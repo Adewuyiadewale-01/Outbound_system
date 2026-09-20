@@ -1,3 +1,5 @@
+<img width="100" height="20" alt="image" src="https://github.com/user-attachments/assets/04165a86-955a-4545-8901-bc38dd950cb9" />
+
 # Outreach Automation
 
 This repository contains a local-first automation toolkit for moving qualified leads through research, review, outreach, follow-up, and reporting workflows. It coordinates Google Sheets-backed queues with controlled browser automation and a local Electron dashboard.
