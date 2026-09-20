@@ -13,9 +13,10 @@ import os
 import re
 import sys
 import time
+from collections.abc import Iterable
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,12 +24,11 @@ HELPERS = ROOT / "helpers"
 sys.path.insert(0, str(HELPERS))
 
 from linkedin_helper import (  # noqa: E402
-    LinkedInSession,
     HumanSimulator,
-    check_circuit_breakers,
-    human_delay,
-    inspect_profile_action_state,
+    LinkedInSession,
     _navigate_with_readiness,
+    check_circuit_breakers,
+    inspect_profile_action_state,
 )
 from outreach_helper import CREDS_PATH, OBF_SHEET_URL, OUTREACH_LOG_TAB  # noqa: E402
 from sheets_helper import get_client, get_worksheet, open_sheet  # noqa: E402
@@ -47,16 +47,18 @@ def parse_run_date(value: str) -> date:
         raise argparse.ArgumentTypeError("date must be YYYY-MM-DD") from exc
 
 
-def load_json(path: Path) -> Dict[str, Any]:
+def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def write_json(path: Path, payload: Dict[str, Any]) -> None:
+def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
-def read_guard() -> Dict[str, Any]:
+def read_guard() -> dict[str, Any]:
     if not RUN_GUARD_PATH.exists():
         return {}
     try:
@@ -65,11 +67,11 @@ def read_guard() -> Dict[str, Any]:
         return {}
 
 
-def write_guard(payload: Dict[str, Any]) -> None:
+def write_guard(payload: dict[str, Any]) -> None:
     write_json(RUN_GUARD_PATH, payload)
 
 
-def check_live_run_cooldown(now: datetime) -> Optional[Dict[str, Any]]:
+def check_live_run_cooldown(now: datetime) -> dict[str, Any] | None:
     guard = read_guard()
     raw_started = guard.get("last_live_run_started_at") or ""
     if not raw_started:
@@ -92,7 +94,7 @@ def check_live_run_cooldown(now: datetime) -> Optional[Dict[str, Any]]:
     }
 
 
-def append_jsonl(path: Path, events: Iterable[Dict[str, Any]]) -> None:
+def append_jsonl(path: Path, events: Iterable[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         for event in events:
@@ -100,7 +102,7 @@ def append_jsonl(path: Path, events: Iterable[Dict[str, Any]]) -> None:
             handle.write(json.dumps(event, ensure_ascii=True, sort_keys=True) + "\n")
 
 
-def read_jsonl(path: Path) -> List[Dict[str, Any]]:
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     events = []
@@ -137,11 +139,11 @@ def completed_prospect_ids(journal_path: Path, session_path: Path) -> set:
     return completed
 
 
-def header_index(headers: List[str]) -> Dict[str, int]:
+def header_index(headers: list[str]) -> dict[str, int]:
     return {str(header or "").strip(): i + 1 for i, header in enumerate(headers)}
 
 
-def update_row_fields(worksheet: Any, row_number: int, fields: Dict[str, Any]) -> None:
+def update_row_fields(worksheet: Any, row_number: int, fields: dict[str, Any]) -> None:
     headers = [str(header or "").strip() for header in worksheet.row_values(1)]
     index = header_index(headers)
     updates = []
@@ -177,20 +179,26 @@ def ensure_withdrawn_tab(spreadsheet: Any) -> Any:
     try:
         worksheet = get_worksheet(spreadsheet, WITHDRAWN_LEADS_TAB)
     except Exception:
-        worksheet = spreadsheet.add_worksheet(title=WITHDRAWN_LEADS_TAB, rows=1000, cols=len(headers))
+        worksheet = spreadsheet.add_worksheet(
+            title=WITHDRAWN_LEADS_TAB, rows=1000, cols=len(headers)
+        )
     current = [str(header or "").strip() for header in worksheet.row_values(1)]
     if current[: len(headers)] != headers:
-        worksheet.update(range_name=f"A1:H1", values=[headers], value_input_option="USER_ENTERED")
+        worksheet.update(range_name="A1:H1", values=[headers], value_input_option="USER_ENTERED")
     return worksheet
 
 
-def upsert_withdrawn_lead(worksheet: Any, target: Dict[str, Any], activity_value: str, withdrawn_at: str) -> None:
+def upsert_withdrawn_lead(
+    worksheet: Any, target: dict[str, Any], activity_value: str, withdrawn_at: str
+) -> None:
     headers = [str(header or "").strip() for header in worksheet.row_values(1)]
     index = header_index(headers)
     prospect_id = str(target.get("prospect_id", "")).strip()
     existing_row = 0
     if prospect_id and "Prospect ID" in index and worksheet.row_count >= 2:
-        values = worksheet.get_values(f"{_a1(2, index['Prospect ID'])}:{_a1(worksheet.row_count, index['Prospect ID'])}")
+        values = worksheet.get_values(
+            f"{_a1(2, index['Prospect ID'])}:{_a1(worksheet.row_count, index['Prospect ID'])}"
+        )
         for offset, row in enumerate(values, start=2):
             if row and str(row[0]).strip() == prospect_id:
                 existing_row = offset
@@ -212,7 +220,7 @@ def upsert_withdrawn_lead(worksheet: Any, target: Dict[str, Any], activity_value
     worksheet.append_row(row_values, value_input_option="USER_ENTERED")
 
 
-def classify_activity_since_sent(activity: Dict[str, Any]) -> str:
+def classify_activity_since_sent(activity: dict[str, Any]) -> str:
     if not activity or activity.get("error"):
         return "Uncertain"
     if activity.get("early_stop_level"):
@@ -245,7 +253,7 @@ def is_cdp_target_detached_error(exc: BaseException) -> bool:
     return "cdp error" in text and "inspected target navigated or closed" in text
 
 
-def _relative_days(text: str) -> Optional[int]:
+def _relative_days(text: str) -> int | None:
     value = text.lower().replace("ago", " ").replace("·", " ").replace("•", " ").strip()
     if not value:
         return None
@@ -273,7 +281,7 @@ def _relative_days(text: str) -> Optional[int]:
     return None
 
 
-def open_sent_invitations(session: LinkedInSession) -> Dict[str, Any]:
+def open_sent_invitations(session: LinkedInSession) -> dict[str, Any]:
     nav_result = _navigate_with_readiness(
         session.cdp,
         SENT_INVITATIONS_URL,
@@ -285,7 +293,8 @@ def open_sent_invitations(session: LinkedInSession) -> Dict[str, Any]:
     danger = check_circuit_breakers(session.cdp)
     if danger:
         return {"ok": False, "danger": danger}
-    result = session.cdp.evaluate("""
+    result = session.cdp.evaluate(
+        """
         (() => {
           const scroller = document.querySelector("main#workspace");
           return {
@@ -298,11 +307,15 @@ def open_sent_invitations(session: LinkedInSession) -> Dict[str, Any]:
             scrollHeight: scroller ? scroller.scrollHeight : null
           };
         })()
-    """ % json.dumps(nav_result))
+    """
+        % json.dumps(nav_result)
+    )
     return result if isinstance(result, dict) else {"ok": False, "raw": result}
 
 
-def find_and_prepare_row(session: LinkedInSession, profile_url: str, max_scrolls: int = 80) -> Dict[str, Any]:
+def find_and_prepare_row(
+    session: LinkedInSession, profile_url: str, max_scrolls: int = 80
+) -> dict[str, Any]:
     target_slug = canonical_profile_url(profile_url).rstrip("/").rsplit("/", 1)[-1].lower()
     scan_script = f"""
     (() => {{
@@ -454,19 +467,38 @@ def find_and_prepare_row(session: LinkedInSession, profile_url: str, max_scrolls
             raw_scroll = session.cdp.evaluate(scroll_script, timeout=8)
             scroll_result = json.loads(raw_scroll) if isinstance(raw_scroll, str) else raw_scroll
         except Exception as exc:
-            return {"found": False, "reason": "sent_invitation_scroll_failed", "error": str(exc), **result}
+            return {
+                "found": False,
+                "reason": "sent_invitation_scroll_failed",
+                "error": str(exc),
+                **result,
+            }
 
         # LinkedIn appends the next invitation page after the workspace scroll event.
-        scroll_after_top = int((scroll_result or {}).get("afterTop") or 0) if isinstance(scroll_result, dict) else 0
-        scroll_after_height = int((scroll_result or {}).get("afterHeight") or 0) if isinstance(scroll_result, dict) else 0
-        scroll_client_height = int((scroll_result or {}).get("clientHeight") or client_height) if isinstance(scroll_result, dict) else client_height
+        scroll_after_top = (
+            int((scroll_result or {}).get("afterTop") or 0)
+            if isinstance(scroll_result, dict)
+            else 0
+        )
+        scroll_after_height = (
+            int((scroll_result or {}).get("afterHeight") or 0)
+            if isinstance(scroll_result, dict)
+            else 0
+        )
+        scroll_client_height = (
+            int((scroll_result or {}).get("clientHeight") or client_height)
+            if isinstance(scroll_result, dict)
+            else client_height
+        )
         at_bottom_after_scroll = scroll_after_top + scroll_client_height >= scroll_after_height - 5
         bottom_pulse_result = None
         if at_bottom or at_bottom_after_scroll:
             time.sleep(0.35)
             try:
                 raw_pulse = session.cdp.evaluate(bottom_pulse_script, timeout=8)
-                bottom_pulse_result = json.loads(raw_pulse) if isinstance(raw_pulse, str) else raw_pulse
+                bottom_pulse_result = (
+                    json.loads(raw_pulse) if isinstance(raw_pulse, str) else raw_pulse
+                )
             except Exception:
                 bottom_pulse_result = {"ok": False, "reason": "bottom_pulse_failed"}
             time.sleep(5.0)
@@ -538,10 +570,11 @@ def find_and_prepare_row(session: LinkedInSession, profile_url: str, max_scrolls
     }
 
 
-def click_prepared_withdrawal(session: LinkedInSession, dry_run: bool = False) -> Dict[str, Any]:
+def click_prepared_withdrawal(session: LinkedInSession, dry_run: bool = False) -> dict[str, Any]:
     if dry_run:
         return {"ok": True, "dry_run": True, "confirmed": False}
-    result = session.cdp.evaluate("""
+    result = session.cdp.evaluate(
+        """
     (async () => {
       const sleep = ms => new Promise(r => setTimeout(r, ms));
       const norm = s => (s || "").replace(/\\s+/g, " ").trim();
@@ -632,12 +665,17 @@ def click_prepared_withdrawal(session: LinkedInSession, dry_run: bool = False) -
       const modalClose = !stillThere ? await closeWithdrawalModal() : "";
       return {ok: !stillThere, confirmed: !stillThere, targetAria, stillThere, modalClose, confirmOpenAttempts};
     })()
-    """, await_promise=True, timeout=75)
+    """,
+        await_promise=True,
+        timeout=75,
+    )
     return result if isinstance(result, dict) else {"ok": False, "raw": result}
 
 
 def canonical_profile_url(url: str) -> str:
-    match = re.search(r"https?://(?:(?:[a-z]{2,3}|www)\.)?linkedin\.com/in/([^/?#]+)", str(url or ""), re.I)
+    match = re.search(
+        r"https?://(?:(?:[a-z]{2,3}|www)\.)?linkedin\.com/in/([^/?#]+)", str(url or ""), re.I
+    )
     if not match:
         return str(url or "").strip()
     return f"https://www.linkedin.com/in/{match.group(1).rstrip('/')}/"
@@ -646,9 +684,7 @@ def canonical_profile_url(url: str) -> str:
 def name_similarity(expected: str, actual: str) -> float:
     def tokens(value: str) -> set[str]:
         return {
-            token
-            for token in re.findall(r"[a-z0-9]+", str(value or "").lower())
-            if len(token) > 1
+            token for token in re.findall(r"[a-z0-9]+", str(value or "").lower()) if len(token) > 1
         }
 
     expected_tokens = tokens(expected)
@@ -660,9 +696,9 @@ def name_similarity(expected: str, actual: str) -> float:
 
 def withdraw_from_profile_fallback(
     session: LinkedInSession,
-    target: Dict[str, Any],
+    target: dict[str, Any],
     dry_run: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Withdraw via the target profile's top card and verify it becomes Connect."""
     profile_url = target.get("contact_linkedin", "")
     expected_name = target.get("contact_name", "")
@@ -688,10 +724,17 @@ def withdraw_from_profile_fallback(
     if observed_state == "already_pending":
         if dry_run:
             return {
-                "ok": True, "confirmed": False, "dry_run": True,
-                "terminal_state": "profile_pending", "closure_reason": "profile_top_card_pending",
-                "via": "profile_fallback", "target_url": target_url, "current_url": current_url,
-                "profile_name": state.get("profileName", ""), "name_similarity": similarity, "state": state,
+                "ok": True,
+                "confirmed": False,
+                "dry_run": True,
+                "terminal_state": "profile_pending",
+                "closure_reason": "profile_top_card_pending",
+                "via": "profile_fallback",
+                "target_url": target_url,
+                "current_url": current_url,
+                "profile_name": state.get("profileName", ""),
+                "name_similarity": similarity,
+                "state": state,
             }
         pending_aria = f"Pending, click to withdraw invitation sent to {expected_name}"
         confirm_aria = f"Withdraw invitation sent to {expected_name}"
@@ -707,7 +750,13 @@ def withdraw_from_profile_fallback(
         except json.JSONDecodeError:
             action = {"ok": False, "reason": "profile_pending_click_invalid"}
         if not isinstance(action, dict) or not action.get("ok"):
-            return {"ok": False, "confirmed": False, "reason": "profile_pending_click_failed", "action": action, "state": state}
+            return {
+                "ok": False,
+                "confirmed": False,
+                "reason": "profile_pending_click_failed",
+                "action": action,
+                "state": state,
+            }
         selector = f'dialog[data-testid="dialog"] button[aria-label="{confirm_aria}"]'
         visible = False
         for _ in range(16):
@@ -716,19 +765,34 @@ def withdraw_from_profile_fallback(
                 visible = True
                 break
         if not visible:
-            return {"ok": False, "confirmed": False, "reason": "profile_withdraw_confirmation_missing", "action": action, "state": state}
+            return {
+                "ok": False,
+                "confirmed": False,
+                "reason": "profile_withdraw_confirmation_missing",
+                "action": action,
+                "state": state,
+            }
         clicked = HumanSimulator(session.cdp).click_element(selector, hover_first=True)
         time.sleep(3)
         verified_state = inspect_profile_action_state(session.cdp, profile_url)
         verified = verified_state.get("state") in {"connect_direct", "connect_in_more"}
         return {
-            "ok": bool(verified), "confirmed": bool(verified), "dry_run": False,
-            "terminal_state": "profile_connect" if verified else "profile_pending_after_confirmation",
-            "closure_reason": "profile_top_card_connect" if verified else "profile_top_card_did_not_change",
-            "via": "profile_fallback", "action": action, "confirmation_click_dispatched": bool(clicked),
+            "ok": bool(verified),
+            "confirmed": bool(verified),
+            "dry_run": False,
+            "terminal_state": "profile_connect"
+            if verified
+            else "profile_pending_after_confirmation",
+            "closure_reason": "profile_top_card_connect"
+            if verified
+            else "profile_top_card_did_not_change",
+            "via": "profile_fallback",
+            "action": action,
+            "confirmation_click_dispatched": bool(clicked),
             "target_url": target_url,
             "current_url": canonical_profile_url(verified_state.get("url", "")),
-            "profile_name": verified_state.get("profileName", ""), "name_similarity": similarity,
+            "profile_name": verified_state.get("profileName", ""),
+            "name_similarity": similarity,
             "state": verified_state,
         }
     if observed_state in {"connect_direct", "connect_in_more"}:
@@ -761,12 +825,12 @@ def withdraw_from_profile_fallback(
 
 def process_target(
     session: LinkedInSession,
-    target: Dict[str, Any],
+    target: dict[str, Any],
     dry_run: bool,
     activity_timeout: float,
     force_profile_fallback: bool = False,
     require_sent_invitations_row: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     time.sleep(max(0, int(target.get("delay_sec", 0))))
     activity_result = session.read_activity_detail(
         target["contact_linkedin"],
@@ -776,15 +840,43 @@ def process_target(
     activity_value = classify_activity_since_sent(activity_result)
     if force_profile_fallback:
         profile_result = withdraw_from_profile_fallback(session, target, dry_run=dry_run)
-        return {"ok": bool(profile_result.get("ok")), "confirmed": bool(profile_result.get("confirmed")), "blocked": not bool(profile_result.get("ok")), "dry_run": dry_run, "target": target, "reason": "forced_profile_fallback", "profile_fallback_result": profile_result, "activity": activity_result, "activity_value": activity_value}
+        return {
+            "ok": bool(profile_result.get("ok")),
+            "confirmed": bool(profile_result.get("confirmed")),
+            "blocked": not bool(profile_result.get("ok")),
+            "dry_run": dry_run,
+            "target": target,
+            "reason": "forced_profile_fallback",
+            "profile_fallback_result": profile_result,
+            "activity": activity_result,
+            "activity_value": activity_value,
+        }
     open_result = open_sent_invitations(session)
     if not open_result.get("ok"):
-        return {"ok": False, "blocked": True, "reason": "sent_invitations_not_ready", "open_result": open_result, "activity": activity_result, "activity_value": activity_value}
+        return {
+            "ok": False,
+            "blocked": True,
+            "reason": "sent_invitations_not_ready",
+            "open_result": open_result,
+            "activity": activity_result,
+            "activity_value": activity_value,
+        }
     row_result = find_and_prepare_row(session, target["contact_linkedin"])
     if not row_result.get("found"):
         if not require_sent_invitations_row:
             profile_result = withdraw_from_profile_fallback(session, target, dry_run=dry_run)
-            return {"ok": bool(profile_result.get("ok")), "confirmed": bool(profile_result.get("confirmed")), "blocked": not bool(profile_result.get("ok")), "dry_run": dry_run, "target": target, "reason": "target_not_found_in_sent_invitations_profile_fallback", "row_result": row_result, "profile_fallback_result": profile_result, "activity": activity_result, "activity_value": activity_value}
+            return {
+                "ok": bool(profile_result.get("ok")),
+                "confirmed": bool(profile_result.get("confirmed")),
+                "blocked": not bool(profile_result.get("ok")),
+                "dry_run": dry_run,
+                "target": target,
+                "reason": "target_not_found_in_sent_invitations_profile_fallback",
+                "row_result": row_result,
+                "profile_fallback_result": profile_result,
+                "activity": activity_result,
+                "activity_value": activity_value,
+            }
         return {
             "ok": bool(profile_result.get("ok")),
             "confirmed": bool(profile_result.get("confirmed")),
@@ -801,7 +893,7 @@ def process_target(
     except RuntimeError as exc:
         if not is_cdp_target_detached_error(exc):
             raise
-        reconnect_result: Dict[str, Any] = {"attempted": True}
+        reconnect_result: dict[str, Any] = {"attempted": True}
         try:
             session.disconnect()
             time.sleep(2)
@@ -851,19 +943,45 @@ def process_target(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run prepared LinkedIn connection withdrawals.")
-    parser.add_argument("--session", default="", help="Prepared session path. Defaults to today's withdrawal session.")
+    parser.add_argument(
+        "--session",
+        default="",
+        help="Prepared session path. Defaults to today's withdrawal session.",
+    )
     parser.add_argument("--credentials", default=CREDS_PATH)
     parser.add_argument("--sheet-url", default=os.environ.get("OBF_SHEET_URL", OBF_SHEET_URL))
     parser.add_argument("--timezone", default=DEFAULT_TIMEZONE)
-    parser.add_argument("--date", type=parse_run_date, default=None, help="Accounting date as YYYY-MM-DD. Defaults to current date in timezone.")
+    parser.add_argument(
+        "--date",
+        type=parse_run_date,
+        default=None,
+        help="Accounting date as YYYY-MM-DD. Defaults to current date in timezone.",
+    )
     parser.add_argument("--limit", type=int, default=0)
-    parser.add_argument("--resume", action="store_true", help="Skip targets already confirmed in this session's withdrawal journal.")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Skip targets already confirmed in this session's withdrawal journal.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--activity-timeout", type=float, default=180.0)
-    parser.add_argument("--cooldown-hours", type=float, default=2.0, help="Minimum hours between live withdrawal runs.")
+    parser.add_argument(
+        "--cooldown-hours",
+        type=float,
+        default=2.0,
+        help="Minimum hours between live withdrawal runs.",
+    )
     parser.add_argument("--max-consecutive-profile-fallbacks", type=int, default=5)
-    parser.add_argument("--force-profile-fallback", action="store_true", help="Bypass Sent Invitations row matching and withdraw through the profile fallback path.")
-    parser.add_argument("--require-sent-invitations-row", action="store_true", help="Block instead of using profile fallback when the target is not found in Sent Invitations.")
+    parser.add_argument(
+        "--force-profile-fallback",
+        action="store_true",
+        help="Bypass Sent Invitations row matching and withdraw through the profile fallback path.",
+    )
+    parser.add_argument(
+        "--require-sent-invitations-row",
+        action="store_true",
+        help="Block instead of using profile fallback when the target is not found in Sent Invitations.",
+    )
     return parser.parse_args()
 
 
@@ -872,17 +990,34 @@ def main() -> int:
     now = datetime.now(ZoneInfo(args.timezone))
     run_date = args.date or now.date()
     run_date_text = run_date.isoformat()
-    session_path = Path(args.session) if args.session else ROOT / "state" / "withdrawal_sessions" / f"{run_date_text}.json"
+    session_path = (
+        Path(args.session)
+        if args.session
+        else ROOT / "state" / "withdrawal_sessions" / f"{run_date_text}.json"
+    )
     journal_path = ROOT / "state" / "withdrawal_journal" / f"{run_date_text}.jsonl"
     payload = load_json(session_path)
     queue = payload.get("runtime_plan", {}).get("queue", [])
     completed_ids = completed_prospect_ids(journal_path, session_path) if args.resume else set()
     if completed_ids:
-        queue = [target for target in queue if str(target.get("prospect_id") or "").strip() not in completed_ids]
+        queue = [
+            target
+            for target in queue
+            if str(target.get("prospect_id") or "").strip() not in completed_ids
+        ]
     if args.limit > 0:
         queue = queue[: args.limit]
     if not queue:
-        print(json.dumps({"ok": False, "blockers": ["No prepared withdrawal targets found"], "session": str(session_path)}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "blockers": ["No prepared withdrawal targets found"],
+                    "session": str(session_path),
+                },
+                indent=2,
+            )
+        )
         return 1
 
     global LIVE_RUN_COOLDOWN_SECONDS
@@ -908,15 +1043,26 @@ def main() -> int:
     linkedin = LinkedInSession()
     connected = linkedin.connect(skip_rate_check=True)
     if not connected.get("ok"):
-        print(json.dumps({"ok": False, "blockers": ["LinkedIn connect/preflight failed"], "detail": connected}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "blockers": ["LinkedIn connect/preflight failed"],
+                    "detail": connected,
+                },
+                indent=2,
+            )
+        )
         return 1
     if not args.dry_run:
-        write_guard({
-            **read_guard(),
-            "last_live_run_started_at": now.isoformat(),
-            "last_live_run_session": str(session_path),
-            "cooldown_seconds": LIVE_RUN_COOLDOWN_SECONDS,
-        })
+        write_guard(
+            {
+                **read_guard(),
+                "last_live_run_started_at": now.isoformat(),
+                "last_live_run_session": str(session_path),
+                "cooldown_seconds": LIVE_RUN_COOLDOWN_SECONDS,
+            }
+        )
 
     result = {
         "ok": True,
@@ -934,7 +1080,7 @@ def main() -> int:
         "resume": args.resume,
         "resume_skips": len(completed_ids),
     }
-    events: List[Dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
     consecutive_profile_fallbacks = 0
     try:
         for batch in payload.get("runtime_plan", {}).get("batches", []):
@@ -997,11 +1143,20 @@ def main() -> int:
                 if processed.get("confirmed"):
                     result["confirmed"] += 1
                     withdrawn_at = run_date_text
-                    update_row_fields(outreach_ws, int(target["row_number"]), {
-                        "Current Progress": "Request Withdrawn",
-                        "Last Action Date": withdrawn_at,
-                    })
-                    upsert_withdrawn_lead(withdrawn_ws, target, processed.get("activity_value", "Uncertain"), withdrawn_at)
+                    update_row_fields(
+                        outreach_ws,
+                        int(target["row_number"]),
+                        {
+                            "Current Progress": "Request Withdrawn",
+                            "Last Action Date": withdrawn_at,
+                        },
+                    )
+                    upsert_withdrawn_lead(
+                        withdrawn_ws,
+                        target,
+                        processed.get("activity_value", "Uncertain"),
+                        withdrawn_at,
+                    )
                 elif not args.dry_run:
                     result["failed"] += 1
                 else:
@@ -1027,17 +1182,23 @@ def main() -> int:
             if result["blocked"]:
                 break
             delay = int(batch.get("inter_batch_delay_sec") or 0)
-            if delay > 0 and not args.dry_run and (args.limit <= 0 or result["processed"] < args.limit):
+            if (
+                delay > 0
+                and not args.dry_run
+                and (args.limit <= 0 or result["processed"] < args.limit)
+            ):
                 time.sleep(delay)
     finally:
         linkedin.disconnect()
 
     if not args.dry_run:
         guard = read_guard()
-        guard.update({
-            "last_live_run_finished_at": datetime.now(ZoneInfo(args.timezone)).isoformat(),
-            "last_live_run_summary": result,
-        })
+        guard.update(
+            {
+                "last_live_run_finished_at": datetime.now(ZoneInfo(args.timezone)).isoformat(),
+                "last_live_run_summary": result,
+            }
+        )
         write_guard(guard)
     append_jsonl(journal_path, [{"event": "withdrawal_run_summary", **result}])
     print(json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True))

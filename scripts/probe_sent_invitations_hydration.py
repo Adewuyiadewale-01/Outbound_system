@@ -60,7 +60,8 @@ def snapshot(session: LinkedInSession, label: str) -> dict:
             } : null,
           };
         })()
-        """ % json.dumps(label),
+        """
+        % json.dumps(label),
         timeout=12,
     )
     return result if isinstance(result, dict) else {"label": label, "raw": result}
@@ -71,18 +72,28 @@ def main() -> int:
     session = LinkedInSession()
     connected = session.connect(skip_rate_check=True)
     if not connected.get("ok"):
-        print(json.dumps({"ok": False, "reason": "linkedin_connect_failed", "detail": connected}, indent=2))
+        print(
+            json.dumps(
+                {"ok": False, "reason": "linkedin_connect_failed", "detail": connected}, indent=2
+            )
+        )
         return 1
 
     observations: list[dict] = []
     try:
         opened = open_sent_invitations(session)
         if not opened.get("ok"):
-            print(json.dumps({"ok": False, "reason": "sent_invitations_not_ready", "open": opened}, indent=2))
+            print(
+                json.dumps(
+                    {"ok": False, "reason": "sent_invitations_not_ready", "open": opened}, indent=2
+                )
+            )
             return 1
         danger = check_circuit_breakers(session.cdp)
         if danger:
-            print(json.dumps({"ok": False, "reason": "circuit_breaker", "detail": danger}, indent=2))
+            print(
+                json.dumps({"ok": False, "reason": "circuit_breaker", "detail": danger}, indent=2)
+            )
             return 1
 
         observations.append(snapshot(session, "opened"))
@@ -92,7 +103,16 @@ def main() -> int:
         point = before.get("wheelPoint") or {}
         height = int(before.get("clientHeight") or 0)
         if not point or height <= 0:
-            print(json.dumps({"ok": False, "reason": "workspace_scroller_missing", "observations": observations}, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "reason": "workspace_scroller_missing",
+                        "observations": observations,
+                    },
+                    indent=2,
+                )
+            )
             return 1
 
         scroll_result = session.cdp.evaluate(
@@ -130,19 +150,24 @@ def main() -> int:
         row_counts = [item.get("withdrawRows", 0) for item in observations]
         initial_rows = int(before.get("withdrawRows") or 0)
         final_rows = int(observations[-1].get("withdrawRows") or 0)
-        print(json.dumps({
-            "ok": True,
-            "mode": "read_only_no_withdrawals",
-            "navigation": SENT_INVITATIONS_URL,
-            "warmup_seconds": args.warmup_seconds,
-            "settle_seconds": args.settle_seconds,
-            "initial_rows": initial_rows,
-            "final_rows": final_rows,
-            "rows_added": final_rows - initial_rows,
-            "hydrated_after_scroll_event": final_rows > initial_rows,
-            "max_rows_seen": max(int(count or 0) for count in row_counts),
-            "observations": observations,
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "mode": "read_only_no_withdrawals",
+                    "navigation": SENT_INVITATIONS_URL,
+                    "warmup_seconds": args.warmup_seconds,
+                    "settle_seconds": args.settle_seconds,
+                    "initial_rows": initial_rows,
+                    "final_rows": final_rows,
+                    "rows_added": final_rows - initial_rows,
+                    "hydrated_after_scroll_event": final_rows > initial_rows,
+                    "max_rows_seen": max(int(count or 0) for count in row_counts),
+                    "observations": observations,
+                },
+                indent=2,
+            )
+        )
         return 0
     finally:
         session.disconnect()

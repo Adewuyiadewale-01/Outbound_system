@@ -7,11 +7,11 @@ import hashlib
 import json
 import re
 import urllib.parse
+from collections.abc import Iterable
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
-
+from typing import Any
 
 ARCHIVE_SCHEMA_VERSION = 1
 MATCH_AVAILABLE = "archive_match"
@@ -63,7 +63,7 @@ def canonical_linkedin_company(value: Any) -> str:
     return f"{parts[0].lower()}/{urllib.parse.unquote(parts[1]).lower()}"
 
 
-def normalized_lead(lead: Dict[str, Any]) -> Dict[str, str]:
+def normalized_lead(lead: dict[str, Any]) -> dict[str, str]:
     company_value = lead.get("company", "")
     company = company_value if isinstance(company_value, dict) else {}
     company_name = company.get("name", "") if company else company_value
@@ -81,7 +81,7 @@ def normalized_lead(lead: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
-def archive_entry_id_for(lead: Dict[str, Any]) -> str:
+def archive_entry_id_for(lead: dict[str, Any]) -> str:
     identity = normalized_lead(lead)
     strongest = (
         identity["company_linkedin_key"]
@@ -93,7 +93,7 @@ def archive_entry_id_for(lead: Dict[str, Any]) -> str:
     return f"research-{digest}"
 
 
-def has_reusable_research(lead: Dict[str, Any]) -> bool:
+def has_reusable_research(lead: dict[str, Any]) -> bool:
     executives = lead.get("executives") or []
     if any(
         clean_text(executive.get("name"))
@@ -104,12 +104,11 @@ def has_reusable_research(lead: Dict[str, Any]) -> bool:
         return True
     destination = lead.get("destination_row") or {}
     return bool(
-        clean_text(destination.get("P1 Name"))
-        and clean_text(destination.get("P1 LinkedIn"))
+        clean_text(destination.get("P1 Name")) and clean_text(destination.get("P1 LinkedIn"))
     )
 
 
-def empty_archive() -> Dict[str, Any]:
+def empty_archive() -> dict[str, Any]:
     return {
         "schema_version": ARCHIVE_SCHEMA_VERSION,
         "updated_at": "",
@@ -122,7 +121,7 @@ class ResearchArchive:
         self.path = Path(path)
         self.data = self._load()
 
-    def _load(self) -> Dict[str, Any]:
+    def _load(self) -> dict[str, Any]:
         if not self.path.exists():
             return empty_archive()
         payload = json.loads(self.path.read_text())
@@ -139,13 +138,13 @@ class ResearchArchive:
         self.data["updated_at"] = datetime.now().isoformat(timespec="seconds")
         self.path.write_text(json.dumps(self.data, indent=2, ensure_ascii=False) + "\n")
 
-    def entries(self) -> Iterable[Dict[str, Any]]:
+    def entries(self) -> Iterable[dict[str, Any]]:
         return self.data.get("entries", {}).values()
 
-    def get(self, entry_id: str) -> Optional[Dict[str, Any]]:
+    def get(self, entry_id: str) -> dict[str, Any] | None:
         return self.data.get("entries", {}).get(clean_text(entry_id))
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         entries = list(self.entries())
         available = [entry for entry in entries if entry.get("status", "available") == "available"]
         consumed = [entry for entry in entries if entry.get("status") == "consumed"]
@@ -159,10 +158,10 @@ class ResearchArchive:
             "path": str(self.path),
         }
 
-    def match(self, lead: Dict[str, Any]) -> Dict[str, Any]:
+    def match(self, lead: dict[str, Any]) -> dict[str, Any]:
         identity = normalized_lead(lead)
-        matches: Dict[str, List[str]] = {}
-        name_matches: List[str] = []
+        matches: dict[str, list[str]] = {}
+        name_matches: list[str] = []
 
         for entry in self.entries():
             entry_id = clean_text(entry.get("archive_entry_id"))
@@ -170,19 +169,19 @@ class ResearchArchive:
             reasons = []
             if identity["lead_id"] and identity["lead_id"] in entry_identity.get("lead_ids", []):
                 reasons.append("lead_id")
-            if (
-                identity["company_linkedin_key"]
-                and identity["company_linkedin_key"] == entry_identity.get("company_linkedin_key")
-            ):
+            if identity["company_linkedin_key"] and identity[
+                "company_linkedin_key"
+            ] == entry_identity.get("company_linkedin_key"):
                 reasons.append("company_linkedin")
-            if identity["website_domain"] and identity["website_domain"] == entry_identity.get("website_domain"):
+            if identity["website_domain"] and identity["website_domain"] == entry_identity.get(
+                "website_domain"
+            ):
                 reasons.append("website_domain")
             if reasons:
                 matches[entry_id] = reasons
-            elif (
-                identity["company_name_key"]
-                and identity["company_name_key"] == entry_identity.get("company_name_key")
-            ):
+            elif identity["company_name_key"] and identity[
+                "company_name_key"
+            ] == entry_identity.get("company_name_key"):
                 name_matches.append(entry_id)
 
         if len(matches) == 1:
@@ -200,7 +199,9 @@ class ResearchArchive:
                 "status": MATCH_CONFLICT,
                 "archive_entry_id": "",
                 "candidate_entry_ids": sorted(matches),
-                "matched_on": sorted({reason for reasons in matches.values() for reason in reasons}),
+                "matched_on": sorted(
+                    {reason for reasons in matches.values() for reason in reasons}
+                ),
                 "confidence": "conflict",
             }
         if name_matches:
@@ -220,12 +221,12 @@ class ResearchArchive:
 
     def upsert_computation_lead(
         self,
-        lead: Dict[str, Any],
+        lead: dict[str, Any],
         *,
         source_computation_file: str = "",
         source_run_file: str = "",
         reason: str = "unreviewed_processing",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         identity = normalized_lead(lead)
         match = self.match(lead)
         if match["status"] in {MATCH_AVAILABLE, MATCH_CONSUMED}:
@@ -270,11 +271,11 @@ class ResearchArchive:
 
     def archive_computation(
         self,
-        computation: Dict[str, Any],
+        computation: dict[str, Any],
         *,
         computation_file: str = "",
         reason: str = "unreviewed_processing",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         archived = []
         skipped = []
         for lead in computation.get("leads", []):
@@ -329,9 +330,9 @@ class ResearchArchive:
 
 
 def hydrate_computation_lead(
-    current: Dict[str, Any],
-    archive_entry: Dict[str, Any],
-) -> Dict[str, Any]:
+    current: dict[str, Any],
+    archive_entry: dict[str, Any],
+) -> dict[str, Any]:
     archived = deepcopy(archive_entry.get("research", {}))
     hydrated = deepcopy(current)
     for field in ("executives", "search_tasks", "search_results", "destination_row", "notes"):

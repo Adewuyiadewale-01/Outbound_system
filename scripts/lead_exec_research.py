@@ -21,23 +21,20 @@ import time
 import unicodedata
 import urllib.parse
 import urllib.request
+from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 import gspread
 from gspread.exceptions import WorksheetNotFound
-from gspread.utils import ValidationConditionType
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPERS = ROOT / "helpers"
 if str(HELPERS) not in sys.path:
     sys.path.insert(0, str(HELPERS))
 
-from sheets_helper import format_sheet_date, get_client, get_worksheet, normalize_rows, open_sheet, sheet_values_equal  # noqa: E402
-from runtime_environment import load_repo_env  # noqa: E402
-from prefinal_queue import enqueue_batch, record_prefinal_publish, rows_fingerprint  # noqa: E402
 from lead_research_archive import (  # noqa: E402
     MATCH_AVAILABLE,
     MATCH_CONFLICT,
@@ -46,6 +43,16 @@ from lead_research_archive import (  # noqa: E402
     ResearchArchive,
     has_reusable_research,
     hydrate_computation_lead,
+)
+from prefinal_queue import enqueue_batch, record_prefinal_publish, rows_fingerprint  # noqa: E402
+from runtime_environment import load_repo_env  # noqa: E402
+from sheets_helper import (  # noqa: E402
+    format_sheet_date,
+    get_client,
+    get_worksheet,
+    normalize_rows,
+    open_sheet,
+    sheet_values_equal,
 )
 
 load_repo_env()
@@ -83,7 +90,12 @@ SOURCE_ALIASES = {
     "Company Name": ["Company Name", "Company", "name"],
     "Company Website": ["Company Website", "Website", "website"],
     "Company Linkedin": ["Company Linkedin", "Company LinkedIn", "LinkedIn", "linkedin"],
-    "Company Employee Count": ["Company Employee Count", "LinkedIn employees", "Emp Count", "Employee Count"],
+    "Company Employee Count": [
+        "Company Employee Count",
+        "LinkedIn employees",
+        "Emp Count",
+        "Employee Count",
+    ],
     "Person Name": ["Person Name", "Name"],
     "Person Role": ["Person Role", "Role", "Title"],
     "Person Email": ["Person Email", "Email"],
@@ -280,7 +292,7 @@ def normalize_url(value: Any) -> str:
     return raw
 
 
-def meaningful_name_parts(name: str) -> List[str]:
+def meaningful_name_parts(name: str) -> list[str]:
     parts = re.split(r"[^a-zA-Z0-9]+", name.lower())
     blocked = {"de", "den", "der", "van", "von", "the", "and", "of", "mr", "mrs", "ms"}
     return [p for p in parts if len(p) >= 4 and p not in blocked]
@@ -307,11 +319,11 @@ def is_linkedin_profile_url(url: str) -> bool:
     return bool(re.search(r"linkedin\.[a-z.]+/in/", normalize_url(url), flags=re.I))
 
 
-def looks_like_company_row(row: Dict[str, Any]) -> bool:
+def looks_like_company_row(row: dict[str, Any]) -> bool:
     return bool(clean_text(row.get("ID")) and clean_text(row.get("Company Name")))
 
 
-def looks_like_employee_row(row: Dict[str, Any]) -> bool:
+def looks_like_employee_row(row: dict[str, Any]) -> bool:
     fields = ["Person Name", "Person Role", "Person Email", "Person Linkedin"]
     return any(clean_text(row.get(field)) for field in fields)
 
@@ -322,7 +334,7 @@ def require_columns(headers: Sequence[str], required: Sequence[str], tab_name: s
         raise ValueError(f"{tab_name} is missing required columns: {', '.join(missing)}")
 
 
-def source_value(row: Dict[str, Any], canonical_column: str) -> str:
+def source_value(row: dict[str, Any], canonical_column: str) -> str:
     for candidate in SOURCE_ALIASES.get(canonical_column, [canonical_column]):
         value = clean_text(row.get(candidate))
         if value:
@@ -330,7 +342,9 @@ def source_value(row: Dict[str, Any], canonical_column: str) -> str:
     return ""
 
 
-def canonicalize_source_rows(headers: Sequence[str], rows: List[Dict[str, Any]], source_tab: str) -> List[Dict[str, Any]]:
+def canonicalize_source_rows(
+    headers: Sequence[str], rows: list[dict[str, Any]], source_tab: str
+) -> list[dict[str, Any]]:
     available = set(headers)
     if not any(column in available for column in SOURCE_ALIASES["Company Name"]):
         raise ValueError(
@@ -338,7 +352,7 @@ def canonicalize_source_rows(headers: Sequence[str], rows: List[Dict[str, Any]],
             f"Accepted names: {', '.join(SOURCE_ALIASES['Company Name'])}"
         )
 
-    normalized_rows: List[Dict[str, Any]] = []
+    normalized_rows: list[dict[str, Any]] = []
     for row in rows:
         normalized = dict(row)
         for canonical_column in SOURCE_ALIASES:
@@ -351,7 +365,9 @@ def canonicalize_source_rows(headers: Sequence[str], rows: List[Dict[str, Any]],
     return normalized_rows
 
 
-def read_worksheet(credentials_path: Path, sheet_url: str, tab_name: str) -> Tuple[List[str], List[Dict[str, Any]]]:
+def read_worksheet(
+    credentials_path: Path, sheet_url: str, tab_name: str
+) -> tuple[list[str], list[dict[str, Any]]]:
     client = get_client(str(credentials_path))
     spreadsheet = open_sheet(client, sheet_url)
     worksheet = get_worksheet(spreadsheet, tab_name)
@@ -373,14 +389,18 @@ def load_destination_ids(credentials_path: Path, sheet_url: str, destination_tab
     return {clean_text(row.get("ID")) for row in rows if clean_text(row.get("ID"))}
 
 
-def load_destination_company_by_id(credentials_path: Path, sheet_url: str, destination_tab: str) -> Dict[str, str]:
+def load_destination_company_by_id(
+    credentials_path: Path, sheet_url: str, destination_tab: str
+) -> dict[str, str]:
     try:
         headers, rows = read_worksheet(credentials_path, sheet_url, destination_tab)
     except Exception:
         return {}
     if "ID" not in headers:
         return {}
-    company_column = "Company" if "Company" in headers else "Company Name" if "Company Name" in headers else ""
+    company_column = (
+        "Company" if "Company" in headers else "Company Name" if "Company Name" in headers else ""
+    )
     if not company_column:
         return {}
     return {
@@ -400,9 +420,9 @@ def load_reviewed_ids(credentials_path: Path, sheet_url: str, review_tab: str) -
     return {clean_text(row.get("Run ID")) for row in rows if clean_text(row.get("Run ID"))}
 
 
-def group_source_rows(rows: List[Dict[str, Any]], source_tab: str) -> List[Dict[str, Any]]:
-    groups: List[Dict[str, Any]] = []
-    current: Optional[Dict[str, Any]] = None
+def group_source_rows(rows: list[dict[str, Any]], source_tab: str) -> list[dict[str, Any]]:
+    groups: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
     for row in rows:
         if looks_like_company_row(row):
             current = {
@@ -432,7 +452,7 @@ def group_source_rows(rows: List[Dict[str, Any]], source_tab: str) -> List[Dict[
     return groups
 
 
-def add_employee(group: Dict[str, Any], row: Dict[str, Any]) -> None:
+def add_employee(group: dict[str, Any], row: dict[str, Any]) -> None:
     name = clean_text(row.get("Person Name"))
     employee = {
         "name": name,
@@ -445,11 +465,11 @@ def add_employee(group: Dict[str, Any], row: Dict[str, Any]) -> None:
     group["source_rows"]["employee_rows"].append(row.get("_row_number"))
 
 
-def chunks(items: Sequence[Dict[str, Any]], size: int) -> List[List[Dict[str, Any]]]:
+def chunks(items: Sequence[dict[str, Any]], size: int) -> list[list[dict[str, Any]]]:
     return [list(items[i : i + size]) for i in range(0, len(items), size)]
 
 
-def assign_primary_lanes(leads: List[Dict[str, Any]]) -> Dict[str, int]:
+def assign_primary_lanes(leads: list[dict[str, Any]]) -> dict[str, int]:
     """Assign balanced lanes, grouped for a Design-first review pass."""
     automation_count = (len(leads) + 1) // 2
     design_count = len(leads) - automation_count
@@ -467,7 +487,7 @@ class SearchClient:
         self.timeout = timeout
         self.last_request_at = 0.0
 
-    def search(self, query: str, limit: int = 5) -> List[Dict[str, str]]:
+    def search(self, query: str, limit: int = 5) -> list[dict[str, str]]:
         self._delay()
         errors = []
         for engine in ("bing", "yahoo", "duckduckgo"):
@@ -479,7 +499,7 @@ class SearchClient:
                 errors.append(f"{engine}: {exc}")
         raise RuntimeError("; ".join(errors))
 
-    def _search_engine(self, engine: str, query: str, limit: int) -> List[Dict[str, str]]:
+    def _search_engine(self, engine: str, query: str, limit: int) -> list[dict[str, str]]:
         if engine == "bing":
             url = "https://www.bing.com/search?" + urllib.parse.urlencode({"q": query})
         elif engine == "yahoo":
@@ -513,20 +533,26 @@ class SearchClient:
             time.sleep(target - elapsed)
 
 
-def parse_duckduckgo_results(body: str, limit: int = 5) -> List[Dict[str, str]]:
-    results: List[Dict[str, str]] = []
+def parse_duckduckgo_results(body: str, limit: int = 5) -> list[dict[str, str]]:
+    results: list[dict[str, str]] = []
     blocks = re.split(r'<div[^>]+class="[^"]*result[^"]*"[^>]*>', body)
     for block in blocks:
         if "result__a" not in block:
             continue
-        link_match = re.search(r'<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>(.*?)</a>', block, re.S)
+        link_match = re.search(
+            r'<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>(.*?)</a>', block, re.S
+        )
         if not link_match:
             continue
         raw_url = html.unescape(link_match.group(1))
         title = strip_tags(link_match.group(2))
-        snippet_match = re.search(r'<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>', block, re.S)
+        snippet_match = re.search(
+            r'<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>', block, re.S
+        )
         if not snippet_match:
-            snippet_match = re.search(r'<div[^>]+class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</div>', block, re.S)
+            snippet_match = re.search(
+                r'<div[^>]+class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</div>', block, re.S
+            )
         snippet = strip_tags(snippet_match.group(1)) if snippet_match else ""
         url = unwrap_duckduckgo_url(raw_url)
         if title and url:
@@ -536,16 +562,18 @@ def parse_duckduckgo_results(body: str, limit: int = 5) -> List[Dict[str, str]]:
     return results
 
 
-def parse_bing_results(body: str, limit: int = 5) -> List[Dict[str, str]]:
-    results: List[Dict[str, str]] = []
+def parse_bing_results(body: str, limit: int = 5) -> list[dict[str, str]]:
+    results: list[dict[str, str]] = []
     blocks = re.split(r'<li[^>]+class="[^"]*b_algo[^"]*"[^>]*>', body)
     for block in blocks:
-        link_match = re.search(r"<h2[^>]*>\s*<a[^>]+href=\"([^\"]+)\"[^>]*>(.*?)</a>\s*</h2>", block, re.S)
+        link_match = re.search(
+            r"<h2[^>]*>\s*<a[^>]+href=\"([^\"]+)\"[^>]*>(.*?)</a>\s*</h2>", block, re.S
+        )
         if not link_match:
             continue
         url = html.unescape(link_match.group(1))
         title = strip_tags(link_match.group(2))
-        snippet_match = re.search(r'<p[^>]*>(.*?)</p>', block, re.S)
+        snippet_match = re.search(r"<p[^>]*>(.*?)</p>", block, re.S)
         snippet = strip_tags(snippet_match.group(1)) if snippet_match else ""
         if title and url:
             results.append({"title": title, "url": url, "snippet": snippet})
@@ -554,8 +582,8 @@ def parse_bing_results(body: str, limit: int = 5) -> List[Dict[str, str]]:
     return results
 
 
-def parse_yahoo_results(body: str, limit: int = 5) -> List[Dict[str, str]]:
-    results: List[Dict[str, str]] = []
+def parse_yahoo_results(body: str, limit: int = 5) -> list[dict[str, str]]:
+    results: list[dict[str, str]] = []
     blocks = re.split(r'<li>\s*<div[^>]+class="[^"]*\balgo\b[^"]*"[^>]*>', body)
     for block in blocks:
         link_match = re.search(r'<a[^>]+href="([^"]+)"[^>]*>.*?<h3[^>]*>(.*?)</h3>', block, re.S)
@@ -563,7 +591,9 @@ def parse_yahoo_results(body: str, limit: int = 5) -> List[Dict[str, str]]:
             continue
         url = unwrap_yahoo_url(html.unescape(link_match.group(1)))
         title = strip_tags(link_match.group(2))
-        snippet_match = re.search(r'<div[^>]+class="[^"]*\bcompText\b[^"]*"[^>]*>.*?<p[^>]*>(.*?)</p>', block, re.S)
+        snippet_match = re.search(
+            r'<div[^>]+class="[^"]*\bcompText\b[^"]*"[^>]*>.*?<p[^>]*>(.*?)</p>', block, re.S
+        )
         snippet = strip_tags(snippet_match.group(1)) if snippet_match else ""
         if title and url:
             results.append({"title": title, "url": url, "snippet": snippet})
@@ -602,7 +632,7 @@ def title_weight(text: str) -> int:
     return best
 
 
-def seniority_score(person: Dict[str, Any]) -> int:
+def seniority_score(person: dict[str, Any]) -> int:
     return title_weight(clean_text(person.get("title") or person.get("role") or ""))
 
 
@@ -612,7 +642,7 @@ def compact_company_name(company_name: str) -> str:
     return compact or clean_text(company_name)
 
 
-def search_query_variants(person_name: str, company_name: str) -> List[str]:
+def search_query_variants(person_name: str, company_name: str) -> list[str]:
     name = clean_text(person_name)
     company = clean_text(company_name)
     short_company = compact_company_name(company)
@@ -642,8 +672,10 @@ def search_query_variants(person_name: str, company_name: str) -> List[str]:
     return variants
 
 
-def extract_exec_candidates(company_name: str, results: List[Dict[str, str]]) -> List[Dict[str, Any]]:
-    candidates: Dict[str, Dict[str, Any]] = {}
+def extract_exec_candidates(
+    company_name: str, results: list[dict[str, str]]
+) -> list[dict[str, Any]]:
+    candidates: dict[str, dict[str, Any]] = {}
     for result in results:
         haystack = f"{result.get('title', '')} {result.get('snippet', '')}"
         for name, role in extract_name_role_pairs(haystack):
@@ -651,7 +683,9 @@ def extract_exec_candidates(company_name: str, results: List[Dict[str, str]]) ->
             if not key:
                 continue
             score = title_weight(role or haystack)
-            if normalize_key(company_name) and normalize_key(company_name) in normalize_key(haystack):
+            if normalize_key(company_name) and normalize_key(company_name) in normalize_key(
+                haystack
+            ):
                 score += 8
             if is_linkedin_profile_url(result.get("url", "")):
                 score += 6
@@ -670,9 +704,9 @@ def extract_exec_candidates(company_name: str, results: List[Dict[str, str]]) ->
     return sorted(candidates.values(), key=lambda item: item["score"], reverse=True)
 
 
-def extract_name_role_pairs(text: str) -> List[Tuple[str, str]]:
+def extract_name_role_pairs(text: str) -> list[tuple[str, str]]:
     cleaned = clean_text(text)
-    pairs: List[Tuple[str, str]] = []
+    pairs: list[tuple[str, str]] = []
     name_pattern = r"([A-Z][a-zA-Z'`.-]+(?:\s+(?:van|von|de|den|der|[A-Z][a-zA-Z'`.-]+)){1,4})"
     role_pattern = r"\b(CEO|Chief Executive Officer|Founder|Co-Founder|Managing Director|President|Owner|Partner|CTO|COO|CFO|Head of [A-Za-z &]+|Director\b[^,;|.-]*)"
 
@@ -707,21 +741,34 @@ def is_plausible_person_name(name: str) -> bool:
     if len(parts) < 2 or len(parts) > 5:
         return False
     blocked = {"Chief Executive", "Managing Director", "Company LinkedIn"}
-    suffixes = {"limited", "ltd", "bv", "b.v", "inc", "llc", "plc", "capital", "management", "company"}
+    suffixes = {
+        "limited",
+        "ltd",
+        "bv",
+        "b.v",
+        "inc",
+        "llc",
+        "plc",
+        "capital",
+        "management",
+        "company",
+    }
     lowered_parts = {part.lower().strip(".") for part in parts}
     if name in blocked or lowered_parts & suffixes:
         return False
     return sum(1 for part in parts if part[:1].isupper()) >= 2
 
 
-def search_execs_for_company(search_client: SearchClient, company: Dict[str, str], max_execs: int = 3) -> List[Dict[str, Any]]:
+def search_execs_for_company(
+    search_client: SearchClient, company: dict[str, str], max_execs: int = 3
+) -> list[dict[str, Any]]:
     company_name = company.get("name", "")
     queries = [
         f'"{company_name}" CEO founder managing director',
         f'"{company_name}" leadership executive team',
         f'site:linkedin.com/in "{company_name}" CEO founder',
     ]
-    all_results: List[Dict[str, str]] = []
+    all_results: list[dict[str, str]] = []
     for query in queries:
         try:
             all_results.extend(search_client.search(query, limit=5))
@@ -735,7 +782,9 @@ def employee_role_score(role: str) -> int:
     return title_weight(role)
 
 
-def fallback_execs_from_employees(employees: List[Dict[str, Any]], max_execs: int = 3) -> List[Dict[str, Any]]:
+def fallback_execs_from_employees(
+    employees: list[dict[str, Any]], max_execs: int = 3
+) -> list[dict[str, Any]]:
     ranked = []
     for employee in employees:
         if not employee.get("name"):
@@ -752,8 +801,10 @@ def fallback_execs_from_employees(employees: List[Dict[str, Any]], max_execs: in
     return ranked[:max_execs]
 
 
-def match_employee(exec_item: Dict[str, Any], employees: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    best: Optional[Dict[str, Any]] = None
+def match_employee(
+    exec_item: dict[str, Any], employees: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    best: dict[str, Any] | None = None
     best_score = 0.0
     for employee in employees:
         score = token_overlap_score(exec_item.get("name", ""), employee.get("name", ""))
@@ -767,7 +818,9 @@ def match_employee(exec_item: Dict[str, Any], employees: List[Dict[str, Any]]) -
     return None
 
 
-def score_search_candidate(exec_item: Dict[str, Any], company: Dict[str, str], result: Dict[str, str]) -> float:
+def score_search_candidate(
+    exec_item: dict[str, Any], company: dict[str, str], result: dict[str, str]
+) -> float:
     name = exec_item.get("name", "")
     title = result.get("title", "")
     snippet = result.get("snippet", "")
@@ -789,12 +842,12 @@ def score_search_candidate(exec_item: Dict[str, Any], company: Dict[str, str], r
 
 def search_linkedin_for_exec(
     search_client: SearchClient,
-    exec_item: Dict[str, Any],
-    company: Dict[str, str],
-) -> Dict[str, Any]:
+    exec_item: dict[str, Any],
+    company: dict[str, str],
+) -> dict[str, Any]:
     queries = search_query_variants(exec_item.get("name", ""), company.get("name", ""))
     query = queries[0] if queries else ""
-    all_results: List[Dict[str, str]] = []
+    all_results: list[dict[str, str]] = []
     errors = []
     try:
         for current_query in queries:
@@ -823,14 +876,20 @@ def search_linkedin_for_exec(
         scored.append(item)
     scored.sort(key=lambda item: item["score"], reverse=True)
     selected = scored[0] if scored and scored[0]["score"] >= 0.45 else None
-    return {"query": query, "queries": queries, "results": scored, "selected": selected, "error": None}
+    return {
+        "query": query,
+        "queries": queries,
+        "results": scored,
+        "selected": selected,
+        "error": None,
+    }
 
 
 def reconcile_exec(
     search_client: SearchClient,
-    group: Dict[str, Any],
-    exec_item: Dict[str, Any],
-) -> Dict[str, Any]:
+    group: dict[str, Any],
+    exec_item: dict[str, Any],
+) -> dict[str, Any]:
     company = group["company"]
     employees = group.get("employees_from_sheet", [])
     matched = match_employee(exec_item, employees)
@@ -857,7 +916,9 @@ def reconcile_exec(
             finalized["confidence"] = max(finalized["confidence"], 0.82 + min(url_score, 1.0) * 0.1)
             finalized["match_notes"].append("Used reconciled LinkedIn from source employee row.")
         elif matched.get("linkedin"):
-            finalized["match_notes"].append("Source employee LinkedIn existed but did not match enough name parts.")
+            finalized["match_notes"].append(
+                "Source employee LinkedIn existed but did not match enough name parts."
+            )
         else:
             finalized["match_notes"].append("Matched source employee row but LinkedIn was blank.")
 
@@ -878,7 +939,7 @@ def reconcile_exec(
     return finalized
 
 
-def choose_people(finalized_execs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def choose_people(finalized_execs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     with_urls = [item for item in finalized_execs if item.get("linkedin")]
     without_urls = [item for item in finalized_execs if not item.get("linkedin")]
     ordered = sorted(with_urls, key=lambda item: item.get("confidence", 0), reverse=True)
@@ -886,14 +947,15 @@ def choose_people(finalized_execs: List[Dict[str, Any]]) -> List[Dict[str, Any]]
     return ordered[:3]
 
 
-def build_destination_row(group: Dict[str, Any]) -> Dict[str, Any]:
+def build_destination_row(group: dict[str, Any]) -> dict[str, Any]:
     selected = choose_people(group.get("finalized_execs", []))
     row = {
         "ID": group.get("id", ""),
         "Company": group.get("company", {}).get("name", ""),
         "Website": group.get("company", {}).get("website", ""),
         "Company LinkedIn": group.get("company", {}).get("linkedin", ""),
-        "Emp Count": group.get("company", {}).get("employee_count") or len(group.get("employees_from_sheet", [])),
+        "Emp Count": group.get("company", {}).get("employee_count")
+        or len(group.get("employees_from_sheet", [])),
         "Source Tab": group.get("company", {}).get("class") or group.get("source_tab", ""),
         "Primary Lane": group.get("primary_lane", ""),
         "Use": group.get("review_use", ""),
@@ -906,7 +968,7 @@ def build_destination_row(group: Dict[str, Any]) -> Dict[str, Any]:
     return row
 
 
-def build_destination_row_from_computation(lead: Dict[str, Any]) -> Dict[str, Any]:
+def build_destination_row_from_computation(lead: dict[str, Any]) -> dict[str, Any]:
     stored_executives = lead.get("executives", [])
     executives = (
         stored_executives[:3]
@@ -934,7 +996,7 @@ def build_destination_row_from_computation(lead: Dict[str, Any]) -> Dict[str, An
     return row
 
 
-def select_computation_people(executives: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def select_computation_people(executives: list[dict[str, Any]]) -> list[dict[str, Any]]:
     indexed = list(enumerate(executives))
     indexed.sort(
         key=lambda item: (
@@ -946,7 +1008,7 @@ def select_computation_people(executives: List[Dict[str, Any]]) -> List[Dict[str
     return [item for _, item in indexed[:3]]
 
 
-def prefinal_row_readiness(row: Dict[str, Any], require_p2: bool = False) -> Tuple[bool, List[str]]:
+def prefinal_row_readiness(row: dict[str, Any], require_p2: bool = False) -> tuple[bool, list[str]]:
     reasons = []
     for column in ("ID", "Company", "Website"):
         if not clean_text(row.get(column)):
@@ -968,10 +1030,10 @@ def prefinal_row_readiness(row: Dict[str, Any], require_p2: bool = False) -> Tup
 
 
 def filter_ready_prefinal_rows(
-    rows: List[Dict[str, Any]],
+    rows: list[dict[str, Any]],
     require_p2: bool = False,
     include_unresolved: bool = False,
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     ready = []
     skipped = []
     for row in rows:
@@ -989,7 +1051,9 @@ def filter_ready_prefinal_rows(
     return ready, skipped
 
 
-def computation_rows_for_write(computation: Dict[str, Any], args: argparse.Namespace) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+def computation_rows_for_write(
+    computation: dict[str, Any], args: argparse.Namespace
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     leads = computation.get("leads", [])
     if args.write_limit:
         leads = leads[: args.write_limit]
@@ -1002,10 +1066,10 @@ def computation_rows_for_write(computation: Dict[str, Any], args: argparse.Names
 
 
 def archive_computation_state(
-    computation: Dict[str, Any],
+    computation: dict[str, Any],
     computation_file: Path,
     args: argparse.Namespace,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     archive = ResearchArchive(archive_index_path(args))
     result = archive.archive_computation(
         computation,
@@ -1026,10 +1090,10 @@ def archive_computation_state(
 
 
 def archive_unreviewed_computation(
-    computation: Dict[str, Any],
+    computation: dict[str, Any],
     computation_file: Path,
     args: argparse.Namespace,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     archive = ResearchArchive(archive_index_path(args))
     uncovered = []
     for lead in computation.get("leads", []):
@@ -1075,8 +1139,8 @@ def archive_unreviewed_computation(
 
 
 def consume_reused_archive_entries(
-    computation: Dict[str, Any],
-    rows: List[Dict[str, Any]],
+    computation: dict[str, Any],
+    rows: list[dict[str, Any]],
     computation_file: Path,
     args: argparse.Namespace,
 ) -> int:
@@ -1084,7 +1148,8 @@ def consume_reused_archive_entries(
     entry_ids = [
         clean_text(lead.get("archive_entry_id"))
         for lead in computation.get("leads", [])
-        if clean_text(lead.get("lead_id")) in written_ids and clean_text(lead.get("archive_entry_id"))
+        if clean_text(lead.get("lead_id")) in written_ids
+        and clean_text(lead.get("archive_entry_id"))
     ]
     if not entry_ids:
         return 0
@@ -1103,7 +1168,7 @@ def verify_destination_rows(
     credentials_path: Path,
     sheet_url: str,
     destination_tab: str,
-    rows: List[Dict[str, Any]],
+    rows: list[dict[str, Any]],
     start_row: int,
 ) -> bool:
     if not rows:
@@ -1121,17 +1186,17 @@ def verify_destination_rows(
 
 
 def write_computation_rows(
-    computation: Dict[str, Any],
+    computation: dict[str, Any],
     args: argparse.Namespace,
-    computation_file: Optional[Path] = None,
-) -> Tuple[int, List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
+    computation_file: Path | None = None,
+) -> tuple[int, list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     if computation.get("publication_mode") == "archive_only":
         raise ValueError(
             "This computation came from an all-leads/unreviewed selection and is archive-only. "
             "Run archive-computation instead of publishing it to Pre-final."
         )
     rows, skipped = computation_rows_for_write(computation, args)
-    queue_batch: Dict[str, Any] = {}
+    queue_batch: dict[str, Any] = {}
     if args.destination_tab != DEFAULT_DESTINATION_TAB or not rows:
         rows_written = write_destination_rows(
             Path(args.credentials),
@@ -1146,7 +1211,9 @@ def write_computation_rows(
     # Pre-final overwrite, so later activity work never depends on the live tab.
     queue_batch = enqueue_batch(rows, str(computation_file or ""))
     if queue_batch.get("status") == "prospects_bridged":
-        raise ValueError(f"Queue batch {queue_batch['fingerprint']} is already completed; refusing to republish it.")
+        raise ValueError(
+            f"Queue batch {queue_batch['fingerprint']} is already completed; refusing to republish it."
+        )
     try:
         rows_written = write_destination_rows(
             Path(args.credentials),
@@ -1163,21 +1230,32 @@ def write_computation_rows(
             args.write_start_row,
         )
         if not verified:
-            record_prefinal_publish(queue_batch["fingerprint"], start_row=args.write_start_row, verified=False, error="readback_fingerprint_mismatch")
+            record_prefinal_publish(
+                queue_batch["fingerprint"],
+                start_row=args.write_start_row,
+                verified=False,
+                error="readback_fingerprint_mismatch",
+            )
             raise RuntimeError("Pre-final write readback did not match the queued batch")
-        queue_batch = record_prefinal_publish(queue_batch["fingerprint"], start_row=args.write_start_row, verified=True)
+        queue_batch = record_prefinal_publish(
+            queue_batch["fingerprint"], start_row=args.write_start_row, verified=True
+        )
     except Exception as exc:
-        record_prefinal_publish(queue_batch["fingerprint"], start_row=args.write_start_row, verified=False, error=str(exc))
+        record_prefinal_publish(
+            queue_batch["fingerprint"],
+            start_row=args.write_start_row,
+            verified=False,
+            error=str(exc),
+        )
         raise
     return rows_written, rows, skipped, queue_batch
-
 
 
 def write_destination_rows(
     credentials_path: Path,
     sheet_url: str,
     destination_tab: str,
-    rows: List[Dict[str, Any]],
+    rows: list[dict[str, Any]],
     start_row: int = 2,
 ) -> int:
     if not rows:
@@ -1196,7 +1274,9 @@ def write_destination_rows(
     payload = [[row.get(header, "") for header in headers] for row in rows]
     start_cell = gspread.utils.rowcol_to_a1(start_row, 1)
     end_cell = gspread.utils.rowcol_to_a1(start_row + len(payload) - 1, len(headers))
-    worksheet.update(range_name=f"{start_cell}:{end_cell}", values=payload, value_input_option="USER_ENTERED")
+    worksheet.update(
+        range_name=f"{start_cell}:{end_cell}", values=payload, value_input_option="USER_ENTERED"
+    )
     return len(payload)
 
 
@@ -1234,7 +1314,7 @@ def prefinal_rows_for_bridge(
     credentials_path: Path,
     sheet_url: str,
     source_tab: str,
-) -> Tuple[List[str], List[Dict[str, Any]]]:
+) -> tuple[list[str], list[dict[str, Any]]]:
     headers, rows = read_worksheet(credentials_path, sheet_url, source_tab)
     # Pre-final contains DESTINATION_COLUMNS; Final adds FINAL_BRIDGE_COLUMNS.
     required = list(DESTINATION_COLUMNS)
@@ -1274,7 +1354,7 @@ def prefinal_rows_for_bridge(
     return headers, ready, skipped
 
 
-def prefinal_bridge_fingerprint(rows: List[Dict[str, Any]]) -> str:
+def prefinal_bridge_fingerprint(rows: list[dict[str, Any]]) -> str:
     canonical_rows = []
     for row in rows:
         canonical_rows.append(
@@ -1287,7 +1367,7 @@ def prefinal_bridge_fingerprint(rows: List[Dict[str, Any]]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
-def pick_engaged_person(row: Dict[str, Any]) -> str:
+def pick_engaged_person(row: dict[str, Any]) -> str:
     use = normalize_key(row.get("Use"))
     if "person 2" in use or use in {"p2", "2"}:
         return "Person 2"
@@ -1298,7 +1378,7 @@ def pick_engaged_person(row: Dict[str, Any]) -> str:
     return "Person 1"
 
 
-def prospect_row_from_prefinal(row: Dict[str, Any]) -> Dict[str, Any]:
+def prospect_row_from_prefinal(row: dict[str, Any]) -> dict[str, Any]:
     prospect = {column: "" for column in PROSPECTS_COLUMNS}
     for column in DESTINATION_COLUMNS:
         prospect[column] = clean_text(row.get(column))
@@ -1311,7 +1391,9 @@ def prospect_row_from_prefinal(row: Dict[str, Any]) -> Dict[str, Any]:
     prospect["P1 LinkedIn"] = normalize_url(prospect.get("P1 LinkedIn"))
     prospect["P2 LinkedIn"] = normalize_url(prospect.get("P2 LinkedIn"))
     engaged_person = clean_text(row.get("Engaged Person"))
-    prospect["Engaged Person"] = engaged_person if engaged_person in {"Person 1", "Person 2"} else pick_engaged_person(row)
+    prospect["Engaged Person"] = (
+        engaged_person if engaged_person in {"Person 1", "Person 2"} else pick_engaged_person(row)
+    )
     prospect["Notes"] = (
         f"source=final_bridge; category={clean_text(row.get('Category'))}; "
         f"bridged_at={datetime.now().isoformat(timespec='seconds')}"
@@ -1329,10 +1411,13 @@ def existing_prospect_ids(credentials_path: Path, sheet_url: str, prospects_tab:
     return {clean_text(row.get("ID")) for row in rows if clean_text(row.get("ID"))}
 
 
-def first_prospect_write_row(rows: List[Dict[str, Any]]) -> int:
+def first_prospect_write_row(rows: list[dict[str, Any]]) -> int:
     last = 1
     for row in rows:
-        if any(clean_text(row.get(column)) for column in ("ID", "Company", "P1 LinkedIn", "P2 LinkedIn")):
+        if any(
+            clean_text(row.get(column))
+            for column in ("ID", "Company", "P1 LinkedIn", "P2 LinkedIn")
+        ):
             last = max(last, int(row.get("_row_number", 1)))
     return last + 1
 
@@ -1341,9 +1426,9 @@ def write_prospect_rows(
     credentials_path: Path,
     sheet_url: str,
     prospects_tab: str,
-    rows: List[Dict[str, Any]],
+    rows: list[dict[str, Any]],
     dry_run: bool = False,
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
     client = get_client(str(credentials_path))
     spreadsheet = open_sheet(client, sheet_url)
     worksheet = get_worksheet(spreadsheet, prospects_tab)
@@ -1359,7 +1444,9 @@ def write_prospect_rows(
     payload = [[row.get(header, "") for header in headers] for row in rows]
     start_cell = gspread.utils.rowcol_to_a1(start_row, 1)
     end_cell = gspread.utils.rowcol_to_a1(start_row + len(payload) - 1, len(headers))
-    worksheet.update(range_name=f"{start_cell}:{end_cell}", values=payload, value_input_option="USER_ENTERED")
+    worksheet.update(
+        range_name=f"{start_cell}:{end_cell}", values=payload, value_input_option="USER_ENTERED"
+    )
     return len(payload), start_row
 
 
@@ -1369,7 +1456,7 @@ def record_outreach_control_prospects_start_row(
     target_date: str,
     start_row: int,
     control_tab: str = DEFAULT_OUTREACH_CONTROL_TAB,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     client = get_client(str(credentials_path))
     spreadsheet = open_sheet(client, sheet_url)
     worksheet = get_worksheet(spreadsheet, control_tab)
@@ -1389,7 +1476,7 @@ def record_outreach_control_prospects_start_row(
         )
     date_idx = headers.index("Date")
     start_idx = headers.index(OUTREACH_CONTROL_PROSPECTS_START_ROW)
-    matches: List[int] = []
+    matches: list[int] = []
     for row_number in range(2, len(values) + 1):
         raw = values[row_number - 1]
         cell_value = raw[date_idx] if date_idx < len(raw) else ""
@@ -1398,8 +1485,11 @@ def record_outreach_control_prospects_start_row(
     if not matches:
         # Reuse OBF's daily-row policy instead of inventing target values here.
         from linkedin_outreach_session import _read_outreach_control
+
         _, control_row, _, _ = _read_outreach_control(
-            str(credentials_path), sheet_url, format_sheet_date(target_date),
+            str(credentials_path),
+            sheet_url,
+            format_sheet_date(target_date),
             auto_create_missing=True,
         )
         matches.append(int(control_row["_row_number"]))
@@ -1420,7 +1510,7 @@ def record_outreach_control_prospects_start_row(
     }
 
 
-def bridge_prefinal_to_prospects(args: argparse.Namespace) -> Dict[str, Any]:
+def bridge_prefinal_to_prospects(args: argparse.Namespace) -> dict[str, Any]:
     target_date = bridge_date_value(args.target_date)
     target_date_key = bridge_date_key(target_date)
     # Bridge should read from Pre-final by default; allow override via --source-tab.
@@ -1432,7 +1522,7 @@ def bridge_prefinal_to_prospects(args: argparse.Namespace) -> Dict[str, Any]:
     )
     fingerprint = prefinal_bridge_fingerprint(prefinal_rows)
     state_file = bridge_state_path(target_date, fingerprint)
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "ok": True,
         "status": "pending",
         "target_date": target_date,
@@ -1458,13 +1548,18 @@ def bridge_prefinal_to_prospects(args: argparse.Namespace) -> Dict[str, Any]:
         return result
     if state_file.exists() and not args.force:
         previous = json.loads(state_file.read_text())
-        if previous.get("write_start_row") and previous.get("outreach_control_update", {}).get("ok") is False:
+        if (
+            previous.get("write_start_row")
+            and previous.get("outreach_control_update", {}).get("ok") is False
+        ):
             # Rows already exist: retry only the unfinished control update.
             if args.dry_run:
                 return {**previous, "ok": False, "status": "control_sync_pending", "dry_run": True}
             try:
                 previous["outreach_control_update"] = record_outreach_control_prospects_start_row(
-                    Path(args.credentials), args.prospects_sheet_url, target_date,
+                    Path(args.credentials),
+                    args.prospects_sheet_url,
+                    target_date,
                     previous["write_start_row"],
                 )
                 previous.update(ok=True, status="processed", blocked=[])
@@ -1482,7 +1577,9 @@ def bridge_prefinal_to_prospects(args: argparse.Namespace) -> Dict[str, Any]:
             )
             return result
 
-    existing_ids = existing_prospect_ids(Path(args.credentials), args.prospects_sheet_url, args.prospects_tab)
+    existing_ids = existing_prospect_ids(
+        Path(args.credentials), args.prospects_sheet_url, args.prospects_tab
+    )
     bridge_rows = []
     for row in prefinal_rows:
         lead_id = clean_text(row.get("ID"))
@@ -1553,9 +1650,7 @@ def ensure_review_tab(credentials_path: Path, sheet_url: str, review_tab: str):
         column_index = headers.index("Research Source") + 1
         worksheet.update_cell(1, column_index, "Overlap Status")
         headers[column_index - 1] = "Overlap Status"
-    missing_overlap_columns = [
-        column for column in REVIEW_OVERLAP_COLUMNS if column not in headers
-    ]
+    missing_overlap_columns = [column for column in REVIEW_OVERLAP_COLUMNS if column not in headers]
     if missing_overlap_columns:
         required_column_count = len(headers) + len(missing_overlap_columns)
         if worksheet.col_count < required_column_count:
@@ -1574,7 +1669,7 @@ def ensure_review_tab(credentials_path: Path, sheet_url: str, review_tab: str):
     return worksheet
 
 
-def build_review_row(run: Dict[str, Any], run_file: Path, lead: Dict[str, Any]) -> Dict[str, Any]:
+def build_review_row(run: dict[str, Any], run_file: Path, lead: dict[str, Any]) -> dict[str, Any]:
     employees = lead.get("employees_from_sheet", [])
     archive_match = lead.get("archive_match", {})
     overlap_status = {
@@ -1597,7 +1692,7 @@ def build_review_row(run: Dict[str, Any], run_file: Path, lead: Dict[str, Any]) 
     }
 
 
-def review_group_date_value(now: Optional[datetime] = None) -> str:
+def review_group_date_value(now: datetime | None = None) -> str:
     now = now or datetime.now()
     return f"{now.month}/{now.day}/{now.year}"
 
@@ -1614,7 +1709,7 @@ def parse_review_group_date(value: Any):
     return None
 
 
-def last_nonempty_review_row(headers: List[str], values: List[List[Any]]) -> int:
+def last_nonempty_review_row(headers: list[str], values: list[list[Any]]) -> int:
     content_columns = ["Date", "Run ID", "Company Name", "Company Website"]
     indexes = [headers.index(column) for column in content_columns if column in headers]
     last_row = 1
@@ -1626,13 +1721,13 @@ def last_nonempty_review_row(headers: List[str], values: List[List[Any]]) -> int
 
 
 def existing_successful_review_group_row(
-    headers: List[str],
-    values: List[List[Any]],
+    headers: list[str],
+    values: list[list[Any]],
     target_date,
-) -> Optional[int]:
+) -> int | None:
     date_idx = headers.index("Date")
     run_id_idx = headers.index("Run ID")
-    group_row: Optional[int] = None
+    group_row: int | None = None
     saw_lead_in_group = False
 
     for row_number, row in enumerate(values[1:], start=2):
@@ -1657,19 +1752,21 @@ def find_successful_review_group_row_for_today(
     credentials_path: Path,
     sheet_url: str,
     review_tab: str,
-) -> Optional[int]:
+) -> int | None:
     worksheet = ensure_review_tab(credentials_path, sheet_url, review_tab)
     headers = worksheet.row_values(1)
     if "Date" not in headers or "Run ID" not in headers:
         return None
-    return existing_successful_review_group_row(headers, worksheet.get_all_values(), datetime.now().date())
+    return existing_successful_review_group_row(
+        headers, worksheet.get_all_values(), datetime.now().date()
+    )
 
 
 def write_review_rows(
     credentials_path: Path,
     sheet_url: str,
     review_tab: str,
-    run: Dict[str, Any],
+    run: dict[str, Any],
     run_file: Path,
 ) -> int:
     worksheet = ensure_review_tab(credentials_path, sheet_url, review_tab)
@@ -1684,7 +1781,9 @@ def write_review_rows(
     payload = [[row.get(header, "") for header in headers] for row in rows]
     group_date = review_group_date_value()
     values = worksheet.get_all_values()
-    existing_group_row = existing_successful_review_group_row(headers, values, datetime.now().date())
+    existing_group_row = existing_successful_review_group_row(
+        headers, values, datetime.now().date()
+    )
     if existing_group_row is not None:
         raise ValueError(
             f"{review_tab} already has a successful review queue for {group_date} "
@@ -1714,7 +1813,9 @@ def write_review_rows(
     return len(payload)
 
 
-def read_review_rows(credentials_path: Path, sheet_url: str, review_tab: str, run_id: str) -> List[Dict[str, Any]]:
+def read_review_rows(
+    credentials_path: Path, sheet_url: str, review_tab: str, run_id: str
+) -> list[dict[str, Any]]:
     headers, rows = read_worksheet(credentials_path, sheet_url, review_tab)
     require_columns(headers, REVIEW_COLUMNS, review_tab)
     return [row for row in rows if clean_text(row.get("Run ID"))]
@@ -1724,8 +1825,8 @@ def remove_review_group_for_run(
     credentials_path: Path,
     sheet_url: str,
     review_tab: str,
-    run: Dict[str, Any],
-) -> Dict[str, Any]:
+    run: dict[str, Any],
+) -> dict[str, Any]:
     client = get_client(str(credentials_path))
     spreadsheet = open_sheet(client, sheet_url)
     worksheet = get_worksheet(spreadsheet, review_tab)
@@ -1737,14 +1838,10 @@ def remove_review_group_for_run(
     date_index = headers.index("Date")
     run_id_index = headers.index("Run ID")
     review_complete_index = (
-        headers.index("Design Review Complete")
-        if "Design Review Complete" in headers
-        else None
+        headers.index("Design Review Complete") if "Design Review Complete" in headers else None
     )
     expected_ids = {
-        clean_text(lead.get("id"))
-        for lead in run.get("leads", [])
-        if clean_text(lead.get("id"))
+        clean_text(lead.get("id")) for lead in run.get("leads", []) if clean_text(lead.get("id"))
     }
     target_date = parse_review_group_date(
         run.get("review", {}).get("write", {}).get("date")
@@ -1831,7 +1928,7 @@ def update_review_statuses(
     sheet_url: str,
     review_tab: str,
     run_id: str,
-    status_by_id: Dict[str, str],
+    status_by_id: dict[str, str],
 ) -> None:
     client = get_client(str(credentials_path))
     spreadsheet = open_sheet(client, sheet_url)
@@ -1862,31 +1959,39 @@ def update_review_statuses(
         worksheet.batch_update(updates, value_input_option="USER_ENTERED")
 
 
-def latest_run_file() -> Optional[Path]:
+def latest_run_file() -> Path | None:
     if not RUNS_DIR.exists():
         return None
-    candidates = sorted(RUNS_DIR.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+    candidates = sorted(
+        RUNS_DIR.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True
+    )
     return candidates[0] if candidates else None
 
 
-def latest_review_run_file() -> Optional[Path]:
+def latest_review_run_file() -> Path | None:
     if not RUNS_DIR.exists():
         return None
-    candidates = sorted(RUNS_DIR.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+    candidates = sorted(
+        RUNS_DIR.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True
+    )
     for path in candidates:
         try:
             run = load_run(path)
         except Exception:
             continue
-        if run.get("status") in {"awaiting_review", "approved_for_processing"} and run.get("review", {}).get("rows_written", 0):
+        if run.get("status") in {"awaiting_review", "approved_for_processing"} and run.get(
+            "review", {}
+        ).get("rows_written", 0):
             return path
     return None
 
 
-def latest_computation_file() -> Optional[Path]:
+def latest_computation_file() -> Path | None:
     if not COMPUTATIONS_DIR.exists():
         return None
-    candidates = sorted(COMPUTATIONS_DIR.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+    candidates = sorted(
+        COMPUTATIONS_DIR.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True
+    )
     return candidates[0] if candidates else None
 
 
@@ -1895,7 +2000,7 @@ def lead_id_fingerprint(lead_ids: Sequence[str]) -> str:
     return hashlib.sha256("\n".join(normalized).encode("utf-8")).hexdigest()[:16]
 
 
-def parse_review_slice(value: Any) -> Optional[Dict[str, int]]:
+def parse_review_slice(value: Any) -> dict[str, int] | None:
     raw = clean_text(value).lower()
     if not raw or raw in {"all", "none"}:
         return None
@@ -1912,7 +2017,7 @@ def parse_review_slice(value: Any) -> Optional[Dict[str, int]]:
     return {"index": index, "total": total}
 
 
-def apply_review_slice(rows: List[Dict[str, Any]], value: Any) -> List[Dict[str, Any]]:
+def apply_review_slice(rows: list[dict[str, Any]], value: Any) -> list[dict[str, Any]]:
     parsed = parse_review_slice(value)
     if not parsed:
         return rows
@@ -1921,16 +2026,18 @@ def apply_review_slice(rows: List[Dict[str, Any]], value: Any) -> List[Dict[str,
     return [row for offset, row in enumerate(rows) if offset % total == index]
 
 
-def computation_fingerprint(computation: Dict[str, Any]) -> str:
+def computation_fingerprint(computation: dict[str, Any]) -> str:
     if clean_text(computation.get("approved_fingerprint")):
         return clean_text(computation.get("approved_fingerprint"))
     return lead_id_fingerprint([lead.get("lead_id", "") for lead in computation.get("leads", [])])
 
 
-def latest_computation_file_for_fingerprint(fingerprint: str) -> Optional[Path]:
+def latest_computation_file_for_fingerprint(fingerprint: str) -> Path | None:
     if not fingerprint or not COMPUTATIONS_DIR.exists():
         return None
-    candidates = sorted(COMPUTATIONS_DIR.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+    candidates = sorted(
+        COMPUTATIONS_DIR.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True
+    )
     for path in candidates:
         try:
             computation = load_run(path)
@@ -1941,14 +2048,16 @@ def latest_computation_file_for_fingerprint(fingerprint: str) -> Optional[Path]:
     return None
 
 
-def latest_search_result_file() -> Optional[Path]:
+def latest_search_result_file() -> Path | None:
     if not SEARCH_RESULTS_DIR.exists():
         return None
-    candidates = sorted(SEARCH_RESULTS_DIR.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+    candidates = sorted(
+        SEARCH_RESULTS_DIR.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True
+    )
     return candidates[0] if candidates else None
 
 
-def approved_gate_status(args: argparse.Namespace) -> Dict[str, Any]:
+def approved_gate_status(args: argparse.Namespace) -> dict[str, Any]:
     import automation_gate  # Local script import keeps gate logic in one place.
 
     gate_args = argparse.Namespace(
@@ -1963,7 +2072,7 @@ def approved_gate_status(args: argparse.Namespace) -> Dict[str, Any]:
     return automation_gate.status_payload(gate_args)
 
 
-def claim_approved_gate(args: argparse.Namespace) -> Dict[str, Any]:
+def claim_approved_gate(args: argparse.Namespace) -> dict[str, Any]:
     import automation_gate
 
     return automation_gate.claim(
@@ -1979,7 +2088,7 @@ def claim_approved_gate(args: argparse.Namespace) -> Dict[str, Any]:
     )
 
 
-def mark_approved_gate(args: argparse.Namespace, fingerprint: str, status: str) -> Dict[str, Any]:
+def mark_approved_gate(args: argparse.Namespace, fingerprint: str, status: str) -> dict[str, Any]:
     import automation_gate
 
     return automation_gate.mark(
@@ -1991,13 +2100,19 @@ def mark_approved_gate(args: argparse.Namespace, fingerprint: str, status: str) 
     )
 
 
-def computation_status_counts(computation: Dict[str, Any], args: argparse.Namespace) -> Dict[str, Any]:
+def computation_status_counts(
+    computation: dict[str, Any], args: argparse.Namespace
+) -> dict[str, Any]:
     leads = computation.get("leads", [])
     rows, skipped = computation_rows_for_write(computation, args)
     search_tasks = computation.get("search_tasks", [])
     pending_tasks = [task for task in search_tasks if task.get("status", "pending") == "pending"]
     selected_tasks = [task for task in search_tasks if task.get("status") == "selected"]
-    latest_batch = computation.get("search_result_batches", [{}])[-1] if computation.get("search_result_batches") else {}
+    latest_batch = (
+        computation.get("search_result_batches", [{}])[-1]
+        if computation.get("search_result_batches")
+        else {}
+    )
     latest_write = computation.get("writes", [{}])[-1] if computation.get("writes") else {}
     p1_linkedin = 0
     p2_linkedin = 0
@@ -2043,9 +2158,19 @@ def computation_status_counts(computation: Dict[str, Any], args: argparse.Namesp
             "source_file": latest_batch.get("source_file", ""),
             "status": latest_batch.get("status", ""),
             "task_count": latest_batch.get("task_count", 0),
-            "selected": len([row for row in latest_batch.get("results", []) if row.get("status") == "selected"]),
-            "needs_review": len([row for row in latest_batch.get("results", []) if row.get("status") == "needs_review"]),
-            "errors": len([row for row in latest_batch.get("results", []) if row.get("status") == "error"]),
+            "selected": len(
+                [row for row in latest_batch.get("results", []) if row.get("status") == "selected"]
+            ),
+            "needs_review": len(
+                [
+                    row
+                    for row in latest_batch.get("results", [])
+                    if row.get("status") == "needs_review"
+                ]
+            ),
+            "errors": len(
+                [row for row in latest_batch.get("results", []) if row.get("status") == "error"]
+            ),
             "pending_tasks": len(latest_batch.get("pending_tasks", [])),
             "captcha_events": latest_batch.get("captcha_events", 0),
             "hot_profiles": len(latest_batch.get("hot_profiles", [])),
@@ -2058,7 +2183,9 @@ def computation_status_counts(computation: Dict[str, Any], args: argparse.Namesp
     }
 
 
-def next_approved_action(gate: Dict[str, Any], computation: Optional[Dict[str, Any]], counts: Dict[str, Any]) -> str:
+def next_approved_action(
+    gate: dict[str, Any], computation: dict[str, Any] | None, counts: dict[str, Any]
+) -> str:
     claim_status = gate.get("claim_status", "")
     if claim_status == "processed":
         return "skip_processed"
@@ -2069,7 +2196,8 @@ def next_approved_action(gate: Dict[str, Any], computation: Optional[Dict[str, A
     if counts.get("research_pending", 0):
         return "research_batch"
     if counts.get("reconciliation_pending", 0) or (
-        computation.get("status") == "reconciliation_pending" and not computation.get("search_tasks")
+        computation.get("status") == "reconciliation_pending"
+        and not computation.get("search_tasks")
     ):
         return "reconcile_existing"
     if counts.get("search_tasks_pending", 0) and counts.get("rows_skipped_unresolved", 0):
@@ -2087,15 +2215,15 @@ def next_approved_action(gate: Dict[str, Any], computation: Optional[Dict[str, A
     return "skip_processed"
 
 
-def approved_workflow_status(args: argparse.Namespace) -> Dict[str, Any]:
+def approved_workflow_status(args: argparse.Namespace) -> dict[str, Any]:
     gate = approved_gate_status(args)
     computation_file = (
         Path(args.computation_file)
         if args.computation_file
         else latest_computation_file_for_fingerprint(gate.get("fingerprint", ""))
     )
-    computation: Optional[Dict[str, Any]] = None
-    counts: Dict[str, Any] = {}
+    computation: dict[str, Any] | None = None
+    counts: dict[str, Any] = {}
     if computation_file and computation_file.exists():
         computation = load_run(computation_file)
         counts = computation_status_counts(computation, args)
@@ -2107,7 +2235,8 @@ def approved_workflow_status(args: argparse.Namespace) -> Dict[str, Any]:
         "computation_status": computation.get("status", "") if computation else "",
         "counts": counts,
         "next_action": action,
-        "resumable": action in {
+        "resumable": action
+        in {
             "claim_and_freeze",
             "freeze_approved",
             "research_batch",
@@ -2120,8 +2249,14 @@ def approved_workflow_status(args: argparse.Namespace) -> Dict[str, Any]:
     }
 
 
-def export_pending_search_tasks(computation: Dict[str, Any], computation_file: Path, args: argparse.Namespace) -> Tuple[Path, List[Dict[str, Any]]]:
-    tasks = [task for task in computation.get("search_tasks", []) if task.get("status", "pending") == "pending"]
+def export_pending_search_tasks(
+    computation: dict[str, Any], computation_file: Path, args: argparse.Namespace
+) -> tuple[Path, list[dict[str, Any]]]:
+    tasks = [
+        task
+        for task in computation.get("search_tasks", [])
+        if task.get("status", "pending") == "pending"
+    ]
     tasks = tasks[: args.max_search_tasks]
     export_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     task_file = SEARCH_TASKS_DIR / f"{export_id}_search_tasks.json"
@@ -2144,7 +2279,9 @@ def export_pending_search_tasks(computation: Dict[str, Any], computation_file: P
     return task_file, tasks
 
 
-def send_review_email(run: Dict[str, Any], run_file: Path, review_tab: str, to_email: str) -> Dict[str, Any]:
+def send_review_email(
+    run: dict[str, Any], run_file: Path, review_tab: str, to_email: str
+) -> dict[str, Any]:
     if not to_email:
         return {"sent": False, "reason": "No notification email configured."}
     host = os.environ.get("SMTP_HOST", "")
@@ -2183,11 +2320,11 @@ def send_review_email(run: Dict[str, Any], run_file: Path, review_tab: str, to_e
     return {"sent": True, "to": to_email}
 
 
-def review_email_subject(run: Dict[str, Any]) -> str:
+def review_email_subject(run: dict[str, Any]) -> str:
     return f"Lead review ready: {run.get('source', {}).get('selected_count', 0)} leads"
 
 
-def review_email_body(run: Dict[str, Any], run_file: Path, review_tab: str) -> str:
+def review_email_body(run: dict[str, Any], run_file: Path, review_tab: str) -> str:
     return "\n".join(
         [
             "A new lead review queue is ready.",
@@ -2206,14 +2343,16 @@ def enqueue_review_notification(
     credentials_path: Path,
     sheet_url: str,
     queue_tab: str,
-    run: Dict[str, Any],
+    run: dict[str, Any],
     run_file: Path,
     review_tab: str,
     to_email: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     client = get_client(str(credentials_path))
     spreadsheet = open_sheet(client, sheet_url)
-    worksheet = get_or_create_worksheet(spreadsheet, queue_tab, rows=1000, cols=len(NOTIFICATION_QUEUE_COLUMNS))
+    worksheet = get_or_create_worksheet(
+        spreadsheet, queue_tab, rows=1000, cols=len(NOTIFICATION_QUEUE_COLUMNS)
+    )
     headers = worksheet.row_values(1)
     if headers[: len(NOTIFICATION_QUEUE_COLUMNS)] != NOTIFICATION_QUEUE_COLUMNS:
         worksheet.update(
@@ -2236,11 +2375,16 @@ def enqueue_review_notification(
         "Sent At": "",
         "Error": "",
     }
-    worksheet.append_row([row.get(header, "") for header in NOTIFICATION_QUEUE_COLUMNS], value_input_option="USER_ENTERED")
+    worksheet.append_row(
+        [row.get(header, "") for header in NOTIFICATION_QUEUE_COLUMNS],
+        value_input_option="USER_ENTERED",
+    )
     return {"queued": True, "tab": queue_tab, "to": to_email}
 
 
-def notify_review_with_fallback(run: Dict[str, Any], run_file: Path, args: argparse.Namespace) -> Dict[str, Any]:
+def notify_review_with_fallback(
+    run: dict[str, Any], run_file: Path, args: argparse.Namespace
+) -> dict[str, Any]:
     try:
         notification = send_review_email(run, run_file, args.review_tab, args.notify_email)
     except Exception as exc:
@@ -2262,8 +2406,10 @@ def notify_review_with_fallback(run: Dict[str, Any], run_file: Path, args: argpa
     return notification
 
 
-def preflight(args: argparse.Namespace) -> Dict[str, Any]:
-    source_headers, source_rows = read_worksheet(Path(args.credentials), source_sheet_url(args), args.source_tab)
+def preflight(args: argparse.Namespace) -> dict[str, Any]:
+    source_headers, source_rows = read_worksheet(
+        Path(args.credentials), source_sheet_url(args), args.source_tab
+    )
     source_rows = canonicalize_source_rows(source_headers, source_rows, args.source_tab)
     destination_headers, _destination_rows = read_worksheet(
         Path(args.credentials), destination_sheet_url(args), args.destination_tab
@@ -2281,12 +2427,12 @@ def preflight(args: argparse.Namespace) -> Dict[str, Any]:
     }
 
 
-def save_run(run: Dict[str, Any], path: Path) -> None:
+def save_run(run: dict[str, Any], path: Path) -> None:
     ensure_dirs()
     path.write_text(json.dumps(run, indent=2, ensure_ascii=False) + "\n")
 
 
-def load_run(path: Path) -> Dict[str, Any]:
+def load_run(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text())
 
 
@@ -2304,17 +2450,21 @@ def archive_index_path(args: argparse.Namespace) -> Path:
 
 
 def annotate_overlap_scan(
-    lead: Dict[str, Any],
+    lead: dict[str, Any],
     archive: ResearchArchive,
     *,
     overlap_scan_enabled: bool,
-) -> Dict[str, Any]:
-    match = archive.match(lead) if overlap_scan_enabled else {
-        "status": MATCH_FRESH,
-        "archive_entry_id": "",
-        "matched_on": [],
-        "confidence": "disabled",
-    }
+) -> dict[str, Any]:
+    match = (
+        archive.match(lead)
+        if overlap_scan_enabled
+        else {
+            "status": MATCH_FRESH,
+            "archive_entry_id": "",
+            "matched_on": [],
+            "confidence": "disabled",
+        }
+    )
     lead["archive_match"] = match
     lead["overlap_status"] = match.get("status", MATCH_FRESH)
     return match
@@ -2322,12 +2472,12 @@ def annotate_overlap_scan(
 
 def collect_overlap_top_up_waves(
     initial_shortfall: int,
-    collect_wave: Callable[[str, int], List[Dict[str, Any]]],
+    collect_wave: Callable[[str, int], list[dict[str, Any]]],
     *,
     enabled: bool,
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], int]:
-    selected: List[Dict[str, Any]] = []
-    waves: List[Dict[str, Any]] = []
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+    selected: list[dict[str, Any]] = []
+    waves: list[dict[str, Any]] = []
     shortfall = max(0, int(initial_shortfall))
     wave_number = 1
     if not enabled:
@@ -2341,14 +2491,10 @@ def collect_overlap_top_up_waves(
             break
         selected.extend(wave)
         archive_matches = [
-            lead
-            for lead in wave
-            if lead.get("archive_match", {}).get("status") == MATCH_AVAILABLE
+            lead for lead in wave if lead.get("archive_match", {}).get("status") == MATCH_AVAILABLE
         ]
         conflicts = [
-            lead
-            for lead in wave
-            if lead.get("archive_match", {}).get("status") == MATCH_CONFLICT
+            lead for lead in wave if lead.get("archive_match", {}).get("status") == MATCH_CONFLICT
         ]
         waves.append(
             {
@@ -2367,33 +2513,33 @@ def collect_overlap_top_up_waves(
     return selected, waves, shortfall
 
 
-def build_run(args: argparse.Namespace) -> Tuple[Dict[str, Any], Path]:
+def build_run(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     headers, rows = read_worksheet(Path(args.credentials), source_sheet_url(args), args.source_tab)
     rows = canonicalize_source_rows(headers, rows, args.source_tab)
     destination_company_by_id = load_destination_company_by_id(
         Path(args.credentials), destination_sheet_url(args), args.destination_tab
     )
-    reviewed_ids = load_reviewed_ids(Path(args.credentials), source_sheet_url(args), args.review_tab)
+    reviewed_ids = load_reviewed_ids(
+        Path(args.credentials), source_sheet_url(args), args.review_tab
+    )
     groups = group_source_rows(rows, args.source_tab)
     archive = ResearchArchive(archive_index_path(args))
     archive_stats = archive.stats()
     overlap_scan_enabled = (
-        not getattr(args, "disable_overlap_scan", False)
-        and archive_stats.get("available", 0) > 0
+        not getattr(args, "disable_overlap_scan", False) and archive_stats.get("available", 0) > 0
     )
-    overlap_top_ups_enabled = (
-        overlap_scan_enabled
-        and not getattr(args, "disable_overlap_top_ups", False)
+    overlap_top_ups_enabled = overlap_scan_enabled and not getattr(
+        args, "disable_overlap_top_ups", False
     )
-    selected: List[Dict[str, Any]] = []
-    prep_waves: List[Dict[str, Any]] = []
+    selected: list[dict[str, Any]] = []
+    prep_waves: list[dict[str, Any]] = []
     destination_conflicts = []
     skipped_destination_ids = set()
     skipped_reviewed_ids = set()
     skipped_consumed_archive_ids = set()
     group_index = 0
 
-    def next_eligible_group() -> Optional[Dict[str, Any]]:
+    def next_eligible_group() -> dict[str, Any] | None:
         nonlocal group_index
         while group_index < len(groups):
             group = groups[group_index]
@@ -2426,7 +2572,7 @@ def build_run(args: argparse.Namespace) -> Tuple[Dict[str, Any], Path]:
             return group
         return None
 
-    def collect_wave(label: str, target: int) -> List[Dict[str, Any]]:
+    def collect_wave(label: str, target: int) -> list[dict[str, Any]]:
         wave = []
         while len(wave) < target:
             group = next_eligible_group()
@@ -2474,11 +2620,7 @@ def build_run(args: argparse.Namespace) -> Tuple[Dict[str, Any], Path]:
     prep_waves.extend(top_up_waves)
 
     fresh_count = len(
-        [
-            lead
-            for lead in selected
-            if lead.get("archive_match", {}).get("status") == MATCH_FRESH
-        ]
+        [lead for lead in selected if lead.get("archive_match", {}).get("status") == MATCH_FRESH]
     )
     archive_match_count = len(
         [
@@ -2488,11 +2630,7 @@ def build_run(args: argparse.Namespace) -> Tuple[Dict[str, Any], Path]:
         ]
     )
     archive_conflict_count = len(
-        [
-            lead
-            for lead in selected
-            if lead.get("archive_match", {}).get("status") == MATCH_CONFLICT
-        ]
+        [lead for lead in selected if lead.get("archive_match", {}).get("status") == MATCH_CONFLICT]
     )
     lane_counts = assign_primary_lanes(selected)
     run_id = now_run_id()
@@ -2541,9 +2679,7 @@ def build_run(args: argparse.Namespace) -> Tuple[Dict[str, Any], Path]:
             "conflict_count": archive_conflict_count,
             "top_up_count": max(0, len(selected) - len(base_wave)),
             "top_up_suppressed_count": (
-                len(base_nonfresh)
-                if overlap_scan_enabled and not overlap_top_ups_enabled
-                else 0
+                len(base_nonfresh) if overlap_scan_enabled and not overlap_top_ups_enabled else 0
             ),
             "unresolved_fresh_shortfall": unresolved_shortfall,
             "target_met": fresh_count >= args.limit,
@@ -2563,7 +2699,7 @@ def build_run(args: argparse.Namespace) -> Tuple[Dict[str, Any], Path]:
     return run, run_file
 
 
-def prepare_review(args: argparse.Namespace) -> Tuple[Dict[str, Any], Path]:
+def prepare_review(args: argparse.Namespace) -> tuple[dict[str, Any], Path]:
     existing_group_row = find_successful_review_group_row_for_today(
         Path(args.credentials),
         source_sheet_url(args),
@@ -2640,7 +2776,7 @@ def prepare_review(args: argparse.Namespace) -> Tuple[Dict[str, Any], Path]:
     return run, run_file
 
 
-def notify_review(run: Dict[str, Any], run_file: Path, args: argparse.Namespace) -> Dict[str, Any]:
+def notify_review(run: dict[str, Any], run_file: Path, args: argparse.Namespace) -> dict[str, Any]:
     notification = notify_review_with_fallback(run, run_file, args)
     run.setdefault("review", {})
     run["review"]["tab"] = run["review"].get("tab") or args.review_tab
@@ -2649,13 +2785,16 @@ def notify_review(run: Dict[str, Any], run_file: Path, args: argparse.Namespace)
     return run
 
 
-def filter_run_to_approved(run: Dict[str, Any], args: argparse.Namespace) -> Dict[str, Any]:
+def filter_run_to_approved(run: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     ignore_review_approval = resolve_ignore_review_approval(args)
-    rows = read_review_rows(Path(args.credentials), source_sheet_url(args), args.review_tab, run.get("run_id", ""))
+    rows = read_review_rows(
+        Path(args.credentials), source_sheet_url(args), args.review_tab, run.get("run_id", "")
+    )
     approved_ids = {
         clean_text(row.get("Run ID"))
         for row in rows
-        if (ignore_review_approval or checkbox_truthy(row.get("Approved"))) and clean_text(row.get("Run ID"))
+        if (ignore_review_approval or checkbox_truthy(row.get("Approved")))
+        and clean_text(row.get("Run ID"))
     }
     use_by_id = {
         clean_text(row.get("Run ID")): clean_text(row.get("Use"))
@@ -2667,7 +2806,9 @@ def filter_run_to_approved(run: Dict[str, Any], args: argparse.Namespace) -> Dic
     approved_leads.sort(key=lambda lead: lead.get("source_rows", {}).get("company_row") or 0)
     if not approved_leads:
         selected_label = "leads" if ignore_review_approval else "approved leads"
-        raise ValueError(f"No {selected_label} found in {args.review_tab} for run {run.get('run_id', '')}.")
+        raise ValueError(
+            f"No {selected_label} found in {args.review_tab} for run {run.get('run_id', '')}."
+        )
 
     for lead in approved_leads:
         lead["review_use"] = use_by_id.get(lead.get("id", ""), "")
@@ -2680,18 +2821,25 @@ def filter_run_to_approved(run: Dict[str, Any], args: argparse.Namespace) -> Dic
         for index, batch in enumerate(chunks(approved_leads, args.batch_size))
     ]
     run["source"]["approved_count"] = len(approved_leads)
-    run["source"]["selection_mode"] = "approval_disabled" if ignore_review_approval else "approved_only"
+    run["source"]["selection_mode"] = (
+        "approval_disabled" if ignore_review_approval else "approved_only"
+    )
     run["status"] = "approved_for_processing"
     return run
 
 
-def approved_leads_from_review(run: Dict[str, Any], args: argparse.Namespace) -> List[Dict[str, Any]]:
+def approved_leads_from_review(
+    run: dict[str, Any], args: argparse.Namespace
+) -> list[dict[str, Any]]:
     ignore_review_approval = resolve_ignore_review_approval(args)
-    rows = read_review_rows(Path(args.credentials), source_sheet_url(args), args.review_tab, run.get("run_id", ""))
+    rows = read_review_rows(
+        Path(args.credentials), source_sheet_url(args), args.review_tab, run.get("run_id", "")
+    )
     approved_rows = [
         row
         for row in rows
-        if (ignore_review_approval or checkbox_truthy(row.get("Approved"))) and clean_text(row.get("Run ID"))
+        if (ignore_review_approval or checkbox_truthy(row.get("Approved")))
+        and clean_text(row.get("Run ID"))
     ]
     lane_scope = clean_text(getattr(args, "review_lane_scope", "all")).lower()
     if lane_scope in {"design", "automation"}:
@@ -2703,12 +2851,10 @@ def approved_leads_from_review(run: Dict[str, Any], args: argparse.Namespace) ->
     approved_rows = apply_review_slice(approved_rows, getattr(args, "review_slice", ""))
     use_by_id = {clean_text(row.get("Run ID")): clean_text(row.get("Use")) for row in approved_rows}
     approved_by_id = {
-        clean_text(row.get("Run ID")): checkbox_truthy(row.get("Approved"))
-        for row in approved_rows
+        clean_text(row.get("Run ID")): checkbox_truthy(row.get("Approved")) for row in approved_rows
     }
     review_row_by_id = {
-        clean_text(row.get("Run ID")): row.get("_row_number")
-        for row in approved_rows
+        clean_text(row.get("Run ID")): row.get("_row_number") for row in approved_rows
     }
     lead_by_id = {lead.get("id"): lead for lead in run.get("leads", [])}
     approved = []
@@ -2726,7 +2872,9 @@ def approved_leads_from_review(run: Dict[str, Any], args: argparse.Namespace) ->
     return approved
 
 
-def freeze_approved(run: Dict[str, Any], run_file: Path, args: argparse.Namespace) -> Tuple[Dict[str, Any], Path, Dict[str, Any], Path]:
+def freeze_approved(
+    run: dict[str, Any], run_file: Path, args: argparse.Namespace
+) -> tuple[dict[str, Any], Path, dict[str, Any], Path]:
     ignore_review_approval = resolve_ignore_review_approval(args)
     approved = approved_leads_from_review(run, args)
     if not approved:
@@ -2758,7 +2906,8 @@ def freeze_approved(run: Dict[str, Any], run_file: Path, args: argparse.Namespac
             "company": lead.get("company", {}).get("name", ""),
             "website": lead.get("company", {}).get("website", ""),
             "company_linkedin": lead.get("company", {}).get("linkedin", ""),
-            "emp_count": lead.get("company", {}).get("employee_count") or len(lead.get("employees_from_sheet", [])),
+            "emp_count": lead.get("company", {}).get("employee_count")
+            or len(lead.get("employees_from_sheet", [])),
             "source_tab": lead.get("source_tab", ""),
             "use": lead.get("review_use", ""),
             "review_approved": bool(lead.get("review_approved")),
@@ -2784,10 +2933,14 @@ def freeze_approved(run: Dict[str, Any], run_file: Path, args: argparse.Namespac
                 archive_reused_count += 1
         elif match.get("status") == MATCH_CONFLICT:
             computation_lead["status"] = "archive_conflict"
-            computation_lead["notes"].append("Archive identity conflict requires manual resolution.")
+            computation_lead["notes"].append(
+                "Archive identity conflict requires manual resolution."
+            )
         elif match.get("status") == MATCH_CONSUMED:
             computation_lead["status"] = "archive_consumed"
-            computation_lead["notes"].append("Archive research was already consumed by an earlier publication.")
+            computation_lead["notes"].append(
+                "Archive research was already consumed by an earlier publication."
+            )
         computation_leads.append(computation_lead)
 
     selection_mode = "approval_disabled" if ignore_review_approval else "approved_only"
@@ -2800,8 +2953,12 @@ def freeze_approved(run: Dict[str, Any], run_file: Path, args: argparse.Namespac
         "selection_mode": selection_mode,
         "review_lane_scope": args.review_lane_scope,
         "review_slice": args.review_slice,
-        "publication_mode": "publish_all" if selection_mode == "approval_disabled" else "publish_approved",
-        "status": "research_pending" if archive_reused_count < len(computation_leads) else "archive_reused",
+        "publication_mode": "publish_all"
+        if selection_mode == "approval_disabled"
+        else "publish_approved",
+        "status": "research_pending"
+        if archive_reused_count < len(computation_leads)
+        else "archive_reused",
         "lead_count": len(computation_leads),
         "archive_reused_count": archive_reused_count,
         "fresh_research_count": len(computation_leads) - archive_reused_count,
@@ -2822,7 +2979,9 @@ def freeze_approved(run: Dict[str, Any], run_file: Path, args: argparse.Namespac
     return snapshot, snapshot_file, computation, computation_file
 
 
-def build_research_prompt(computation: Dict[str, Any], args: argparse.Namespace) -> Tuple[str, List[Dict[str, Any]]]:
+def build_research_prompt(
+    computation: dict[str, Any], args: argparse.Namespace
+) -> tuple[str, list[dict[str, Any]]]:
     pending = [
         lead
         for lead in computation.get("leads", [])
@@ -2851,7 +3010,9 @@ def build_research_prompt(computation: Dict[str, Any], args: argparse.Namespace)
     return "\n".join(lines), batch
 
 
-def write_research_prompt(computation: Dict[str, Any], computation_file: Path, args: argparse.Namespace) -> Path:
+def write_research_prompt(
+    computation: dict[str, Any], computation_file: Path, args: argparse.Namespace
+) -> Path:
     prompt, batch = build_research_prompt(computation, args)
     prompt_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     prompt_file = PROMPTS_DIR / f"{prompt_id}_research_prompt.md"
@@ -2870,7 +3031,7 @@ def write_research_prompt(computation: Dict[str, Any], computation_file: Path, a
     return prompt_file
 
 
-def normalize_research_executives(raw: Any) -> List[Dict[str, str]]:
+def normalize_research_executives(raw: Any) -> list[dict[str, str]]:
     if isinstance(raw, dict):
         raw = raw.get("executives", [])
     if not isinstance(raw, list):
@@ -2879,8 +3040,12 @@ def normalize_research_executives(raw: Any) -> List[Dict[str, str]]:
     for item in raw:
         if not isinstance(item, dict):
             continue
-        name = clean_text(item.get("name") or item.get("Name") or item.get("names") or item.get("Names"))
-        title = clean_text(item.get("title") or item.get("Title") or item.get("titles") or item.get("Titles"))
+        name = clean_text(
+            item.get("name") or item.get("Name") or item.get("names") or item.get("Names")
+        )
+        title = clean_text(
+            item.get("title") or item.get("Title") or item.get("titles") or item.get("Titles")
+        )
         linkedin = normalize_url(
             item.get("linkedin_url")
             or item.get("linkedin")
@@ -2905,7 +3070,7 @@ def normalize_research_executives(raw: Any) -> List[Dict[str, str]]:
     return executives[:3]
 
 
-def apply_research_results(computation: Dict[str, Any], research_file: Path) -> Dict[str, Any]:
+def apply_research_results(computation: dict[str, Any], research_file: Path) -> dict[str, Any]:
     data = json.loads(research_file.read_text())
     if isinstance(data, dict) and "results" in data:
         rows = data["results"]
@@ -2914,7 +3079,9 @@ def apply_research_results(computation: Dict[str, Any], research_file: Path) -> 
     else:
         raise ValueError("Research file must be a list or an object with a 'results' list.")
 
-    lead_by_company = {normalize_key(lead.get("company", "")): lead for lead in computation.get("leads", [])}
+    lead_by_company = {
+        normalize_key(lead.get("company", "")): lead for lead in computation.get("leads", [])
+    }
     applied = 0
     unmatched = []
     for row in rows:
@@ -2942,7 +3109,7 @@ def apply_research_results(computation: Dict[str, Any], research_file: Path) -> 
     return computation
 
 
-def reconcile_computation_existing_data(computation: Dict[str, Any]) -> Dict[str, Any]:
+def reconcile_computation_existing_data(computation: dict[str, Any]) -> dict[str, Any]:
     all_search_tasks = []
     for lead in computation.get("leads", []):
         executives = lead.get("executives", [])
@@ -2960,14 +3127,20 @@ def reconcile_computation_existing_data(computation: Dict[str, Any]) -> Dict[str
                 executive["email"] = matched.get("email", "") or executive.get("email", "")
                 if not executive.get("title") and matched.get("role"):
                     executive["title"] = matched.get("role", "")
-                score = linkedin_url_name_score(executive.get("name", ""), matched.get("linkedin", ""))
+                score = linkedin_url_name_score(
+                    executive.get("name", ""), matched.get("linkedin", "")
+                )
                 if matched.get("linkedin") and score >= 0.34:
                     executive["linkedin_url"] = matched.get("linkedin", "")
                     executive["linkedin_source"] = "source_employee_row"
                     executive["needs_linkedin_search"] = False
-                    executive.setdefault("reconciliation_notes", []).append("LinkedIn matched on same employee row.")
+                    executive.setdefault("reconciliation_notes", []).append(
+                        "LinkedIn matched on same employee row."
+                    )
                     continue
-                executive.setdefault("reconciliation_notes", []).append("Name matched source employee row.")
+                executive.setdefault("reconciliation_notes", []).append(
+                    "Name matched source employee row."
+                )
 
             best_url = ""
             best_score = 0.0
@@ -2981,7 +3154,9 @@ def reconcile_computation_existing_data(computation: Dict[str, Any]) -> Dict[str
                 executive["linkedin_url"] = best_url
                 executive["linkedin_source"] = "source_group_url_match"
                 executive["needs_linkedin_search"] = False
-                executive.setdefault("reconciliation_notes", []).append("LinkedIn matched by name parts across source group URLs.")
+                executive.setdefault("reconciliation_notes", []).append(
+                    "LinkedIn matched by name parts across source group URLs."
+                )
                 continue
 
             task = {
@@ -2989,8 +3164,12 @@ def reconcile_computation_existing_data(computation: Dict[str, Any]) -> Dict[str
                 "company": lead.get("company", ""),
                 "person_name": executive.get("name", ""),
                 "title": executive.get("title", ""),
-                "query": search_query_variants(executive.get("name", ""), lead.get("company", ""))[0],
-                "queries": search_query_variants(executive.get("name", ""), lead.get("company", "")),
+                "query": search_query_variants(executive.get("name", ""), lead.get("company", ""))[
+                    0
+                ],
+                "queries": search_query_variants(
+                    executive.get("name", ""), lead.get("company", "")
+                ),
                 "status": "pending",
             }
             executive["needs_linkedin_search"] = True
@@ -3006,24 +3185,34 @@ def reconcile_computation_existing_data(computation: Dict[str, Any]) -> Dict[str
     return computation
 
 
-def score_task_candidate(task: Dict[str, Any], result: Dict[str, str]) -> float:
+def score_task_candidate(task: dict[str, Any], result: dict[str, str]) -> float:
     exec_item = {"name": task.get("person_name", ""), "role": task.get("title", "")}
     company = {"name": task.get("company", "")}
     return score_search_candidate(exec_item, company, result)
 
 
-def find_executive_for_task(computation: Dict[str, Any], task: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def find_executive_for_task(
+    computation: dict[str, Any], task: dict[str, Any]
+) -> dict[str, Any] | None:
     for lead in computation.get("leads", []):
         if lead.get("lead_id") != task.get("lead_id"):
             continue
         for executive in lead.get("executives", []):
-            if normalize_key(executive.get("name", "")) == normalize_key(task.get("person_name", "")):
+            if normalize_key(executive.get("name", "")) == normalize_key(
+                task.get("person_name", "")
+            ):
                 return executive
     return None
 
 
-def run_search_tasks(computation: Dict[str, Any], computation_file: Path, args: argparse.Namespace) -> Tuple[Dict[str, Any], Path]:
-    tasks = [task for task in computation.get("search_tasks", []) if task.get("status", "pending") == "pending"]
+def run_search_tasks(
+    computation: dict[str, Any], computation_file: Path, args: argparse.Namespace
+) -> tuple[dict[str, Any], Path]:
+    tasks = [
+        task
+        for task in computation.get("search_tasks", [])
+        if task.get("status", "pending") == "pending"
+    ]
     tasks = tasks[: args.max_search_tasks]
     search_client = SearchClient(delay_min=args.delay_min, delay_max=args.delay_max)
     result_batch = {
@@ -3057,13 +3246,20 @@ def run_search_tasks(computation: Dict[str, Any], computation_file: Path, args: 
                 scored_for_query.sort(key=lambda row: row.get("score", 0), reverse=True)
                 if scored_for_query and not best_scored:
                     best_scored = scored_for_query
-                if scored_for_query and scored_for_query[0].get("score", 0) >= args.search_accept_threshold:
+                if (
+                    scored_for_query
+                    and scored_for_query[0].get("score", 0) >= args.search_accept_threshold
+                ):
                     best_scored = scored_for_query
                     break
             if not results and search_errors:
                 raise RuntimeError("; ".join(search_errors))
             scored = best_scored
-            selected = scored[0] if scored and scored[0].get("score", 0) >= args.search_accept_threshold else None
+            selected = (
+                scored[0]
+                if scored and scored[0].get("score", 0) >= args.search_accept_threshold
+                else None
+            )
             item["results"] = scored
             item["selected"] = selected
             item["status"] = "selected" if selected else "needs_review"
@@ -3073,7 +3269,9 @@ def run_search_tasks(computation: Dict[str, Any], computation_file: Path, args: 
                     executive["linkedin_url"] = normalize_url(selected.get("url", ""))
                     executive["linkedin_source"] = "search_task"
                     executive["needs_linkedin_search"] = False
-                    executive.setdefault("reconciliation_notes", []).append("LinkedIn selected from search task results.")
+                    executive.setdefault("reconciliation_notes", []).append(
+                        "LinkedIn selected from search task results."
+                    )
         except Exception as exc:
             item["results"] = []
             item["selected"] = None
@@ -3090,17 +3288,27 @@ def run_search_tasks(computation: Dict[str, Any], computation_file: Path, args: 
         if key in completed_status_by_key:
             task["status"] = completed_status_by_key[key]
 
-    remaining_pending = [task for task in computation.get("search_tasks", []) if task.get("status", "pending") == "pending"]
+    remaining_pending = [
+        task
+        for task in computation.get("search_tasks", [])
+        if task.get("status", "pending") == "pending"
+    ]
     computation.setdefault("search_result_batches", []).append(result_batch)
-    computation["status"] = "linkedin_search_pending" if remaining_pending else "search_tasks_completed"
+    computation["status"] = (
+        "linkedin_search_pending" if remaining_pending else "search_tasks_completed"
+    )
     computation["search_tasks_remaining"] = len(remaining_pending)
-    result_file = SEARCH_RESULTS_DIR / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_search_results.json"
+    result_file = (
+        SEARCH_RESULTS_DIR / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_search_results.json"
+    )
     result_file.write_text(json.dumps(result_batch, indent=2, ensure_ascii=False) + "\n")
     save_run(computation, computation_file)
     return computation, result_file
 
 
-def apply_search_result_batch(computation: Dict[str, Any], result_file: Path, args: argparse.Namespace) -> Dict[str, Any]:
+def apply_search_result_batch(
+    computation: dict[str, Any], result_file: Path, args: argparse.Namespace
+) -> dict[str, Any]:
     batch = json.loads(result_file.read_text())
     normalized_batch = {
         "created_at": batch.get("created_at", datetime.now().isoformat(timespec="seconds")),
@@ -3123,7 +3331,11 @@ def apply_search_result_batch(computation: Dict[str, Any], result_file: Path, ar
             scored_item["score"] = score_task_candidate(item, result)
             scored.append(scored_item)
         scored.sort(key=lambda row: row.get("score", 0), reverse=True)
-        selected = scored[0] if scored and scored[0].get("score", 0) >= args.search_accept_threshold else None
+        selected = (
+            scored[0]
+            if scored and scored[0].get("score", 0) >= args.search_accept_threshold
+            else None
+        )
         out = dict(item)
         out["results"] = scored
         out["selected"] = selected
@@ -3142,24 +3354,34 @@ def apply_search_result_batch(computation: Dict[str, Any], result_file: Path, ar
                 executive["linkedin_url"] = normalize_url(selected.get("url", ""))
                 executive["linkedin_source"] = "playwright_search_task"
                 executive["needs_linkedin_search"] = False
-                executive.setdefault("reconciliation_notes", []).append("LinkedIn selected from Playwright search task results.")
+                executive.setdefault("reconciliation_notes", []).append(
+                    "LinkedIn selected from Playwright search task results."
+                )
 
     for task in computation.get("search_tasks", []):
         key = (task.get("lead_id"), task.get("person_name"))
         if key in completed_status_by_key:
             task["status"] = completed_status_by_key[key]
 
-    remaining_pending = [task for task in computation.get("search_tasks", []) if task.get("status", "pending") == "pending"]
+    remaining_pending = [
+        task
+        for task in computation.get("search_tasks", [])
+        if task.get("status", "pending") == "pending"
+    ]
     computation.setdefault("search_result_batches", []).append(normalized_batch)
     computation["search_tasks_remaining"] = len(remaining_pending)
-    if normalized_batch.get("status") == "paused_due_to_all_profiles_hot" or normalized_batch.get("pending_tasks"):
+    if normalized_batch.get("status") == "paused_due_to_all_profiles_hot" or normalized_batch.get(
+        "pending_tasks"
+    ):
         computation["status"] = "playwright_search_paused"
     else:
-        computation["status"] = "linkedin_search_pending" if remaining_pending else "search_tasks_completed"
+        computation["status"] = (
+            "linkedin_search_pending" if remaining_pending else "search_tasks_completed"
+        )
     return computation
 
 
-def process_run(run: Dict[str, Any], run_file: Path, args: argparse.Namespace) -> Dict[str, Any]:
+def process_run(run: dict[str, Any], run_file: Path, args: argparse.Namespace) -> dict[str, Any]:
     search_client = SearchClient(delay_min=args.delay_min, delay_max=args.delay_max)
     lead_by_id = {lead["id"]: lead for lead in run.get("leads", [])}
     for batch in run.get("batches", []):
@@ -3174,7 +3396,9 @@ def process_run(run: Dict[str, Any], run_file: Path, args: argparse.Namespace) -
             try:
                 execs = search_execs_for_company(search_client, group["company"], max_execs=3)
                 if not execs:
-                    execs = fallback_execs_from_employees(group.get("employees_from_sheet", []), max_execs=3)
+                    execs = fallback_execs_from_employees(
+                        group.get("employees_from_sheet", []), max_execs=3
+                    )
                 group["execs_found"] = execs
                 group["finalized_execs"] = [
                     reconcile_exec(search_client, group, exec_item) for exec_item in execs
@@ -3199,22 +3423,27 @@ def process_run(run: Dict[str, Any], run_file: Path, args: argparse.Namespace) -
     return run
 
 
-def process_approved_run(run: Dict[str, Any], run_file: Path, args: argparse.Namespace) -> Dict[str, Any]:
+def process_approved_run(
+    run: dict[str, Any], run_file: Path, args: argparse.Namespace
+) -> dict[str, Any]:
     run = filter_run_to_approved(run, args)
     save_run(run, run_file)
     status_by_id = {lead.get("id", ""): "Processing" for lead in run.get("leads", [])}
-    update_review_statuses(Path(args.credentials), source_sheet_url(args), args.review_tab, run["run_id"], status_by_id)
+    update_review_statuses(
+        Path(args.credentials), source_sheet_url(args), args.review_tab, run["run_id"], status_by_id
+    )
     run = process_run(run, run_file, args)
     final_status = {
         lead.get("id", ""): ("Processed" if lead.get("status") == "completed" else "Error")
         for lead in run.get("leads", [])
     }
-    update_review_statuses(Path(args.credentials), source_sheet_url(args), args.review_tab, run["run_id"], final_status)
+    update_review_statuses(
+        Path(args.credentials), source_sheet_url(args), args.review_tab, run["run_id"], final_status
+    )
     return run
 
 
-
-def push_run(run: Dict[str, Any], run_file: Path, args: argparse.Namespace) -> int:
+def push_run(run: dict[str, Any], run_file: Path, args: argparse.Namespace) -> int:
     if args.dry_run:
         run["rows_written"] = 0
         run["status"] = "dry_run_completed"
@@ -3232,10 +3461,12 @@ def push_run(run: Dict[str, Any], run_file: Path, args: argparse.Namespace) -> i
     return rows_written
 
 
-def print_summary(run: Dict[str, Any], run_file: Path, rows_written: int, dry_run: bool) -> None:
+def print_summary(run: dict[str, Any], run_file: Path, rows_written: int, dry_run: bool) -> None:
     print("Lead exec research summary")
     print(f"Run file: {run_file}")
-    print(f"Selected leads: {run.get('source', {}).get('selected_count', len(run.get('leads', [])))}")
+    print(
+        f"Selected leads: {run.get('source', {}).get('selected_count', len(run.get('leads', [])))}"
+    )
     if "approved_count" in run.get("source", {}):
         print(f"Approved leads: {run.get('source', {}).get('approved_count', 0)}")
     print(f"Batches: {len(run.get('batches', []))}")
@@ -3257,26 +3488,57 @@ def print_summary(run: Dict[str, Any], run_file: Path, rows_written: int, dry_ru
 
 
 def add_common_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--sheet-url", default=os.environ.get("LEAD_RESEARCH_SHEET_URL", DEFAULT_SHEET_URL), help="Google Sheet URL when source and destination are the same.")
-    parser.add_argument("--source-sheet-url", default=os.environ.get("LEAD_RESEARCH_SOURCE_SHEET_URL", ""), help="Source Google Sheet URL.")
-    parser.add_argument("--destination-sheet-url", default=os.environ.get("LEAD_RESEARCH_DESTINATION_SHEET_URL", ""), help="Destination Google Sheet URL.")
-    parser.add_argument("--source-tab", default=os.environ.get("LEAD_RESEARCH_SOURCE_TAB", DEFAULT_SOURCE_TAB))
-    parser.add_argument("--destination-tab", default=os.environ.get("LEAD_RESEARCH_DESTINATION_TAB", DEFAULT_DESTINATION_TAB))
-    parser.add_argument("--final-tab", default=os.environ.get("LEAD_RESEARCH_FINAL_TAB", DEFAULT_FINAL_TAB))
-    parser.add_argument("--prospects-sheet-url", default=os.environ.get("OBF_SHEET_URL", DEFAULT_OBF_SHEET_URL))
-    parser.add_argument("--prospects-tab", default=os.environ.get("OBF_PROSPECTS_TAB", DEFAULT_PROSPECTS_TAB))
+    parser.add_argument(
+        "--sheet-url",
+        default=os.environ.get("LEAD_RESEARCH_SHEET_URL", DEFAULT_SHEET_URL),
+        help="Google Sheet URL when source and destination are the same.",
+    )
+    parser.add_argument(
+        "--source-sheet-url",
+        default=os.environ.get("LEAD_RESEARCH_SOURCE_SHEET_URL", ""),
+        help="Source Google Sheet URL.",
+    )
+    parser.add_argument(
+        "--destination-sheet-url",
+        default=os.environ.get("LEAD_RESEARCH_DESTINATION_SHEET_URL", ""),
+        help="Destination Google Sheet URL.",
+    )
+    parser.add_argument(
+        "--source-tab", default=os.environ.get("LEAD_RESEARCH_SOURCE_TAB", DEFAULT_SOURCE_TAB)
+    )
+    parser.add_argument(
+        "--destination-tab",
+        default=os.environ.get("LEAD_RESEARCH_DESTINATION_TAB", DEFAULT_DESTINATION_TAB),
+    )
+    parser.add_argument(
+        "--final-tab", default=os.environ.get("LEAD_RESEARCH_FINAL_TAB", DEFAULT_FINAL_TAB)
+    )
+    parser.add_argument(
+        "--prospects-sheet-url", default=os.environ.get("OBF_SHEET_URL", DEFAULT_OBF_SHEET_URL)
+    )
+    parser.add_argument(
+        "--prospects-tab", default=os.environ.get("OBF_PROSPECTS_TAB", DEFAULT_PROSPECTS_TAB)
+    )
     parser.add_argument("--target-date", default=os.environ.get("BRIDGE_TARGET_DATE", "today"))
     parser.add_argument("--force", action="store_true")
-    parser.add_argument("--review-tab", default=os.environ.get("LEAD_RESEARCH_REVIEW_TAB", DEFAULT_REVIEW_TAB))
+    parser.add_argument(
+        "--review-tab", default=os.environ.get("LEAD_RESEARCH_REVIEW_TAB", DEFAULT_REVIEW_TAB)
+    )
     parser.add_argument(
         "--notification-queue-tab",
-        default=os.environ.get("LEAD_RESEARCH_NOTIFICATION_QUEUE_TAB", DEFAULT_NOTIFICATION_QUEUE_TAB),
+        default=os.environ.get(
+            "LEAD_RESEARCH_NOTIFICATION_QUEUE_TAB", DEFAULT_NOTIFICATION_QUEUE_TAB
+        ),
     )
     parser.add_argument(
         "--notify-email",
-        default=os.environ.get("LEAD_RESEARCH_NOTIFY_EMAIL", os.environ.get("NOTIFY_TO", DEFAULT_NOTIFY_EMAIL)),
+        default=os.environ.get(
+            "LEAD_RESEARCH_NOTIFY_EMAIL", os.environ.get("NOTIFY_TO", DEFAULT_NOTIFY_EMAIL)
+        ),
     )
-    parser.add_argument("--no-email", action="store_true", help="Skip review-ready email notification.")
+    parser.add_argument(
+        "--no-email", action="store_true", help="Skip review-ready email notification."
+    )
     parser.add_argument(
         "--no-queue-notification",
         dest="queue_notification",
@@ -3284,7 +3546,9 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
         default=True,
         help="Do not write to the Notification Queue tab when SMTP fails.",
     )
-    parser.add_argument("--credentials", default=os.environ.get("GOOGLE_SHEETS_CREDENTIALS", str(DEFAULT_CREDS)))
+    parser.add_argument(
+        "--credentials", default=os.environ.get("GOOGLE_SHEETS_CREDENTIALS", str(DEFAULT_CREDS))
+    )
     parser.add_argument("--limit", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=5)
     parser.add_argument(
@@ -3300,7 +3564,9 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
         default=os.environ.get(
             "LEAD_OVERLAP_SCAN_ENABLED",
             os.environ.get("LEAD_ARCHIVE_RECONCILIATION_ENABLED", "1"),
-        ).strip().lower()
+        )
+        .strip()
+        .lower()
         in {"0", "false", "no", "off"},
         help="Pause the detection-only archive overlap scan.",
     )
@@ -3354,8 +3620,16 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--write-limit", type=int, default=0)
     parser.add_argument("--write-start-row", type=int, default=2)
-    parser.add_argument("--include-unresolved", action="store_true", help="Allow write-computation to write rows that fail readiness checks.")
-    parser.add_argument("--require-p2", action="store_true", help="Require P2 name and LinkedIn before writing/bridging rows.")
+    parser.add_argument(
+        "--include-unresolved",
+        action="store_true",
+        help="Allow write-computation to write rows that fail readiness checks.",
+    )
+    parser.add_argument(
+        "--require-p2",
+        action="store_true",
+        help="Require P2 name and LinkedIn before writing/bridging rows.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--run-file", default="")
 
@@ -3387,7 +3661,7 @@ def validate_args(args: argparse.Namespace) -> None:
         raise SystemExit("--write-start-row must be >= 2.")
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
     parser = argparse.ArgumentParser(description="Lead executive research workflow")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -3434,7 +3708,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     if args.command == "archive-computation":
-        computation_file = Path(args.computation_file) if args.computation_file else latest_computation_file()
+        computation_file = (
+            Path(args.computation_file) if args.computation_file else latest_computation_file()
+        )
         if computation_file is None:
             raise SystemExit("No computation file found. Pass --computation-file.")
         computation = load_run(computation_file)
@@ -3443,7 +3719,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     if args.command == "archive-unreviewed":
-        computation_file = Path(args.computation_file) if args.computation_file else latest_computation_file()
+        computation_file = (
+            Path(args.computation_file) if args.computation_file else latest_computation_file()
+        )
         if computation_file is None:
             raise SystemExit("No computation file found. Pass --computation-file.")
         computation = load_run(computation_file)
@@ -3475,17 +3753,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         status = approved_workflow_status(args)
         print(json.dumps(status, indent=2, ensure_ascii=False))
         action = status.get("next_action")
-        computation_file = Path(status.get("computation_file", "")) if status.get("computation_file") else None
+        computation_file = (
+            Path(status.get("computation_file", "")) if status.get("computation_file") else None
+        )
         if action in {"claim_and_freeze", "freeze_approved"}:
             if action == "claim_and_freeze":
                 claim = claim_approved_gate(args)
                 if not claim.get("claimed"):
-                    raise SystemExit(f"Could not claim approved group: {claim.get('reason', 'unknown reason')}")
+                    raise SystemExit(
+                        f"Could not claim approved group: {claim.get('reason', 'unknown reason')}"
+                    )
             latest = latest_review_run_file()
             if latest is None:
                 raise SystemExit("No review run file found for freeze-approved.")
             run = load_run(latest)
-            _snapshot, snapshot_file, _computation, new_computation_file = freeze_approved(run, latest, args)
+            _snapshot, snapshot_file, _computation, new_computation_file = freeze_approved(
+                run, latest, args
+            )
             print(f"Snapshot file: {snapshot_file}")
             print(f"Computation file: {new_computation_file}")
         elif action == "research_batch":
@@ -3515,9 +3799,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if args.dry_run:
                 rows, skipped = computation_rows_for_write(computation, args)
                 rows_written = 0
-                queue_batch = {"dry_run": True, "fingerprint": rows_fingerprint(rows) if rows else "", "row_count": len(rows)}
+                queue_batch = {
+                    "dry_run": True,
+                    "fingerprint": rows_fingerprint(rows) if rows else "",
+                    "row_count": len(rows),
+                }
             else:
-                rows_written, rows, skipped, queue_batch = write_computation_rows(computation, args, computation_file)
+                rows_written, rows, skipped, queue_batch = write_computation_rows(
+                    computation, args, computation_file
+                )
                 consume_reused_archive_entries(computation, rows, computation_file, args)
             computation.setdefault("writes", []).append(
                 {
@@ -3561,9 +3851,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     if args.command == "research-prompt":
-        computation_file = Path(args.computation_file) if args.computation_file else latest_computation_file()
+        computation_file = (
+            Path(args.computation_file) if args.computation_file else latest_computation_file()
+        )
         if computation_file is None:
-            raise SystemExit("No computation file found. Run freeze-approved first or pass --computation-file.")
+            raise SystemExit(
+                "No computation file found. Run freeze-approved first or pass --computation-file."
+            )
         computation = load_run(computation_file)
         prompt_file = write_research_prompt(computation, computation_file, args)
         print(prompt_file.read_text())
@@ -3571,9 +3865,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     if args.command == "apply-research":
-        computation_file = Path(args.computation_file) if args.computation_file else latest_computation_file()
+        computation_file = (
+            Path(args.computation_file) if args.computation_file else latest_computation_file()
+        )
         if computation_file is None:
-            raise SystemExit("No computation file found. Run freeze-approved first or pass --computation-file.")
+            raise SystemExit(
+                "No computation file found. Run freeze-approved first or pass --computation-file."
+            )
         if not args.research_file:
             raise SystemExit("Missing --research-file.")
         computation = load_run(computation_file)
@@ -3588,9 +3886,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     if args.command == "reconcile-existing":
-        computation_file = Path(args.computation_file) if args.computation_file else latest_computation_file()
+        computation_file = (
+            Path(args.computation_file) if args.computation_file else latest_computation_file()
+        )
         if computation_file is None:
-            raise SystemExit("No computation file found. Run freeze-approved first or pass --computation-file.")
+            raise SystemExit(
+                "No computation file found. Run freeze-approved first or pass --computation-file."
+            )
         computation = load_run(computation_file)
         computation = reconcile_computation_existing_data(computation)
         save_run(computation, computation_file)
@@ -3601,9 +3903,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     if args.command == "export-search-tasks":
-        computation_file = Path(args.computation_file) if args.computation_file else latest_computation_file()
+        computation_file = (
+            Path(args.computation_file) if args.computation_file else latest_computation_file()
+        )
         if computation_file is None:
-            raise SystemExit("No computation file found. Run freeze-approved first or pass --computation-file.")
+            raise SystemExit(
+                "No computation file found. Run freeze-approved first or pass --computation-file."
+            )
         computation = load_run(computation_file)
         task_file, tasks = export_pending_search_tasks(computation, computation_file, args)
         print("Lead exec research summary")
@@ -3613,14 +3919,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     if args.command == "run-search-tasks":
-        computation_file = Path(args.computation_file) if args.computation_file else latest_computation_file()
+        computation_file = (
+            Path(args.computation_file) if args.computation_file else latest_computation_file()
+        )
         if computation_file is None:
-            raise SystemExit("No computation file found. Run freeze-approved first or pass --computation-file.")
+            raise SystemExit(
+                "No computation file found. Run freeze-approved first or pass --computation-file."
+            )
         computation = load_run(computation_file)
         computation, result_file = run_search_tasks(computation, computation_file, args)
         latest_batch = computation.get("search_result_batches", [{}])[-1]
-        selected = [row for row in latest_batch.get("results", []) if row.get("status") == "selected"]
-        needs_review = [row for row in latest_batch.get("results", []) if row.get("status") == "needs_review"]
+        selected = [
+            row for row in latest_batch.get("results", []) if row.get("status") == "selected"
+        ]
+        needs_review = [
+            row for row in latest_batch.get("results", []) if row.get("status") == "needs_review"
+        ]
         errors = [row for row in latest_batch.get("results", []) if row.get("status") == "error"]
         print("Lead exec research summary")
         print(f"Computation file: {computation_file}")
@@ -3633,17 +3947,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     if args.command == "apply-search-results":
-        computation_file = Path(args.computation_file) if args.computation_file else latest_computation_file()
+        computation_file = (
+            Path(args.computation_file) if args.computation_file else latest_computation_file()
+        )
         if computation_file is None:
-            raise SystemExit("No computation file found. Run freeze-approved first or pass --computation-file.")
+            raise SystemExit(
+                "No computation file found. Run freeze-approved first or pass --computation-file."
+            )
         if not args.search_result_file:
             raise SystemExit("Missing --search-result-file.")
         computation = load_run(computation_file)
         computation = apply_search_result_batch(computation, Path(args.search_result_file), args)
         save_run(computation, computation_file)
         latest_batch = computation.get("search_result_batches", [{}])[-1]
-        selected = [row for row in latest_batch.get("results", []) if row.get("status") == "selected"]
-        needs_review = [row for row in latest_batch.get("results", []) if row.get("status") == "needs_review"]
+        selected = [
+            row for row in latest_batch.get("results", []) if row.get("status") == "selected"
+        ]
+        needs_review = [
+            row for row in latest_batch.get("results", []) if row.get("status") == "needs_review"
+        ]
         errors = [row for row in latest_batch.get("results", []) if row.get("status") == "error"]
         print("Lead exec research summary")
         print(f"Computation file: {computation_file}")
@@ -3655,16 +3977,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     if args.command == "write-computation":
-        computation_file = Path(args.computation_file) if args.computation_file else latest_computation_file()
+        computation_file = (
+            Path(args.computation_file) if args.computation_file else latest_computation_file()
+        )
         if computation_file is None:
-            raise SystemExit("No computation file found. Run freeze-approved first or pass --computation-file.")
+            raise SystemExit(
+                "No computation file found. Run freeze-approved first or pass --computation-file."
+            )
         computation = load_run(computation_file)
         if args.dry_run:
             rows, skipped = computation_rows_for_write(computation, args)
             rows_written = 0
-            queue_batch = {"dry_run": True, "fingerprint": rows_fingerprint(rows) if rows else "", "row_count": len(rows)}
+            queue_batch = {
+                "dry_run": True,
+                "fingerprint": rows_fingerprint(rows) if rows else "",
+                "row_count": len(rows),
+            }
         else:
-            rows_written, rows, skipped, queue_batch = write_computation_rows(computation, args, computation_file)
+            rows_written, rows, skipped, queue_batch = write_computation_rows(
+                computation, args, computation_file
+            )
             consume_reused_archive_entries(computation, rows, computation_file, args)
         computation.setdefault("writes", []).append(
             {
@@ -3715,7 +4047,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     rows_written = int(run.get("rows_written", 0) or 0)
     if args.command == "freeze-approved":
-        snapshot, snapshot_file, computation, computation_file = freeze_approved(run, run_file, args)
+        snapshot, snapshot_file, computation, computation_file = freeze_approved(
+            run, run_file, args
+        )
         print("Lead exec research summary")
         print(f"Run file: {run_file}")
         print(f"Snapshot file: {snapshot_file}")

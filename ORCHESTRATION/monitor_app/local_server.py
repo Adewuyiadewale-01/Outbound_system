@@ -16,9 +16,8 @@ from datetime import datetime
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 from zoneinfo import ZoneInfo
-
 
 APP_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = APP_DIR.parents[1]
@@ -37,15 +36,25 @@ JOB_DISCOVERY_SCHEDULER_LABEL = "com.fulltime-job.daily-job-discovery"
 sys.path.insert(0, str(SCRIPTS_DIR))
 sys.path.insert(0, str(HELPERS_DIR))
 
-from runtime_environment import load_repo_env
 from post_engagement import (
     add_source as add_post_engagement_source,
+)
+from post_engagement import (
     archive_and_start_fresh as archive_post_engagement_campaign,
+)
+from post_engagement import (
     dashboard as read_post_engagement_dashboard,
+)
+from post_engagement import (
     pause_campaign as pause_post_engagement_campaign,
+)
+from post_engagement import (
     resume_campaign as resume_post_engagement_campaign,
+)
+from post_engagement import (
     save_config as save_post_engagement_config,
 )
+from runtime_environment import load_repo_env
 
 load_repo_env()
 
@@ -62,9 +71,7 @@ LEAD_PREP_ARCHIVE_PATH = STATE_DIR / "lead_exec_research" / "research_archive" /
 LEAD_PREP_RUNS_DIR = STATE_DIR / "lead_exec_research" / "runs"
 LEAD_PREP_COMPUTATIONS_DIR = STATE_DIR / "lead_exec_research" / "computations"
 LEAD_REVIEW_CACHE_PATH = STATE_DIR / "lead_exec_research" / "dashboard_cache.json"
-LEAD_RESEARCH_PROGRESS_PATH = (
-    STATE_DIR / "lead_exec_research" / "manual_research_progress.json"
-)
+LEAD_RESEARCH_PROGRESS_PATH = STATE_DIR / "lead_exec_research" / "manual_research_progress.json"
 OBF_SOURCE_CONFIG_PATH = STATE_DIR / "obf_source.json"
 OBF_CONFIG_PATH = STATE_DIR / "obf_orchestration_config.json"
 OBF_SHEET_URL = os.environ.get("OBF_SHEET_URL", "")
@@ -88,10 +95,12 @@ FOLLOWUP_CONFIG_PATH = STATE_DIR / "followup_orchestration_config.json"
 WITHDRAWAL_SESSIONS_DIR = STATE_DIR / "withdrawal_sessions"
 WITHDRAWAL_JOURNAL_DIR = STATE_DIR / "withdrawal_journal"
 WITHDRAWAL_RUN_GUARD_PATH = STATE_DIR / "withdrawal_run_guard.json"
-WITHDRAWAL_DASHBOARD_RUN_STATE_PATH = STATE_DIR / "dashboard_cache" / "withdrawal_dashboard_run.json"
+WITHDRAWAL_DASHBOARD_RUN_STATE_PATH = (
+    STATE_DIR / "dashboard_cache" / "withdrawal_dashboard_run.json"
+)
 WITHDRAWAL_DASHBOARD_RUN_LOG_PATH = STATE_DIR / "dashboard_cache" / "withdrawal_dashboard_run.log"
 ACTIVITY_SESSIONS_DIR = STATE_DIR / "activity_sessions"
-ACTIVITY_HISTORY_CACHE: Dict[str, Any] = {"signature": (), "rows": []}
+ACTIVITY_HISTORY_CACHE: dict[str, Any] = {"signature": (), "rows": []}
 WATCHER_STATE_PATH = STATE_DIR / "orchestration_watcher.json"
 WATCHER_SCRIPT_PATH = PROJECT_DIR / "ORCHESTRATION" / "watcher" / "orchestration_watcher.py"
 WATCHER_LABEL = "com.outreachautomation.orchestration-watcher"
@@ -101,18 +110,14 @@ PROCESS_APPROVED_FIRST_AUTOMATION_PATH = (
     Path.home() / ".codex" / "automations" / "process-approved-leads" / "automation.toml"
 )
 PROCESS_APPROVED_FALLBACK_AUTOMATION_PATH = (
-    Path.home()
-    / ".codex"
-    / "automations"
-    / "process-approved-leads-23-00"
-    / "automation.toml"
+    Path.home() / ".codex" / "automations" / "process-approved-leads-23-00" / "automation.toml"
 )
 LOCAL_TZ = ZoneInfo("Africa/Lagos")
 OBF_RUN_LOCK = threading.Lock()
-OBF_ACTIVE_PROCESS: Optional[subprocess.Popen] = None
+OBF_ACTIVE_PROCESS: subprocess.Popen | None = None
 WITHDRAWAL_RUN_LOCK = threading.Lock()
-WITHDRAWAL_ACTIVE_PROCESS: Optional[subprocess.Popen] = None
-POST_ENGAGEMENT_ACTIVE_PROCESS: Optional[subprocess.Popen] = None
+WITHDRAWAL_ACTIVE_PROCESS: subprocess.Popen | None = None
+POST_ENGAGEMENT_ACTIVE_PROCESS: subprocess.Popen | None = None
 
 LEAD_PREP_CONFIG_DEFAULTS = {
     "autonomous_prep_enabled": False,
@@ -155,7 +160,7 @@ def job_discovery_scheduler_enabled() -> bool:
     return result.returncode == 0
 
 
-def run_job_discovery_node(*args: str, timeout: int = 30) -> Dict[str, Any]:
+def run_job_discovery_node(*args: str, timeout: int = 30) -> dict[str, Any]:
     if not job_discovery_available():
         return {
             "ok": False,
@@ -182,7 +187,7 @@ def run_job_discovery_node(*args: str, timeout: int = 30) -> Dict[str, Any]:
         return {"ok": False, "stdout": "", "stderr": str(error), "code": -1}
 
 
-def read_job_discovery_dashboard() -> Dict[str, Any]:
+def read_job_discovery_dashboard() -> dict[str, Any]:
     config = read_json(JOB_DISCOVERY_CONFIG_PATH, {})
     lock = read_json(JOB_DISCOVERY_LOCK_PATH, None)
     if not job_discovery_available():
@@ -200,7 +205,11 @@ def read_job_discovery_dashboard() -> Dict[str, Any]:
         status = json.loads(result["stdout"] or "{}")
     except json.JSONDecodeError:
         status = {}
-    error = "" if result["ok"] else (result["stderr"] or result["stdout"] or "Status command failed.").strip()
+    error = (
+        ""
+        if result["ok"]
+        else (result["stderr"] or result["stdout"] or "Status command failed.").strip()
+    )
     return {
         "available": True,
         "root": str(JOB_DISCOVERY_DIR),
@@ -215,40 +224,55 @@ def read_job_discovery_dashboard() -> Dict[str, Any]:
     }
 
 
-def save_job_discovery_settings(requested: Dict[str, Any]) -> Dict[str, Any]:
+def save_job_discovery_settings(requested: dict[str, Any]) -> dict[str, Any]:
     if not job_discovery_available():
         return {"ok": False, "error": f"Daily Job Discovery was not found at {JOB_DISCOVERY_DIR}."}
     current = read_json(JOB_DISCOVERY_CONFIG_PATH, {})
     daily_run_time = str(requested.get("dailyRunTime") or current.get("dailyRunTime") or "").strip()
     if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", daily_run_time):
         return {"ok": False, "error": "Daily run time must use 24-hour HH:MM format."}
+
     def bounded(value: Any, fallback: Any, maximum: int) -> int:
         try:
             return max(1, min(maximum, int(value)))
         except (TypeError, ValueError):
             return max(1, min(maximum, int(fallback or 1)))
+
     next_config = {
         **current,
         "automationEnabled": bool(requested.get("automationEnabled")),
         "dailyRunTime": daily_run_time,
-        "maxQueriesPerRun": bounded(requested.get("maxQueriesPerRun"), current.get("maxQueriesPerRun", 180), 500),
-        "maxListingsPerRun": bounded(requested.get("maxListingsPerRun"), current.get("maxListingsPerRun", 180), 1000),
+        "maxQueriesPerRun": bounded(
+            requested.get("maxQueriesPerRun"), current.get("maxQueriesPerRun", 180), 500
+        ),
+        "maxListingsPerRun": bounded(
+            requested.get("maxListingsPerRun"), current.get("maxListingsPerRun", 180), 1000
+        ),
     }
     write_json(JOB_DISCOVERY_CONFIG_PATH, next_config)
     return {"ok": True, "config": next_config}
 
 
-def toggle_job_discovery_scheduler(requested: Dict[str, Any]) -> Dict[str, Any]:
+def toggle_job_discovery_scheduler(requested: dict[str, Any]) -> dict[str, Any]:
     if not job_discovery_available():
         return {"ok": False, "error": f"Daily Job Discovery was not found at {JOB_DISCOVERY_DIR}."}
-    script = "scripts/install-launchd.mjs" if bool(requested.get("enabled")) else "scripts/uninstall-launchd.mjs"
+    script = (
+        "scripts/install-launchd.mjs"
+        if bool(requested.get("enabled"))
+        else "scripts/uninstall-launchd.mjs"
+    )
     result = run_job_discovery_node(script)
     if not result["ok"]:
-        return {"ok": False, "error": (result["stderr"] or result["stdout"] or "Unable to change scheduler service.").strip()}
+        return {
+            "ok": False,
+            "error": (
+                result["stderr"] or result["stdout"] or "Unable to change scheduler service."
+            ).strip(),
+        }
     return {"ok": True, "enabled": job_discovery_scheduler_enabled()}
 
 
-def start_job_discovery_action(action: str) -> Dict[str, Any]:
+def start_job_discovery_action(action: str) -> dict[str, Any]:
     if action not in {"run", "reverify"}:
         raise ValueError("Unsupported Daily Job Discovery action.")
     if not job_discovery_available():
@@ -276,7 +300,7 @@ def write_json(path: Path, payload: Any) -> None:
     temporary.replace(path)
 
 
-def read_lead_prep_config() -> Dict[str, Any]:
+def read_lead_prep_config() -> dict[str, Any]:
     stored = read_json(LEAD_PREP_CONFIG_PATH, {})
     if not stored.get("overlap_scan_mode") and stored.get("reconciliation_mode"):
         stored["overlap_scan_mode"] = stored["reconciliation_mode"]
@@ -285,7 +309,7 @@ def read_lead_prep_config() -> Dict[str, Any]:
     return {**LEAD_PREP_CONFIG_DEFAULTS, **stored}
 
 
-def read_obf_source_config() -> Dict[str, Any]:
+def read_obf_source_config() -> dict[str, Any]:
     config = {**OBF_SOURCE_DEFAULTS, **read_json(OBF_SOURCE_CONFIG_PATH, {})}
     tab = str(config.get("prospects_tab") or "").strip()
     if not tab:
@@ -295,7 +319,7 @@ def read_obf_source_config() -> Dict[str, Any]:
     return config
 
 
-def read_obf_config() -> Dict[str, Any]:
+def read_obf_config() -> dict[str, Any]:
     return {**OBF_CONFIG_DEFAULTS, **read_json(OBF_CONFIG_PATH, {})}
 
 
@@ -309,12 +333,14 @@ def obf_credentials_path() -> str:
     return str(PROJECT_DIR / ".openclaw" / "credentials" / "google-sheets.json")
 
 
-def refresh_obf_source_snapshot() -> Dict[str, Any]:
+def refresh_obf_source_snapshot() -> dict[str, Any]:
     """The only OBF path that reads Sheets; dashboard reads its saved snapshot."""
     source = read_obf_source_config()
     from sheets_helper import read_tab
+
     data = read_tab(obf_credentials_path(), OBF_SHEET_URL, source["prospects_tab"])
     from linkedin_outreach_session import _read_outreach_control
+
     approval, control_row, target, remaining = _read_outreach_control(
         obf_credentials_path(), OBF_SHEET_URL, local_now().date().isoformat()
     )
@@ -366,7 +392,10 @@ def obf_row_status(events: list) -> tuple[str, str]:
         return "Requires Email", "warning"
     if any(event.get("event_type") == "prospect_reconciliation" for event in events):
         return "Reconciled", "success"
-    if any(event.get("error") or any(token in status for token in ("fail", "blocked", "error")) for event, status in zip(events, statuses)):
+    if any(
+        event.get("error") or any(token in status for token in ("fail", "blocked", "error"))
+        for event, status in zip(events, statuses)
+    ):
         return "Failed", "danger"
     if "skipped_timeout" in statuses:
         return "Timed Out", "warning"
@@ -375,8 +404,8 @@ def obf_row_status(events: list) -> tuple[str, str]:
     return "Prepared", "neutral"
 
 
-def summarize_obf_day(day: str, prepared: Dict[str, Any], events: list) -> Dict[str, Any]:
-    grouped: Dict[str, list] = {}
+def summarize_obf_day(day: str, prepared: dict[str, Any], events: list) -> dict[str, Any]:
+    grouped: dict[str, list] = {}
     for event in events:
         key = str(event.get("prospect_id") or "")
         if key:
@@ -389,20 +418,40 @@ def summarize_obf_day(day: str, prepared: Dict[str, Any], events: list) -> Dict[
         progress, tone = obf_row_status(prospect_events)
         latest = prospect_events[-1] if prospect_events else {}
         retries = sum(
-            1 for event in prospect_events
-            if any(token in f"{event.get('event_type', '')} {event.get('status', '')} {event.get('stage', '')}".lower() for token in ("retry", "recover", "timeout"))
+            1
+            for event in prospect_events
+            if any(
+                token
+                in f"{event.get('event_type', '')} {event.get('status', '')} {event.get('stage', '')}".lower()
+                for token in ("retry", "recover", "timeout")
+            )
         )
-        rows.append({
-            "index": index + 1, "id": prospect.get("id") or "", "company": prospect.get("company") or "Unknown company",
-            "contact_name": prospect.get("contact_name") or "Unknown contact", "contact_title": prospect.get("contact_title") or "",
-            "contact_linkedin": prospect.get("contact_linkedin") or "", "prospect_row": prospect.get("_row_number") or "",
-            "primary_lane": prospect.get("primary_lane") or "Unassigned", "worker_id": prospect.get("worker_id") or "Unassigned",
-            "slot_id": runtime.get("slot_id") or index + 1, "activity_timing": runtime.get("activity_log_timing") or "",
-            "delay_sec": runtime.get("delay_sec"), "diversion": runtime.get("lead_diversion") or "none",
-            "progress": progress, "tone": tone, "retry_count": retries,
-            "latest_stage": latest.get("stage") or latest.get("event_type") or "",
-            "last_update": latest.get("recorded_at") or "", "detail": latest.get("error") or latest.get("reason") or latest.get("live_state") or "",
-        })
+        rows.append(
+            {
+                "index": index + 1,
+                "id": prospect.get("id") or "",
+                "company": prospect.get("company") or "Unknown company",
+                "contact_name": prospect.get("contact_name") or "Unknown contact",
+                "contact_title": prospect.get("contact_title") or "",
+                "contact_linkedin": prospect.get("contact_linkedin") or "",
+                "prospect_row": prospect.get("_row_number") or "",
+                "primary_lane": prospect.get("primary_lane") or "Unassigned",
+                "worker_id": prospect.get("worker_id") or "Unassigned",
+                "slot_id": runtime.get("slot_id") or index + 1,
+                "activity_timing": runtime.get("activity_log_timing") or "",
+                "delay_sec": runtime.get("delay_sec"),
+                "diversion": runtime.get("lead_diversion") or "none",
+                "progress": progress,
+                "tone": tone,
+                "retry_count": retries,
+                "latest_stage": latest.get("stage") or latest.get("event_type") or "",
+                "last_update": latest.get("recorded_at") or "",
+                "detail": latest.get("error")
+                or latest.get("reason")
+                or latest.get("live_state")
+                or "",
+            }
+        )
     sent = sum(row["progress"] == "Conn Sent" for row in rows)
     reconciled = sum(row["progress"] == "Reconciled" for row in rows)
     requires_email = sum(row["progress"] == "Requires Email" for row in rows)
@@ -410,10 +459,18 @@ def summarize_obf_day(day: str, prepared: Dict[str, Any], events: list) -> Dict[
     pending_sync = sum(row["progress"] == "Sync Pending" for row in rows)
     timed_out = sum(row["progress"] == "Timed Out" for row in rows)
     return {
-        "date": day, "rows": rows,
-        "planned": int(prepared.get("planned_count") or prepared.get("target_remaining") or len(rows)),
-        "target": int(prepared.get("target_total") or 0), "sent": sent, "reconciled": reconciled,
-        "requires_email": requires_email, "failed": failed, "pending_sync": pending_sync, "timed_out": timed_out,
+        "date": day,
+        "rows": rows,
+        "planned": int(
+            prepared.get("planned_count") or prepared.get("target_remaining") or len(rows)
+        ),
+        "target": int(prepared.get("target_total") or 0),
+        "sent": sent,
+        "reconciled": reconciled,
+        "requires_email": requires_email,
+        "failed": failed,
+        "pending_sync": pending_sync,
+        "timed_out": timed_out,
         "resolved": sent + reconciled + requires_email + failed + pending_sync + timed_out,
         "retries": sum(row["retry_count"] for row in rows),
         "start_time": events[0].get("recorded_at") if events else None,
@@ -425,14 +482,23 @@ def obf_issue_rows(events: list) -> list:
     issues = []
     for event in events:
         status = str(event.get("status") or "").lower()
-        if not (event.get("error") or status in {"pending_sync", "skipped_timeout"} or any(token in status for token in ("fail", "blocked", "retry"))):
+        if not (
+            event.get("error")
+            or status in {"pending_sync", "skipped_timeout"}
+            or any(token in status for token in ("fail", "blocked", "retry"))
+        ):
             continue
-        issues.append({
-            "time": event.get("recorded_at") or "", "severity": "danger" if event.get("error") or any(token in status for token in ("fail", "blocked")) else "warning",
-            "title": event.get("company") or event.get("event_type") or "Workflow issue",
-            "detail": event.get("error") or event.get("reason") or event.get("stage") or status,
-            "prospect_id": event.get("prospect_id") or "",
-        })
+        issues.append(
+            {
+                "time": event.get("recorded_at") or "",
+                "severity": "danger"
+                if event.get("error") or any(token in status for token in ("fail", "blocked"))
+                else "warning",
+                "title": event.get("company") or event.get("event_type") or "Workflow issue",
+                "detail": event.get("error") or event.get("reason") or event.get("stage") or status,
+                "prospect_id": event.get("prospect_id") or "",
+            }
+        )
     return list(reversed(issues[-20:]))
 
 
@@ -444,31 +510,54 @@ def obf_history() -> list:
         prepared = read_json(path, {})
         events = read_json_lines(OBF_JOURNAL_DIR / f"{day}.jsonl")
         summary = summarize_obf_day(day, prepared, events)
-        issue_labels: Dict[str, int] = {}
+        issue_labels: dict[str, int] = {}
         for event in events:
             status = str(event.get("status") or "").lower()
-            if not (event.get("error") or event.get("reason") or status in {"pending_sync", "skipped_timeout"} or any(token in status for token in ("fail", "blocked", "retry"))):
+            if not (
+                event.get("error")
+                or event.get("reason")
+                or status in {"pending_sync", "skipped_timeout"}
+                or any(token in status for token in ("fail", "blocked", "retry"))
+            ):
                 continue
             # Prefer the explicit error/reason, but preserve the timeout state
             # instead of reducing it to the generic activity-sync stage.
-            detail = event.get("error") or event.get("reason") or status or event.get("stage") or "workflow issue"
+            detail = (
+                event.get("error")
+                or event.get("reason")
+                or status
+                or event.get("stage")
+                or "workflow issue"
+            )
             label = str(detail).replace("_", " ").strip().title()
             issue_labels[label] = issue_labels.get(label, 0) + 1
-        issue_summary = " · ".join(
-            f"{label} ({count})" for label, count in sorted(issue_labels.items(), key=lambda item: (-item[1], item[0]))[:3]
-        ) or "—"
+        issue_summary = (
+            " · ".join(
+                f"{label} ({count})"
+                for label, count in sorted(
+                    issue_labels.items(), key=lambda item: (-item[1], item[0])
+                )[:3]
+            )
+            or "—"
+        )
         planned = summary["planned"]
-        records.append({
-            "date": day, "prepared": planned, "sent": summary["sent"], "reconciled": summary["reconciled"],
-            "issues": summary["failed"] + summary["pending_sync"] + summary["timed_out"],
-            "issue_summary": issue_summary,
-            "completion": round((summary["resolved"] / planned) * 100) if planned else 0,
-            "started_at": summary["start_time"], "completed_at": summary["last_event_time"],
-        })
+        records.append(
+            {
+                "date": day,
+                "prepared": planned,
+                "sent": summary["sent"],
+                "reconciled": summary["reconciled"],
+                "issues": summary["failed"] + summary["pending_sync"] + summary["timed_out"],
+                "issue_summary": issue_summary,
+                "completion": round((summary["resolved"] / planned) * 100) if planned else 0,
+                "started_at": summary["start_time"],
+                "completed_at": summary["last_event_time"],
+            }
+        )
     return records
 
 
-def source_availability(data: Dict[str, Any]) -> tuple[list, Dict[str, int]]:
+def source_availability(data: dict[str, Any]) -> tuple[list, dict[str, int]]:
     """Describe the live source without mixing it into the frozen daily queue."""
     rows = []
     for index, row in enumerate(data.get("rows") or [], start=1):
@@ -480,12 +569,25 @@ def source_availability(data: Dict[str, Any]) -> tuple[list, Dict[str, int]]:
         fresh = not status
         available = fresh and bool(linkedin)
         assigned = lane.lower() in {"design", "automation"}
-        rows.append({
-            "index": index, "id": str(row.get("ID") or "").strip(), "company": str(row.get("Company") or "").strip(),
-            "contact_name": str(row.get(f"{prefix} Name") or "").strip(), "contact_title": str(row.get(f"{prefix} Title") or "").strip(),
-            "primary_lane": lane, "outreach_status": status, "fresh": fresh, "available": available, "lane_assigned": assigned,
-            "source_state": "Available" if available and assigned else ("Needs lane assignment" if available else (status or "Missing LinkedIn profile")),
-        })
+        rows.append(
+            {
+                "index": index,
+                "id": str(row.get("ID") or "").strip(),
+                "company": str(row.get("Company") or "").strip(),
+                "contact_name": str(row.get(f"{prefix} Name") or "").strip(),
+                "contact_title": str(row.get(f"{prefix} Title") or "").strip(),
+                "primary_lane": lane,
+                "outreach_status": status,
+                "fresh": fresh,
+                "available": available,
+                "lane_assigned": assigned,
+                "source_state": "Available"
+                if available and assigned
+                else (
+                    "Needs lane assignment" if available else (status or "Missing LinkedIn profile")
+                ),
+            }
+        )
     summary = {
         "total": len(rows),
         "fresh": sum(row["fresh"] for row in rows),
@@ -495,7 +597,7 @@ def source_availability(data: Dict[str, Any]) -> tuple[list, Dict[str, int]]:
     return rows, summary
 
 
-def obf_run_state() -> Dict[str, Any]:
+def obf_run_state() -> dict[str, Any]:
     with OBF_RUN_LOCK:
         global OBF_ACTIVE_PROCESS
         if OBF_ACTIVE_PROCESS and OBF_ACTIVE_PROCESS.poll() is not None:
@@ -503,7 +605,7 @@ def obf_run_state() -> Dict[str, Any]:
         return read_json(OBF_RUN_STATE_PATH, {})
 
 
-def read_obf_dashboard() -> Dict[str, Any]:
+def read_obf_dashboard() -> dict[str, Any]:
     """Read frozen OBF state and its local execution journal; never read Sheets."""
     source = read_obf_source_config()
     day = local_now().date().isoformat()
@@ -526,17 +628,36 @@ def read_obf_dashboard() -> Dict[str, Any]:
     cached_control = snapshot.get("outreach_control") or {}
     if prepared.get("ready"):
         summary = summarize_obf_day(day, prepared, events)
-        phase = "completed" if summary["planned"] and summary["resolved"] >= summary["planned"] else ("executing" if events else "prepared")
+        phase = (
+            "completed"
+            if summary["planned"] and summary["resolved"] >= summary["planned"]
+            else ("executing" if events else "prepared")
+        )
         if is_running:
             phase = "preparing" if active_action == "prepare" else "executing"
         return {
-            "today": day, "preview": False, "source_mode": "test" if source["test_mode"] else "live",
-            "config": read_obf_config(), "phase": phase, "is_running": is_running, "active_action": active_action,
-            "prepared_exists": True, "prepared_at": prepared.get("prepared_at"), "approval": prepared.get("approval_state"),
-            "control": prepared.get("outreach_control") or {}, "state_path": str(prepared_path), "journal_path": str(journal_path),
-            "summary": summary, "issues": obf_issue_rows(events), "checkpoints": {}, "history": obf_history(),
-            "source_rows": source_rows, "source_summary": source_summary,
-            "last_updated": summary.get("last_event_time") or prepared.get("prepared_at") or refreshed_at,
+            "today": day,
+            "preview": False,
+            "source_mode": "test" if source["test_mode"] else "live",
+            "config": read_obf_config(),
+            "phase": phase,
+            "is_running": is_running,
+            "active_action": active_action,
+            "prepared_exists": True,
+            "prepared_at": prepared.get("prepared_at"),
+            "approval": prepared.get("approval_state"),
+            "control": prepared.get("outreach_control") or {},
+            "state_path": str(prepared_path),
+            "journal_path": str(journal_path),
+            "summary": summary,
+            "issues": obf_issue_rows(events),
+            "checkpoints": {},
+            "history": obf_history(),
+            "source_rows": source_rows,
+            "source_summary": source_summary,
+            "last_updated": summary.get("last_event_time")
+            or prepared.get("prepared_at")
+            or refreshed_at,
         }
 
     # Before Prep, show only the locally-cached source snapshot.
@@ -545,7 +666,9 @@ def read_obf_dashboard() -> Dict[str, Any]:
         "preview": False,
         "source_mode": "test" if source["test_mode"] else "live",
         "config": read_obf_config(),
-        "phase": "preparing" if is_running and active_action == "prepare" else ("source_ready" if source_rows else "waiting"),
+        "phase": "preparing"
+        if is_running and active_action == "prepare"
+        else ("source_ready" if source_rows else "waiting"),
         "is_running": is_running,
         "active_action": active_action,
         "prepared_exists": False,
@@ -554,15 +677,33 @@ def read_obf_dashboard() -> Dict[str, Any]:
         "control": {
             "effective_target": cached_control.get("target_total", 0),
             "current_progress": int((cached_control.get("row") or {}).get("Current Progress") or 0),
-            "prospects_start_row": (cached_control.get("approval") or {}).get("prospects_start_row"),
-            "status": (cached_control.get("approval") or {}).get("status") or "Waiting for preparation",
+            "prospects_start_row": (cached_control.get("approval") or {}).get(
+                "prospects_start_row"
+            ),
+            "status": (cached_control.get("approval") or {}).get("status")
+            or "Waiting for preparation",
         },
         "state_path": (
             f"{source['prospects_tab']} · local snapshot refreshed {refreshed_at}"
-            if refreshed_at else f"{source['prospects_tab']} · no local snapshot yet"
+            if refreshed_at
+            else f"{source['prospects_tab']} · no local snapshot yet"
         ),
         "journal_path": "No execution journal",
-        "summary": {"rows": [], "planned": 0, "target": 0, "sent": 0, "reconciled": 0, "requires_email": 0, "failed": 0, "pending_sync": 0, "timed_out": 0, "resolved": 0, "retries": 0, "start_time": None, "last_event_time": None},
+        "summary": {
+            "rows": [],
+            "planned": 0,
+            "target": 0,
+            "sent": 0,
+            "reconciled": 0,
+            "requires_email": 0,
+            "failed": 0,
+            "pending_sync": 0,
+            "timed_out": 0,
+            "resolved": 0,
+            "retries": 0,
+            "start_time": None,
+            "last_event_time": None,
+        },
         "source_rows": source_rows,
         "source_summary": source_summary,
         "issues": [],
@@ -573,7 +714,7 @@ def read_obf_dashboard() -> Dict[str, Any]:
     return payload
 
 
-def start_obf_action(action: str, requested: Dict[str, Any]) -> Dict[str, Any]:
+def start_obf_action(action: str, requested: dict[str, Any]) -> dict[str, Any]:
     """Start the same production command used by the desktop dashboard."""
     global OBF_ACTIVE_PROCESS
     if action not in {"prepare", "execute"}:
@@ -585,32 +726,77 @@ def start_obf_action(action: str, requested: Dict[str, Any]) -> Dict[str, Any]:
         day = local_now().date().isoformat()
         prepared_path = OBF_PREPARED_DIR / f"{day}-prepared.json"
         if action == "prepare":
-            command = [sys.executable, str(HELPERS_DIR / "linkedin_outreach_session.py"), "prepare-8_30-session", "--date", day, "--prospects-tab", source["prospects_tab"]]
+            command = [
+                sys.executable,
+                str(HELPERS_DIR / "linkedin_outreach_session.py"),
+                "prepare-8_30-session",
+                "--date",
+                day,
+                "--prospects-tab",
+                source["prospects_tab"],
+            ]
         else:
             if source["test_mode"]:
-                return {"ok": False, "error": "Switch back to the live Prospects source before running production Execute."}
+                return {
+                    "ok": False,
+                    "error": "Switch back to the live Prospects source before running production Execute.",
+                }
             if not read_json(prepared_path, {}).get("ready"):
                 return {"ok": False, "error": "Run Prep first to create today’s frozen queue."}
-            max_sends = max(1, min(30, int(requested.get("max_sends") or read_obf_config()["max_sends"])))
-            command = [sys.executable, str(SCRIPTS_DIR / "run_outreach_lanes.py"), "--date", day, "--max-sends", str(max_sends)]
-        write_json(OBF_RUN_STATE_PATH, {"status": "running", "action": action, "started_at": local_now().isoformat(), "command": command})
+            max_sends = max(
+                1, min(30, int(requested.get("max_sends") or read_obf_config()["max_sends"]))
+            )
+            command = [
+                sys.executable,
+                str(SCRIPTS_DIR / "run_outreach_lanes.py"),
+                "--date",
+                day,
+                "--max-sends",
+                str(max_sends),
+            ]
+        write_json(
+            OBF_RUN_STATE_PATH,
+            {
+                "status": "running",
+                "action": action,
+                "started_at": local_now().isoformat(),
+                "command": command,
+            },
+        )
         OBF_RUN_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         log_handle = OBF_RUN_LOG_PATH.open("a", encoding="utf-8")
         log_handle.write(f"\n[{local_now().isoformat()}] {' '.join(command)}\n")
         log_handle.flush()
-        OBF_ACTIVE_PROCESS = subprocess.Popen(command, cwd=PROJECT_DIR, stdout=log_handle, stderr=subprocess.STDOUT, start_new_session=True)
+        OBF_ACTIVE_PROCESS = subprocess.Popen(
+            command,
+            cwd=PROJECT_DIR,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
 
         def wait_for_completion(process: subprocess.Popen, log_file: Any) -> None:
             code = process.wait()
             log_file.close()
             with OBF_RUN_LOCK:
-                write_json(OBF_RUN_STATE_PATH, {"status": "complete" if code == 0 else "failed", "action": action, "started_at": read_json(OBF_RUN_STATE_PATH, {}).get("started_at"), "finished_at": local_now().isoformat(), "exit_code": code})
+                write_json(
+                    OBF_RUN_STATE_PATH,
+                    {
+                        "status": "complete" if code == 0 else "failed",
+                        "action": action,
+                        "started_at": read_json(OBF_RUN_STATE_PATH, {}).get("started_at"),
+                        "finished_at": local_now().isoformat(),
+                        "exit_code": code,
+                    },
+                )
 
-        threading.Thread(target=wait_for_completion, args=(OBF_ACTIVE_PROCESS, log_handle), daemon=True).start()
+        threading.Thread(
+            target=wait_for_completion, args=(OBF_ACTIVE_PROCESS, log_handle), daemon=True
+        ).start()
     return {"ok": True, "action": action, "date": day}
 
 
-def start_withdrawal_action(action: str, requested: Dict[str, Any]) -> Dict[str, Any]:
+def start_withdrawal_action(action: str, requested: dict[str, Any]) -> dict[str, Any]:
     """Launch a withdrawal action from the local dashboard without using Electron IPC."""
     if action not in {"prepare", "execute", "full"}:
         raise ValueError("Unsupported withdrawal action.")
@@ -628,13 +814,36 @@ def start_withdrawal_action(action: str, requested: Dict[str, Any]) -> Dict[str,
         requested_limit = int(requested.get("limit") or 0)
         if requested_limit < 0 or requested_limit > 50:
             return {"ok": False, "error": "Withdrawal preparation limit must be between 1 and 50."}
-        prepare = [sys.executable, str(SCRIPTS_DIR / "prepare_connection_withdrawals.py"), "--date", day, "--session", str(session)]
+        prepare = [
+            sys.executable,
+            str(SCRIPTS_DIR / "prepare_connection_withdrawals.py"),
+            "--date",
+            day,
+            "--session",
+            str(session),
+        ]
         if requested_limit:
             prepare.extend(["--limit", str(requested_limit)])
-        execute = [sys.executable, str(SCRIPTS_DIR / "run_withdrawal_lanes.py"), "--date", day, "--session", str(session)]
-        commands = [backfill, prepare] if action == "prepare" else [execute] if action == "execute" else [backfill, prepare, execute]
+        execute = [
+            sys.executable,
+            str(SCRIPTS_DIR / "run_withdrawal_lanes.py"),
+            "--date",
+            day,
+            "--session",
+            str(session),
+        ]
+        commands = (
+            [backfill, prepare]
+            if action == "prepare"
+            else [execute]
+            if action == "execute"
+            else [backfill, prepare, execute]
+        )
         started_at = local_now().isoformat()
-        write_json(WITHDRAWAL_DASHBOARD_RUN_STATE_PATH, {"status": "running", "action": action, "started_at": started_at, "command": commands})
+        write_json(
+            WITHDRAWAL_DASHBOARD_RUN_STATE_PATH,
+            {"status": "running", "action": action, "started_at": started_at, "command": commands},
+        )
         WITHDRAWAL_DASHBOARD_RUN_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
         def run_chain() -> None:
@@ -644,7 +853,13 @@ def start_withdrawal_action(action: str, requested: Dict[str, Any]) -> Dict[str,
                 for command in commands:
                     log_handle.write(f"\n[{local_now().isoformat()}] {' '.join(command)}\n")
                     log_handle.flush()
-                    process = subprocess.Popen(command, cwd=PROJECT_DIR, stdout=log_handle, stderr=subprocess.STDOUT, start_new_session=True)
+                    process = subprocess.Popen(
+                        command,
+                        cwd=PROJECT_DIR,
+                        stdout=log_handle,
+                        stderr=subprocess.STDOUT,
+                        start_new_session=True,
+                    )
                     with WITHDRAWAL_RUN_LOCK:
                         WITHDRAWAL_ACTIVE_PROCESS = process
                     exit_code = process.wait()
@@ -652,19 +867,22 @@ def start_withdrawal_action(action: str, requested: Dict[str, Any]) -> Dict[str,
                         break
             with WITHDRAWAL_RUN_LOCK:
                 WITHDRAWAL_ACTIVE_PROCESS = None
-                write_json(WITHDRAWAL_DASHBOARD_RUN_STATE_PATH, {
-                    "status": "complete" if exit_code == 0 else "failed",
-                    "action": action,
-                    "started_at": started_at,
-                    "finished_at": local_now().isoformat(),
-                    "exit_code": exit_code,
-                })
+                write_json(
+                    WITHDRAWAL_DASHBOARD_RUN_STATE_PATH,
+                    {
+                        "status": "complete" if exit_code == 0 else "failed",
+                        "action": action,
+                        "started_at": started_at,
+                        "finished_at": local_now().isoformat(),
+                        "exit_code": exit_code,
+                    },
+                )
 
         threading.Thread(target=run_chain, daemon=True).start()
     return {"ok": True, "action": action, "date": day}
 
 
-def stop_withdrawal_action() -> Dict[str, Any]:
+def stop_withdrawal_action() -> dict[str, Any]:
     global WITHDRAWAL_ACTIVE_PROCESS
     with WITHDRAWAL_RUN_LOCK:
         process = WITHDRAWAL_ACTIVE_PROCESS
@@ -674,46 +892,77 @@ def stop_withdrawal_action() -> Dict[str, Any]:
     return {"ok": True}
 
 
-def save_obf_settings(requested: Dict[str, Any]) -> Dict[str, Any]:
+def save_obf_settings(requested: dict[str, Any]) -> dict[str, Any]:
     """Persist local schedule settings and sync daily controls to Outreach Control."""
     if obf_run_state().get("status") == "running":
-        return {"ok": False, "error": "Wait for the active OBF action to finish before changing settings."}
+        return {
+            "ok": False,
+            "error": "Wait for the active OBF action to finish before changing settings.",
+        }
     current = read_obf_config()
     try:
         next_config = {
             **current,
             "enabled": bool(requested.get("enabled")),
-            "daily_volume": max(1, min(30, int(requested.get("daily_volume") or current["daily_volume"]))),
-            "prospects_start_row": int(requested["prospects_start_row"]) if requested.get("prospects_start_row") else None,
+            "daily_volume": max(
+                1, min(30, int(requested.get("daily_volume") or current["daily_volume"]))
+            ),
+            "prospects_start_row": int(requested["prospects_start_row"])
+            if requested.get("prospects_start_row")
+            else None,
             "prep_time": str(requested.get("prep_time") or current["prep_time"]),
             "exec_time": str(requested.get("exec_time") or current["exec_time"]),
             "max_sends": max(1, min(30, int(requested.get("max_sends") or current["max_sends"]))),
         }
     except (TypeError, ValueError):
-        return {"ok": False, "error": "Daily volume, start row, and run ceiling must be valid numbers."}
-    if not re.fullmatch(r"\d{2}:\d{2}", next_config["prep_time"]) or not re.fullmatch(r"\d{2}:\d{2}", next_config["exec_time"]):
+        return {
+            "ok": False,
+            "error": "Daily volume, start row, and run ceiling must be valid numbers.",
+        }
+    if not re.fullmatch(r"\d{2}:\d{2}", next_config["prep_time"]) or not re.fullmatch(
+        r"\d{2}:\d{2}", next_config["exec_time"]
+    ):
         return {"ok": False, "error": "Prep and execution times must use HH:MM."}
     if next_config["prospects_start_row"] is not None and next_config["prospects_start_row"] < 2:
         return {"ok": False, "error": "Prospects start row must be 2 or greater."}
     if requested.get("update_sheet", True):
-        command = [sys.executable, str(HELPERS_DIR / "linkedin_outreach_session.py"), "configure-outreach-control", "--date", local_now().date().isoformat(), "--daily-volume", str(next_config["daily_volume"])]
+        command = [
+            sys.executable,
+            str(HELPERS_DIR / "linkedin_outreach_session.py"),
+            "configure-outreach-control",
+            "--date",
+            local_now().date().isoformat(),
+            "--daily-volume",
+            str(next_config["daily_volume"]),
+        ]
         if next_config["prospects_start_row"] is not None:
             command.extend(["--prospects-start-row", str(next_config["prospects_start_row"])])
         command.extend(["--approved", "true" if requested.get("approved") else "false"])
         completed = subprocess.run(command, cwd=PROJECT_DIR, text=True, capture_output=True)
         if completed.returncode != 0:
-            return {"ok": False, "error": completed.stderr.strip() or completed.stdout.strip() or "Could not update Outreach Control."}
+            return {
+                "ok": False,
+                "error": completed.stderr.strip()
+                or completed.stdout.strip()
+                or "Could not update Outreach Control.",
+            }
     write_json(OBF_CONFIG_PATH, next_config)
     refresh_obf_source_snapshot()
-    return {"ok": True, "config": next_config, "requires_reprep": bool((OBF_PREPARED_DIR / f"{local_now().date().isoformat()}-prepared.json").exists())}
+    return {
+        "ok": True,
+        "config": next_config,
+        "requires_reprep": bool(
+            (OBF_PREPARED_DIR / f"{local_now().date().isoformat()}-prepared.json").exists()
+        ),
+    }
 
 
-def latest_json_file(directory: Path) -> Optional[Path]:
+def latest_json_file(directory: Path) -> Path | None:
     candidates = sorted(directory.glob("*.json"), reverse=True) if directory.exists() else []
     return candidates[0] if candidates else None
 
 
-def latest_matching_computation(review_leads: list) -> Dict[str, Any]:
+def latest_matching_computation(review_leads: list) -> dict[str, Any]:
     lead_ids = {str(lead.get("run_id") or "") for lead in review_leads}
     if not lead_ids or not LEAD_PREP_COMPUTATIONS_DIR.exists():
         return {"file": "", "data": {}}
@@ -724,7 +973,7 @@ def latest_matching_computation(review_leads: list) -> Dict[str, Any]:
     return {"file": "", "data": {}}
 
 
-def manual_computation_path(review: Dict[str, Any]) -> Path:
+def manual_computation_path(review: dict[str, Any]) -> Path:
     day = re.sub(r"[^0-9-]", "", str(review.get("date") or "undated"))
     group_row = int(review.get("group_row") or 0)
     return LEAD_PREP_COMPUTATIONS_DIR / f"manual_{day}_{group_row}_computation.json"
@@ -740,7 +989,7 @@ def valid_linkedin_profile(value: Any) -> bool:
     )
 
 
-def manual_lead_ready(lead: Dict[str, Any]) -> bool:
+def manual_lead_ready(lead: dict[str, Any]) -> bool:
     executives = list(lead.get("executives") or [])
     if not executives:
         return False
@@ -775,7 +1024,7 @@ def normalize_manual_executives(raw: Any) -> list:
     return executives
 
 
-def create_manual_computation(dashboard: Dict[str, Any]) -> tuple[Path, Dict[str, Any]]:
+def create_manual_computation(dashboard: dict[str, Any]) -> tuple[Path, dict[str, Any]]:
     review = dashboard.get("review", {})
     processing = dashboard.get("processing", {})
     path = manual_computation_path(review)
@@ -783,9 +1032,7 @@ def create_manual_computation(dashboard: Dict[str, Any]) -> tuple[Path, Dict[str
     if existing:
         return path, existing
     source_run = read_json(Path(str(dashboard.get("run", {}).get("file") or "")), {})
-    source_by_id = {
-        str(item.get("id") or ""): item for item in source_run.get("leads", [])
-    }
+    source_by_id = {str(item.get("id") or ""): item for item in source_run.get("leads", [])}
     leads = []
     for lead in processing.get("leads", []):
         source = source_by_id.get(str(lead.get("run_id") or ""), {})
@@ -807,11 +1054,7 @@ def create_manual_computation(dashboard: Dict[str, Any]) -> tuple[Path, Dict[str
                 "search_tasks": [],
                 "search_results": [],
                 "destination_row": {},
-                "status": (
-                    "manual_ready"
-                    if manual_lead_ready(lead)
-                    else "manual_draft"
-                ),
+                "status": ("manual_ready" if manual_lead_ready(lead) else "manual_draft"),
                 "notes": [],
             }
         )
@@ -843,8 +1086,8 @@ def create_manual_computation(dashboard: Dict[str, Any]) -> tuple[Path, Dict[str
 
 
 def processing_final_report(
-    computation: Dict[str, Any], computation_file: str = ""
-) -> Dict[str, Any]:
+    computation: dict[str, Any], computation_file: str = ""
+) -> dict[str, Any]:
     if not computation:
         return {
             "available": False,
@@ -877,9 +1120,7 @@ def processing_final_report(
     skipped = list(latest_write.get("skipped_unresolved") or [])
     batch_results = list(latest_batch.get("results") or [])
     errors = list(computation.get("errors") or [])
-    research_completed = sum(
-        1 for lead in leads if list(lead.get("executives") or [])
-    )
+    research_completed = sum(1 for lead in leads if list(lead.get("executives") or []))
     person_coverage = [
         sum(
             1
@@ -901,19 +1142,11 @@ def processing_final_report(
             and valid_linkedin_profile(first.get("linkedin_url"))
         ):
             rows_ready += 1
-    pending_tasks = sum(
-        1 for task in tasks if str(task.get("status") or "pending") == "pending"
-    )
-    selected_tasks = sum(
-        1 for task in tasks if str(task.get("status") or "") == "selected"
-    )
-    search_errors = sum(
-        1 for result in batch_results if str(result.get("status") or "") == "error"
-    )
+    pending_tasks = sum(1 for task in tasks if str(task.get("status") or "pending") == "pending")
+    selected_tasks = sum(1 for task in tasks if str(task.get("status") or "") == "selected")
+    search_errors = sum(1 for result in batch_results if str(result.get("status") or "") == "error")
     needs_review = sum(
-        1
-        for result in batch_results
-        if str(result.get("status") or "") == "needs_review"
+        1 for result in batch_results if str(result.get("status") or "") == "needs_review"
     )
     retry_count = sum(
         max(
@@ -922,9 +1155,7 @@ def processing_final_report(
         )
         for task in tasks
     )
-    conflict_count = sum(
-        1 for lead in leads if str(lead.get("status") or "") == "archive_conflict"
-    )
+    conflict_count = sum(1 for lead in leads if str(lead.get("status") or "") == "archive_conflict")
     rows_written = int(latest_write.get("rows_written") or 0)
     skipped_count = int(latest_write.get("skipped_unresolved_count") or len(skipped))
     raw_status = str(computation.get("status") or "unknown")
@@ -968,9 +1199,7 @@ def processing_final_report(
     mode = "manual" if str(computation.get("mode") or "") == "manual" else "codex"
     issues = []
     for item in skipped:
-        reasons = ", ".join(
-            str(reason).replace("_", " ") for reason in item.get("reasons", [])
-        )
+        reasons = ", ".join(str(reason).replace("_", " ") for reason in item.get("reasons", []))
         issues.append(
             {
                 "type": "unresolved",
@@ -986,17 +1215,11 @@ def processing_final_report(
         issues.append(
             {
                 "type": "search",
-                "tone": (
-                    "danger"
-                    if str(result.get("status") or "") == "error"
-                    else "warning"
-                ),
+                "tone": ("danger" if str(result.get("status") or "") == "error" else "warning"),
                 "lead_id": str(result.get("lead_id") or ""),
                 "company": str(result.get("company") or ""),
                 "message": str(
-                    result.get("error")
-                    or result.get("message")
-                    or "LinkedIn search needs review."
+                    result.get("error") or result.get("message") or "LinkedIn search needs review."
                 ),
             }
         )
@@ -1033,20 +1256,20 @@ def processing_final_report(
         )
     destination = str(latest_write.get("destination_tab") or "")
     published = dict(latest_write.get("queue_batch", {}).get("prefinal_publish") or {})
-    write_timestamp = (
-        published.get("published_at")
-        or latest_write.get("created_at")
-        or None
-    )
+    write_timestamp = published.get("published_at") or latest_write.get("created_at") or None
     if outcome == "completed":
-        summary = f"{rows_written} of {len(leads)} leads were written to {destination or 'Pre-final'}."
+        summary = (
+            f"{rows_written} of {len(leads)} leads were written to {destination or 'Pre-final'}."
+        )
     elif outcome == "partial":
         summary = (
             f"{rows_written} of {len(leads)} leads were written; "
             f"{skipped_count} unresolved row{'s' if skipped_count != 1 else ''} were skipped."
         )
     elif outcome == "archived":
-        summary = f"{len(leads)} leads were retained in the research archive instead of being published."
+        summary = (
+            f"{len(leads)} leads were retained in the research archive instead of being published."
+        )
     elif outcome == "failed":
         summary = "The persisted computation ended in a failure state. Review the reported issues before retrying."
     else:
@@ -1062,11 +1285,7 @@ def processing_final_report(
         "tone": tone,
         "raw_status": raw_status,
         "mode": mode,
-        "mode_label": (
-            "Manual dashboard"
-            if mode == "manual"
-            else "Codex orchestration"
-        ),
+        "mode_label": ("Manual dashboard" if mode == "manual" else "Codex orchestration"),
         "summary": summary,
         "counts": {
             "lead_count": len(leads),
@@ -1101,9 +1320,7 @@ def processing_final_report(
             "created_at": write_timestamp,
             "verified": published.get("verified"),
             "status": str(published.get("status") or ""),
-            "queue_fingerprint": str(
-                latest_write.get("queue_batch", {}).get("fingerprint") or ""
-            ),
+            "queue_fingerprint": str(latest_write.get("queue_batch", {}).get("fingerprint") or ""),
         },
         "issues": issues,
         "last_updated": (
@@ -1116,18 +1333,14 @@ def processing_final_report(
     }
 
 
-def latest_matching_review_run(review_leads: list) -> Dict[str, Any]:
-    expected_ids = {
-        str(lead.get("run_id") or "") for lead in review_leads if lead.get("run_id")
-    }
+def latest_matching_review_run(review_leads: list) -> dict[str, Any]:
+    expected_ids = {str(lead.get("run_id") or "") for lead in review_leads if lead.get("run_id")}
     if not expected_ids or not LEAD_PREP_RUNS_DIR.exists():
         return {"file": "", "data": {}}
     best = {"file": "", "data": {}, "overlap": 0}
     for path in sorted(LEAD_PREP_RUNS_DIR.glob("*.json"), reverse=True):
         data = read_json(path, {})
-        run_ids = {
-            str(lead.get("id") or "") for lead in data.get("leads", []) if lead.get("id")
-        }
+        run_ids = {str(lead.get("id") or "") for lead in data.get("leads", []) if lead.get("id")}
         overlap = len(expected_ids & run_ids)
         if run_ids == expected_ids:
             return {"file": str(path), "data": data}
@@ -1136,7 +1349,7 @@ def latest_matching_review_run(review_leads: list) -> Dict[str, Any]:
     return {"file": best["file"], "data": best["data"]}
 
 
-def run_matches_day(run: Dict[str, Any], today: str) -> bool:
+def run_matches_day(run: dict[str, Any], today: str) -> bool:
     if str(run.get("created_at") or "").startswith(today):
         return True
     review_date = (
@@ -1152,7 +1365,7 @@ def run_matches_day(run: Dict[str, Any], today: str) -> bool:
     return False
 
 
-def computation_destination_row(lead: Dict[str, Any]) -> Dict[str, Any]:
+def computation_destination_row(lead: dict[str, Any]) -> dict[str, Any]:
     row = dict(lead.get("destination_row") or {})
     people = list(lead.get("executives") or [])[:3]
     for index, person in enumerate(people, start=1):
@@ -1163,14 +1376,16 @@ def computation_destination_row(lead: Dict[str, Any]) -> Dict[str, Any]:
     return row
 
 
-def read_activity_dashboard(today: str) -> Dict[str, Any]:
+def read_activity_dashboard(today: str) -> dict[str, Any]:
     path = ACTIVITY_SESSIONS_DIR / f"{today}.json"
     session = read_json(path, {}) if path.exists() else {}
     prepared = session.get("prepared_targets") or []
     recorded = session.get("targets") or {}
-    recorded_by_key = recorded if isinstance(recorded, dict) else {
-        str(item.get("key") or ""): item for item in recorded
-    }
+    recorded_by_key = (
+        recorded
+        if isinstance(recorded, dict)
+        else {str(item.get("key") or ""): item for item in recorded}
+    )
     targets = []
     for item in prepared:
         live = recorded_by_key.get(str(item.get("key") or ""), {})
@@ -1186,17 +1401,20 @@ def read_activity_dashboard(today: str) -> Dict[str, Any]:
     active_signals = sum(
         1
         for target in targets
-        if str(target.get("activity_value") or "").strip().lower()
-        in {"active", "very active"}
+        if str(target.get("activity_value") or "").strip().lower() in {"active", "very active"}
     )
     bridged_rows = int(session.get("bridged_rows_count") or 0)
     checkpoints = (
         read_json(WATCHER_STATE_PATH, {})
-        .get("workflows", {}).get("activity", {}).get("days", {}).get(today, {})
+        .get("workflows", {})
+        .get("activity", {})
+        .get("days", {})
+        .get(today, {})
         .get("checkpoints", {})
     )
     active_checkpoints = [
-        item for item in checkpoints.values()
+        item
+        for item in checkpoints.values()
         if item.get("status") in {"running", "waiting"} and item.get("started_at")
     ]
     latest_checkpoint = max(
@@ -1206,13 +1424,19 @@ def read_activity_dashboard(today: str) -> Dict[str, Any]:
     )
     run_started_at = str(latest_checkpoint.get("started_at") or "")
     current_records = [
-        target for target in targets
+        target
+        for target in targets
         if run_started_at and str(target.get("recorded_at") or "") >= run_started_at
     ]
-    prior_count = sum(
-        1 for target in targets
-        if target.get("recorded_at") and str(target.get("recorded_at")) < run_started_at
-    ) if run_started_at else 0
+    prior_count = (
+        sum(
+            1
+            for target in targets
+            if target.get("recorded_at") and str(target.get("recorded_at")) < run_started_at
+        )
+        if run_started_at
+        else 0
+    )
     current_total = max(0, len(targets) - prior_count) if run_started_at else len(targets)
     current_completed = len(current_records)
     quarantine_issues = read_activity_quarantine_issues()
@@ -1232,7 +1456,9 @@ def read_activity_dashboard(today: str) -> Dict[str, Any]:
             "profiles_prepared": len(targets),
             "profiles_recorded": recorded_count,
             "profiles_pending": max(0, len(targets) - recorded_count),
-            "unique_leads": len({str(item.get("lead_id") or "") for item in targets if item.get("lead_id")}),
+            "unique_leads": len(
+                {str(item.get("lead_id") or "") for item in targets if item.get("lead_id")}
+            ),
             "active_signals": active_signals,
             "bridged_rows": bridged_rows,
             "failures": len(session.get("failures") or []),
@@ -1245,8 +1471,10 @@ def read_activity_dashboard(today: str) -> Dict[str, Any]:
             "profiles_pending": max(0, current_total - current_completed),
             "prior_records": prior_count,
             "active_signals": sum(
-                1 for target in current_records
-                if str(target.get("activity_value") or "").strip().lower() in {"active", "very active"}
+                1
+                for target in current_records
+                if str(target.get("activity_value") or "").strip().lower()
+                in {"active", "very active"}
             ),
         },
         "quarantine_issues": quarantine_issues,
@@ -1271,18 +1499,20 @@ def read_activity_quarantine_issues() -> list:
         for key, issue in sorted(activity_issues.items()):
             lead_id, _, prefix = str(key).partition(":")
             row = rows_by_id.get(lead_id, {})
-            issues.append({
-                "key": key,
-                "queue_fingerprint": queue.get("fingerprint", queue_path.stem),
-                "lead_id": lead_id,
-                "company": row.get("Company", ""),
-                "person": prefix,
-                "name": row.get(f"{prefix} Name", ""),
-                "title": row.get(f"{prefix} Title", ""),
-                "profile_url": issue.get("profile_url", ""),
-                "reason": issue.get("terminal_reason", issue.get("reason", "")),
-                "recorded_at": issue.get("recorded_at", ""),
-            })
+            issues.append(
+                {
+                    "key": key,
+                    "queue_fingerprint": queue.get("fingerprint", queue_path.stem),
+                    "lead_id": lead_id,
+                    "company": row.get("Company", ""),
+                    "person": prefix,
+                    "name": row.get(f"{prefix} Name", ""),
+                    "title": row.get(f"{prefix} Title", ""),
+                    "profile_url": issue.get("profile_url", ""),
+                    "reason": issue.get("terminal_reason", issue.get("reason", "")),
+                    "recorded_at": issue.get("recorded_at", ""),
+                }
+            )
     return issues
 
 
@@ -1301,8 +1531,7 @@ def read_activity_history() -> list:
         active_signals = sum(
             1
             for item in recorded_rows
-            if str(item.get("activity_value") or "").strip().lower()
-            in {"active", "very active"}
+            if str(item.get("activity_value") or "").strip().lower() in {"active", "very active"}
         )
         rows.append(
             {
@@ -1311,11 +1540,15 @@ def read_activity_history() -> list:
                 "profiles_prepared": len(prepared),
                 "profiles_recorded": recorded_count,
                 "profiles_pending": max(0, len(prepared) - recorded_count),
-                "unique_leads": len({str(item.get("lead_id") or "") for item in prepared if item.get("lead_id")}),
+                "unique_leads": len(
+                    {str(item.get("lead_id") or "") for item in prepared if item.get("lead_id")}
+                ),
                 "active_signals": active_signals,
                 "bridged_rows": int(session.get("bridged_rows_count") or 0),
                 "failures": len(session.get("failures") or []),
-                "updated_at": session.get("updated_at") or session.get("completed_at") or session.get("prepared_at"),
+                "updated_at": session.get("updated_at")
+                or session.get("completed_at")
+                or session.get("prepared_at"),
             }
         )
     ACTIVITY_HISTORY_CACHE["signature"] = signature
@@ -1335,7 +1568,7 @@ def read_automation_status(path: Path) -> str:
         return "UNKNOWN"
 
 
-def read_lead_prep_dashboard() -> Dict[str, Any]:
+def read_lead_prep_dashboard() -> dict[str, Any]:
     config = read_lead_prep_config()
     archive = read_json(LEAD_PREP_ARCHIVE_PATH, {"entries": {}, "updated_at": ""})
     raw_entries = archive.get("entries", {})
@@ -1382,9 +1615,7 @@ def read_lead_prep_dashboard() -> Dict[str, Any]:
         run = matching_run["data"]
         overlap_scan = run.get("overlap_scan") or run.get("archive_reconciliation") or {}
     manual_research_completed = sum(
-        1
-        for lead in prepared_leads
-        if lead.get("manual_research", {}).get("status") == "completed"
+        1 for lead in prepared_leads if lead.get("manual_research", {}).get("status") == "completed"
     )
     approved_review_leads = [lead for lead in prepared_leads if lead.get("approved")]
     matching_computation = latest_matching_computation(prepared_leads)
@@ -1397,7 +1628,9 @@ def read_lead_prep_dashboard() -> Dict[str, Any]:
     approval_gate_enabled = bool(config.get("approval_gate_enabled"))
     if computation_by_lead_id:
         processing_source = [
-            lead for lead in prepared_leads if str(lead.get("run_id") or "") in computation_by_lead_id
+            lead
+            for lead in prepared_leads
+            if str(lead.get("run_id") or "") in computation_by_lead_id
         ]
         selection_mode = "computation_state"
     elif not approval_gate_enabled:
@@ -1417,8 +1650,7 @@ def read_lead_prep_dashboard() -> Dict[str, Any]:
         processing_leads.append(
             {
                 **lead,
-                "processing_status": computation_lead.get("status")
-                or "awaiting_processing",
+                "processing_status": computation_lead.get("status") or "awaiting_processing",
                 "executive_count": len(computation_lead.get("executives", [])),
                 "executives": computation_lead.get("executives", []),
                 "search_tasks_total": len(computation_lead.get("search_tasks", [])),
@@ -1437,12 +1669,8 @@ def read_lead_prep_dashboard() -> Dict[str, Any]:
     final_report = processing_final_report(
         matching_computation["data"], matching_computation["file"]
     )
-    first_automation_status = read_automation_status(
-        PROCESS_APPROVED_FIRST_AUTOMATION_PATH
-    )
-    fallback_automation_status = read_automation_status(
-        PROCESS_APPROVED_FALLBACK_AUTOMATION_PATH
-    )
+    first_automation_status = read_automation_status(PROCESS_APPROVED_FIRST_AUTOMATION_PATH)
+    fallback_automation_status = read_automation_status(PROCESS_APPROVED_FALLBACK_AUTOMATION_PATH)
 
     first_deadline = datetime.fromisoformat(
         f"{today}T{config.get('first_review_deadline', '18:00')}:00"
@@ -1451,11 +1679,7 @@ def read_lead_prep_dashboard() -> Dict[str, Any]:
         f"{today}T{config.get('fallback_review_deadline', '22:00')}:00"
     ).replace(tzinfo=LOCAL_TZ)
     review_window = (
-        "first"
-        if now < first_deadline
-        else "fallback"
-        if now < fallback_deadline
-        else "closed"
+        "first" if now < first_deadline else "fallback" if now < fallback_deadline else "closed"
     )
     review_status = (
         "review_complete"
@@ -1496,9 +1720,7 @@ def read_lead_prep_dashboard() -> Dict[str, Any]:
         else cached_today.get("conflict_count", 0)
     )
     target_met = bool(
-        overlap_scan["target_met"]
-        if "target_met" in overlap_scan
-        else fresh_count >= fresh_target
+        overlap_scan["target_met"] if "target_met" in overlap_scan else fresh_count >= fresh_target
     )
     summary = review_cache.get(
         "summary",
@@ -1529,23 +1751,17 @@ def read_lead_prep_dashboard() -> Dict[str, Any]:
             "status": run.get("status", "not_prepared"),
             "file": str(run_path) if run_path else "",
             "selected_count": int(
-                run.get("source", {}).get("selected_count")
-                or len(run.get("leads", []))
-                or 0
+                run.get("source", {}).get("selected_count") or len(run.get("leads", [])) or 0
             ),
             "fresh_target": fresh_target,
             "fresh_count": fresh_count,
             "archive_match_count": archive_match_count,
             "conflict_count": conflict_count,
             "top_up_count": int(overlap_scan.get("top_up_count") or 0),
-            "top_up_suppressed_count": int(
-                overlap_scan.get("top_up_suppressed_count") or 0
-            ),
+            "top_up_suppressed_count": int(overlap_scan.get("top_up_suppressed_count") or 0),
             "top_ups_enabled": bool(overlap_scan.get("top_ups_enabled", True)),
             "target_met": target_met,
-            "settled_for_day": bool(
-                overlap_scan.get("settled_for_day", target_met)
-            ),
+            "settled_for_day": bool(overlap_scan.get("settled_for_day", target_met)),
             "source_exhausted": bool(overlap_scan.get("source_exhausted")),
             "enabled": bool(overlap_scan.get("enabled")),
             "detection_only": bool(overlap_scan.get("detection_only", True)),
@@ -1614,7 +1830,7 @@ def read_lead_prep_dashboard() -> Dict[str, Any]:
     }
 
 
-def run_project_script(script_name: str, *args: str) -> Dict[str, Any]:
+def run_project_script(script_name: str, *args: str) -> dict[str, Any]:
     completed = subprocess.run(
         [sys.executable, str(SCRIPTS_DIR / script_name), *args],
         cwd=PROJECT_DIR,
@@ -1631,7 +1847,7 @@ def run_project_script(script_name: str, *args: str) -> Dict[str, Any]:
     }
 
 
-def read_withdrawal_state(day: str) -> Dict[str, Any]:
+def read_withdrawal_state(day: str) -> dict[str, Any]:
     """Read the frozen withdrawal queue and journal only; never query Sheets."""
     session_path = WITHDRAWAL_SESSIONS_DIR / f"{day}.json"
     journal_path = WITHDRAWAL_JOURNAL_DIR / f"{day}.jsonl"
@@ -1643,7 +1859,7 @@ def read_withdrawal_state(day: str) -> Dict[str, Any]:
         session_names.add(str(session_path.resolve()))
     except OSError:
         pass
-    target_events: Dict[str, Dict[str, Any]] = {}
+    target_events: dict[str, dict[str, Any]] = {}
     for event in events:
         if event.get("event") != "withdrawal_target_result":
             continue
@@ -1663,18 +1879,22 @@ def read_withdrawal_state(day: str) -> Dict[str, Any]:
             status = "Failed" if not event.get("ok", False) else "Not withdrawn"
         else:
             status = "Prepared"
-        rows.append({
-            "index": index,
-            "id": prospect_id,
-            "company": str(target.get("company") or ""),
-            "contact_name": str(target.get("contact_name") or ""),
-            "sent_at": str(target.get("sent_at") or ""),
-            "days_left": target.get("days_left"),
-            "batch": target.get("batch_number"),
-            "navigation": str(target.get("navigation_type") or "").replace("_", " "),
-            "status": status,
-            "last_update": event.get("recorded_at") or event.get("withdrawn_at") or session.get("prepared_at"),
-        })
+        rows.append(
+            {
+                "index": index,
+                "id": prospect_id,
+                "company": str(target.get("company") or ""),
+                "contact_name": str(target.get("contact_name") or ""),
+                "sent_at": str(target.get("sent_at") or ""),
+                "days_left": target.get("days_left"),
+                "batch": target.get("batch_number"),
+                "navigation": str(target.get("navigation_type") or "").replace("_", " "),
+                "status": status,
+                "last_update": event.get("recorded_at")
+                or event.get("withdrawn_at")
+                or session.get("prepared_at"),
+            }
+        )
     dashboard_run = read_json(WITHDRAWAL_DASHBOARD_RUN_STATE_PATH, {})
     running = dashboard_run.get("status") == "running" or any(
         "withdraw_connections.py" in line
@@ -1684,9 +1904,16 @@ def read_withdrawal_state(day: str) -> Dict[str, Any]:
     completed = sum(row["status"] == "Withdrawn" for row in rows)
     failed = sum(row["status"] in {"Failed", "Not withdrawn"} for row in rows)
     return {
-        "exists": bool(session), "session_path": str(session_path), "prepared_at": session.get("prepared_at"),
-        "rows": rows, "list": rows, "prepared": len(rows), "completed": completed, "failed": failed,
-        "pending": len(rows) - completed - failed, "is_running": running,
+        "exists": bool(session),
+        "session_path": str(session_path),
+        "prepared_at": session.get("prepared_at"),
+        "rows": rows,
+        "list": rows,
+        "prepared": len(rows),
+        "completed": completed,
+        "failed": failed,
+        "pending": len(rows) - completed - failed,
+        "is_running": running,
         "start_time": dashboard_run.get("started_at") or session.get("prepared_at"),
         "last_event_time": events[-1].get("recorded_at") if events else session.get("prepared_at"),
         "cooldown_active": bool(guard.get("last_live_run_started_at")) and running,
@@ -1694,7 +1921,7 @@ def read_withdrawal_state(day: str) -> Dict[str, Any]:
     }
 
 
-def dashboard_stats(requested: Dict[str, Any]) -> Dict[str, Any]:
+def dashboard_stats(requested: dict[str, Any]) -> dict[str, Any]:
     configured = str(read_lead_prep_config().get("dashboard_date_override") or "")
     requested_day = str(requested.get("date") or "")
     today = requested_day if re.fullmatch(r"\d{4}-\d{2}-\d{2}", requested_day) else configured
@@ -1703,28 +1930,40 @@ def dashboard_stats(requested: Dict[str, Any]) -> Dict[str, Any]:
     activity = read_activity_dashboard(today)
     watcher = read_json(WATCHER_STATE_PATH, {})
     watcher_completion = {"tracked_days": 0, "completed_days": 0, "completion_rate": 0}
-    terminal_statuses = {"completed", "failed_terminal", "cutoff_skipped", "needs_attention", "paused_manual_stop"}
+    terminal_statuses = {
+        "completed",
+        "failed_terminal",
+        "cutoff_skipped",
+        "needs_attention",
+        "paused_manual_stop",
+    }
     # This endpoint powers the live overview. Keep historical alerts in watcher
     # state/history, but only surface alerts belonging to the selected day here.
     watcher_completion["alerts"] = [
-        item for item in watcher.get("alerts", [])
+        item
+        for item in watcher.get("alerts", [])
         if not item.get("acknowledged")
-        and (
-            item.get("day") == today
-            or str(item.get("created_at") or "").startswith(today)
-        )
+        and (item.get("day") == today or str(item.get("created_at") or "").startswith(today))
     ]
     for queue_path in sorted((STATE_DIR / "prefinal_queue").glob("*.json")):
         queue = read_json(queue_path, {})
         issue_count = len(queue.get("activity_issues") or {})
-        queue_day = str(queue.get("updated_at") or queue.get("prepared_at") or queue.get("created_at") or "")[:10]
-        if queue_day == today and issue_count and queue.get("status") not in {"prospects_bridged", "final_bridged"}:
-            watcher_completion["alerts"].append({
-                "workflow": "activity",
-                "reason": f"{issue_count}_quarantined_profile_issues",
-                "checkpoint": queue.get("fingerprint", ""),
-            })
-    watcher_days: Dict[str, List[Dict[str, Any]]] = {}
+        queue_day = str(
+            queue.get("updated_at") or queue.get("prepared_at") or queue.get("created_at") or ""
+        )[:10]
+        if (
+            queue_day == today
+            and issue_count
+            and queue.get("status") not in {"prospects_bridged", "final_bridged"}
+        ):
+            watcher_completion["alerts"].append(
+                {
+                    "workflow": "activity",
+                    "reason": f"{issue_count}_quarantined_profile_issues",
+                    "checkpoint": queue.get("fingerprint", ""),
+                }
+            )
+    watcher_days: dict[str, list[dict[str, Any]]] = {}
     for workflow_name, workflow in watcher.get("workflows", {}).items():
         for day, day_data in workflow.get("days", {}).items():
             checkpoints = day_data.get("checkpoints", {})
@@ -1734,14 +1973,20 @@ def dashboard_stats(requested: Dict[str, Any]) -> Dict[str, Any]:
             if day == today:
                 for checkpoint_name, checkpoint in checkpoints.items():
                     if checkpoint.get("status") in {"retry_waiting", "resume_pending"}:
-                        watcher_completion["alerts"].append({
-                            "workflow": workflow_name,
-                            "reason": checkpoint.get("status"),
-                            "checkpoint": checkpoint_name,
-                            "next_retry_at": checkpoint.get("next_retry_at"),
-                            "severity": "info",
-                        })
-                    if checkpoint.get("status") in {"failed_terminal", "needs_attention", "interrupted_terminal"}:
+                        watcher_completion["alerts"].append(
+                            {
+                                "workflow": workflow_name,
+                                "reason": checkpoint.get("status"),
+                                "checkpoint": checkpoint_name,
+                                "next_retry_at": checkpoint.get("next_retry_at"),
+                                "severity": "info",
+                            }
+                        )
+                    if checkpoint.get("status") in {
+                        "failed_terminal",
+                        "needs_attention",
+                        "interrupted_terminal",
+                    }:
                         commands = (checkpoint.get("result") or {}).get("commands") or []
                         output = "\n".join(
                             f"{command.get('stdout_tail') or ''}\n{command.get('stderr_tail') or ''}"
@@ -1751,33 +1996,45 @@ def dashboard_stats(requested: Dict[str, Any]) -> Dict[str, Any]:
                         detail = (
                             blocked.group(1).strip()
                             if blocked
-                            else str(checkpoint.get("reason") or checkpoint.get("status") or "checkpoint failed").replace("_", " ")
+                            else str(
+                                checkpoint.get("reason")
+                                or checkpoint.get("status")
+                                or "checkpoint failed"
+                            ).replace("_", " ")
                         )
-                        detail = re.sub(r'''["',}\s]+$''', "", detail)
-                        existing = next((
-                            alert for alert in watcher_completion["alerts"]
-                            if alert.get("workflow") == workflow_name
-                            and alert.get("checkpoint") == checkpoint_name
-                        ), None)
+                        detail = re.sub(r"""["',}\s]+$""", "", detail)
+                        existing = next(
+                            (
+                                alert
+                                for alert in watcher_completion["alerts"]
+                                if alert.get("workflow") == workflow_name
+                                and alert.get("checkpoint") == checkpoint_name
+                            ),
+                            None,
+                        )
                         if existing:
                             existing["detail"] = detail
                             existing["severity"] = "danger"
                         else:
-                            watcher_completion["alerts"].append({
-                                "workflow": workflow_name,
-                                "reason": checkpoint.get("reason") or checkpoint.get("status"),
-                                "checkpoint": checkpoint_name,
-                                "detail": detail,
-                                "severity": "danger",
-                                "day": day,
-                            })
+                            watcher_completion["alerts"].append(
+                                {
+                                    "workflow": workflow_name,
+                                    "reason": checkpoint.get("reason") or checkpoint.get("status"),
+                                    "checkpoint": checkpoint_name,
+                                    "detail": detail,
+                                    "severity": "danger",
+                                    "day": day,
+                                }
+                            )
     for checkpoint_states in watcher_days.values():
         if all(item.get("status") in terminal_statuses for item in checkpoint_states):
             watcher_completion["tracked_days"] += 1
             if all(item.get("status") == "completed" for item in checkpoint_states):
                 watcher_completion["completed_days"] += 1
     finalized_checkpoints = [
-        item for states in watcher_days.values() for item in states
+        item
+        for states in watcher_days.values()
+        for item in states
         if item.get("status") in terminal_statuses
     ]
     watcher_completion["finalized_checkpoints"] = len(finalized_checkpoints)
@@ -1786,15 +2043,25 @@ def dashboard_stats(requested: Dict[str, Any]) -> Dict[str, Any]:
     )
     if watcher_completion["finalized_checkpoints"]:
         watcher_completion["completion_rate"] = round(
-            watcher_completion["completed_checkpoints"] / watcher_completion["finalized_checkpoints"] * 100
+            watcher_completion["completed_checkpoints"]
+            / watcher_completion["finalized_checkpoints"]
+            * 100
         )
     watcher_completion["history"] = [
         {
             "date": day,
             "completed": sum(item.get("status") == "completed" for item in states),
             "scheduled": len(states),
-            "rate": round(sum(item.get("status") == "completed" for item in states) / len(states) * 100),
-            "outcome": "Completed" if states and all(item.get("status") == "completed" for item in states) else ("Finalized with exceptions" if all(item.get("status") in terminal_statuses for item in states) else "In progress"),
+            "rate": round(
+                sum(item.get("status") == "completed" for item in states) / len(states) * 100
+            ),
+            "outcome": "Completed"
+            if states and all(item.get("status") == "completed" for item in states)
+            else (
+                "Finalized with exceptions"
+                if all(item.get("status") in terminal_statuses for item in states)
+                else "In progress"
+            ),
         }
         for day, states in sorted(watcher_days.items(), reverse=True)
     ]
@@ -1808,7 +2075,11 @@ def dashboard_stats(requested: Dict[str, Any]) -> Dict[str, Any]:
         deduped_alerts.append(alert)
     watcher_completion["alerts"] = deduped_alerts[:5]
     checkpoints = (
-        watcher.get("workflows", {}).get("activity", {}).get("days", {}).get(today, {}).get("checkpoints", {})
+        watcher.get("workflows", {})
+        .get("activity", {})
+        .get("days", {})
+        .get(today, {})
+        .get("checkpoints", {})
     )
     is_running = any(item.get("status") in {"running", "waiting"} for item in checkpoints.values())
     stats = activity["stats"]
@@ -1819,8 +2090,11 @@ def dashboard_stats(requested: Dict[str, Any]) -> Dict[str, Any]:
         "today": today,
         "activity_prep_done": activity["exists"],
         "activity_run_done": stats["profiles_recorded"] > 0,
-        "followup_prep_done": False, "followup_daytime_done": False, "followups_enabled": followups_enabled,
-        "withdrawal_prep_done": withdrawal["exists"], "withdrawal_execute_done": withdrawal["completed"] > 0,
+        "followup_prep_done": False,
+        "followup_daytime_done": False,
+        "followups_enabled": followups_enabled,
+        "withdrawal_prep_done": withdrawal["exists"],
+        "withdrawal_execute_done": withdrawal["completed"] > 0,
         "watcher": watcher_completion,
         "activity": {
             "prepared": current_run.get("profiles_total", stats["profiles_prepared"]),
@@ -1828,30 +2102,43 @@ def dashboard_stats(requested: Dict[str, Any]) -> Dict[str, Any]:
             "failed": stats["failures"],
             "pending": current_run.get("profiles_pending", stats["profiles_pending"]),
             "is_running": is_running,
-            "start_time": next((item.get("started_at") for item in checkpoints.values() if item.get("started_at")), None),
+            "start_time": next(
+                (item.get("started_at") for item in checkpoints.values() if item.get("started_at")),
+                None,
+            ),
             "last_event_time": activity.get("updated_at"),
             "next_action_due": None,
             "list": activity["targets"],
             "quarantine_issues": activity.get("quarantine_issues", []),
         },
-        "followups": (lambda session: {
-            "enabled": followups_enabled,
-            "prepared": len(session.get("targets") or []) or int(session.get("first_message_draft_count") or 0),
-            "completed": 0,
-            "failed": 0,
-            "pending": len(session.get("targets") or []) or int(session.get("first_message_draft_count") or 0),
-            "is_running": False,
-            "list": [],
-            "due_today": len(session.get("targets") or []) or int(session.get("first_message_draft_count") or 0),
-            "first_message_drafts": int(session.get("first_message_draft_count") or 0),
-            "second_message_due": sum(1 for target in (session.get("targets") or []) if str(target.get("next_action") or "").upper() in {"FU-2", "FU-3", "FU-4"}),
-            "pipeline_assessed": len(session.get("targets") or []) + len(session.get("skipped") or []),
-        })(read_json(STATE_DIR / "followup_sessions" / f"{today}.json", {})),
+        "followups": (
+            lambda session: {
+                "enabled": followups_enabled,
+                "prepared": len(session.get("targets") or [])
+                or int(session.get("first_message_draft_count") or 0),
+                "completed": 0,
+                "failed": 0,
+                "pending": len(session.get("targets") or [])
+                or int(session.get("first_message_draft_count") or 0),
+                "is_running": False,
+                "list": [],
+                "due_today": len(session.get("targets") or [])
+                or int(session.get("first_message_draft_count") or 0),
+                "first_message_drafts": int(session.get("first_message_draft_count") or 0),
+                "second_message_due": sum(
+                    1
+                    for target in (session.get("targets") or [])
+                    if str(target.get("next_action") or "").upper() in {"FU-2", "FU-3", "FU-4"}
+                ),
+                "pipeline_assessed": len(session.get("targets") or [])
+                + len(session.get("skipped") or []),
+            }
+        )(read_json(STATE_DIR / "followup_sessions" / f"{today}.json", {})),
         "withdrawals": withdrawal,
     }
 
 
-def start_activity_watcher(requested: Dict[str, Any]) -> Dict[str, Any]:
+def start_activity_watcher(requested: dict[str, Any]) -> dict[str, Any]:
     mode = str(requested.get("mode") or "full")
     if mode not in {"full", "prepare-only", "activity-only"}:
         raise ValueError("Unsupported Activity Check mode.")
@@ -1860,7 +2147,14 @@ def start_activity_watcher(requested: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": "Activity Check is already running through the watcher."}
     day = status["today"]
     subprocess.Popen(
-        [sys.executable, str(WATCHER_SCRIPT_PATH), "--force-activity-date", day, "--force-activity-mode", mode],
+        [
+            sys.executable,
+            str(WATCHER_SCRIPT_PATH),
+            "--force-activity-date",
+            day,
+            "--force-activity-mode",
+            mode,
+        ],
         cwd=PROJECT_DIR,
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
         stdout=subprocess.DEVNULL,
@@ -1870,7 +2164,7 @@ def start_activity_watcher(requested: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "date": day, "mode": mode}
 
 
-def launch_chrome_accounts(requested: Dict[str, Any]) -> Dict[str, Any]:
+def launch_chrome_accounts(requested: dict[str, Any]) -> dict[str, Any]:
     target = str(requested.get("target") or "cdp1")
     scripts = {
         "cdp1": [SCRIPTS_DIR / "launch-chrome.sh"],
@@ -1880,7 +2174,13 @@ def launch_chrome_accounts(requested: Dict[str, Any]) -> Dict[str, Any]:
     if not scripts or any(not script.is_file() for script in scripts):
         raise ValueError("Requested Chrome launch script is unavailable.")
     for script in scripts:
-        subprocess.Popen(["bash", str(script)], cwd=PROJECT_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        subprocess.Popen(
+            ["bash", str(script)],
+            cwd=PROJECT_DIR,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
     return {"ok": True, "target": target}
 
 
@@ -1894,7 +2194,7 @@ def watcher_enabled() -> bool:
     return result.returncode == 0
 
 
-def set_watcher_enabled(requested: Any) -> Dict[str, Any]:
+def set_watcher_enabled(requested: Any) -> dict[str, Any]:
     enabled = bool(requested if isinstance(requested, bool) else requested.get("enabled"))
     domain = f"gui/{os.getuid()}"
     service = f"{domain}/{WATCHER_LABEL}"
@@ -1933,7 +2233,7 @@ def set_watcher_enabled(requested: Any) -> Dict[str, Any]:
     return {"ok": True, "enabled": watcher_enabled()}
 
 
-def invoke(channel: str, requested: Dict[str, Any]) -> Any:
+def invoke(channel: str, requested: dict[str, Any]) -> Any:
     global POST_ENGAGEMENT_ACTIVE_PROCESS
     if channel == "check-watcher-status":
         return watcher_enabled()
@@ -1944,8 +2244,7 @@ def invoke(channel: str, requested: Dict[str, Any]) -> Any:
     if channel == "read-post-engagement-dashboard":
         value = read_post_engagement_dashboard(str(requested.get("day") or "") or None)
         value["is_running"] = value.get("is_running", False) or bool(
-            POST_ENGAGEMENT_ACTIVE_PROCESS
-            and POST_ENGAGEMENT_ACTIVE_PROCESS.poll() is None
+            POST_ENGAGEMENT_ACTIVE_PROCESS and POST_ENGAGEMENT_ACTIVE_PROCESS.poll() is None
         )
         return value
     if channel == "add-post-engagement-source":
@@ -1961,8 +2260,14 @@ def invoke(channel: str, requested: Dict[str, Any]) -> Any:
         return {"ok": True, "config": save_post_engagement_config(requested)}
     if channel == "archive-post-engagement-and-fresh":
         if POST_ENGAGEMENT_ACTIVE_PROCESS and POST_ENGAGEMENT_ACTIVE_PROCESS.poll() is None:
-            return {"ok": False, "error": "Post Engagement is still running. Pause it before starting fresh."}
-        return {"ok": True, **archive_post_engagement_campaign(str(requested.get("day") or "") or None)}
+            return {
+                "ok": False,
+                "error": "Post Engagement is still running. Pause it before starting fresh.",
+            }
+        return {
+            "ok": True,
+            **archive_post_engagement_campaign(str(requested.get("day") or "") or None),
+        }
     if channel == "pause-post-engagement-run":
         campaign = pause_post_engagement_campaign(str(requested.get("day") or "") or None)
         return {"ok": True, "campaign": campaign}
@@ -1976,10 +2281,16 @@ def invoke(channel: str, requested: Dict[str, Any]) -> Any:
         log_path = STATE_DIR / "post_engagement" / "runner.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_handle = log_path.open("a", encoding="utf-8")
-        command = (["/usr/bin/caffeinate", "-i"] if Path("/usr/bin/caffeinate").exists() else []) + args
+        command = (
+            ["/usr/bin/caffeinate", "-i"] if Path("/usr/bin/caffeinate").exists() else []
+        ) + args
         POST_ENGAGEMENT_ACTIVE_PROCESS = subprocess.Popen(
-            command, cwd=PROJECT_DIR, env={**os.environ, "PYTHONUNBUFFERED": "1"},
-            stdout=log_handle, stderr=subprocess.STDOUT, start_new_session=True,
+            command,
+            cwd=PROJECT_DIR,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
         return {"ok": True, "campaign": campaign, "pid": POST_ENGAGEMENT_ACTIVE_PROCESS.pid}
     if channel in {"start-post-engagement-dry-run", "start-post-engagement-run"}:
@@ -1993,7 +2304,9 @@ def invoke(channel: str, requested: Dict[str, Any]) -> Any:
         log_path = STATE_DIR / "post_engagement" / "runner.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_handle = log_path.open("a", encoding="utf-8")
-        command = (["/usr/bin/caffeinate", "-i"] if Path("/usr/bin/caffeinate").exists() else []) + args
+        command = (
+            ["/usr/bin/caffeinate", "-i"] if Path("/usr/bin/caffeinate").exists() else []
+        ) + args
         POST_ENGAGEMENT_ACTIVE_PROCESS = subprocess.Popen(
             command,
             cwd=PROJECT_DIR,
@@ -2005,7 +2318,11 @@ def invoke(channel: str, requested: Dict[str, Any]) -> Any:
         return {"ok": True, "pid": POST_ENGAGEMENT_ACTIVE_PROCESS.pid, "log_path": str(log_path)}
     if channel == "refresh-obf-source-cache":
         snapshot = refresh_obf_source_snapshot()
-        return {"ok": True, "refreshed_at": snapshot["refreshed_at"], "dashboard": read_obf_dashboard()}
+        return {
+            "ok": True,
+            "refreshed_at": snapshot["refreshed_at"],
+            "dashboard": read_obf_dashboard(),
+        }
     if channel == "start-obf-prepare":
         return start_obf_action("prepare", requested)
     if channel == "start-obf-execute":
@@ -2061,9 +2378,7 @@ def invoke(channel: str, requested: Dict[str, Any]) -> Any:
         status = status if status in allowed else "not_started"
         if not run_id:
             return {"ok": False, "error": "A Lead Review run ID is required."}
-        state = read_json(
-            LEAD_RESEARCH_PROGRESS_PATH, {"schema_version": 1, "days": {}}
-        )
+        state = read_json(LEAD_RESEARCH_PROGRESS_PATH, {"schema_version": 1, "days": {}})
         state["schema_version"] = 1
         state.setdefault("days", {}).setdefault(day, {})[run_id] = {
             "status": status,
@@ -2141,17 +2456,13 @@ def invoke(channel: str, requested: Dict[str, Any]) -> Any:
         )
     if channel == "sync-lead-review-group":
         payload_json = json.dumps(requested, separators=(",", ":"))
-        result = run_project_script(
-            "sync_lead_review_group.py", "--payload-json", payload_json
-        )
+        result = run_project_script("sync_lead_review_group.py", "--payload-json", payload_json)
         return (
             {"ok": True, "dashboard": read_lead_prep_dashboard()}
             if result["ok"]
             else {
                 "ok": False,
-                "error": result["stderr"]
-                or result["stdout"]
-                or "Review handoff failed.",
+                "error": result["stderr"] or result["stdout"] or "Review handoff failed.",
             }
         )
     if channel == "save-manual-lead-research":
@@ -2167,7 +2478,10 @@ def invoke(channel: str, requested: Dict[str, Any]) -> Any:
             for lead in dashboard.get("processing", {}).get("leads", [])
         }
         if lead_id not in allowed_ids:
-            return {"ok": False, "error": "The selected lead is not in the active processing group."}
+            return {
+                "ok": False,
+                "error": "The selected lead is not in the active processing group.",
+            }
         try:
             executives = normalize_manual_executives(requested.get("executives"))
             path, computation = create_manual_computation(dashboard)
@@ -2179,9 +2493,7 @@ def invoke(channel: str, requested: Dict[str, Any]) -> Any:
             lead["executives"] = executives
             lead["status"] = "manual_ready" if manual_lead_ready(lead) else "manual_draft"
             lead["updated_at"] = local_now().isoformat()
-            ready_count = sum(
-                1 for item in computation.get("leads", []) if manual_lead_ready(item)
-            )
+            ready_count = sum(1 for item in computation.get("leads", []) if manual_lead_ready(item))
             computation["updated_at"] = local_now().isoformat()
             computation["status"] = (
                 "manual_research_ready"
@@ -2216,18 +2528,14 @@ def invoke(channel: str, requested: Dict[str, Any]) -> Any:
             if result["ok"]
             else {
                 "ok": False,
-                "error": result["stderr"]
-                or result["stdout"]
-                or "Manual research bridge failed.",
+                "error": result["stderr"] or result["stdout"] or "Manual research bridge failed.",
             }
         )
     if channel == "save-lead-prep-settings":
         current = read_lead_prep_config()
         next_config = {
             **current,
-            "autonomous_prep_enabled": bool(
-                requested.get("autonomous_prep_enabled")
-            ),
+            "autonomous_prep_enabled": bool(requested.get("autonomous_prep_enabled")),
             "prep_time": str(requested.get("prep_time") or current["prep_time"]),
             "base_volume": max(
                 1,
@@ -2238,13 +2546,9 @@ def invoke(channel: str, requested: Dict[str, Any]) -> Any:
             ),
             "processing_batch_size": 30,
             "approval_gate_enabled": bool(requested.get("approval_gate_enabled")),
-            "overlap_scan_mode": (
-                "off" if requested.get("overlap_scan_mode") == "off" else "auto"
-            ),
+            "overlap_scan_mode": ("off" if requested.get("overlap_scan_mode") == "off" else "auto"),
             "fresh_volume_top_up_mode": (
-                "off"
-                if requested.get("fresh_volume_top_up_mode") == "off"
-                else "auto"
+                "off" if requested.get("fresh_volume_top_up_mode") == "off" else "auto"
             ),
         }
         write_json(LEAD_PREP_CONFIG_PATH, next_config)
@@ -2279,9 +2583,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         if self.path != "/api/invoke":
-            self._send_json(
-                {"ok": False, "error": "Not found"}, HTTPStatus.NOT_FOUND
-            )
+            self._send_json({"ok": False, "error": "Not found"}, HTTPStatus.NOT_FOUND)
             return
         try:
             length = int(self.headers.get("Content-Length") or 0)

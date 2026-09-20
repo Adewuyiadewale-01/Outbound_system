@@ -1,7 +1,7 @@
 import json
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from ORCHESTRATION.monitor_app import local_server
@@ -228,6 +228,7 @@ class DashboardRunResolutionTests(unittest.TestCase):
         self.assertEqual(failed["counts"]["errors"], 1)
         self.assertEqual(waiting["outcome"], "waiting")
         self.assertFalse(waiting["available"])
+
 
 if __name__ == "__main__":
     unittest.main()

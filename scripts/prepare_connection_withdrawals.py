@@ -12,16 +12,17 @@ This script does not open LinkedIn and does not write withdrawal results.
 from __future__ import annotations
 
 import argparse
-import json
-import os
 import hashlib
+import json
 import math
+import os
 import random
 import re
 import sys
+from collections.abc import Iterable
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,7 +52,14 @@ BATCH_DIVERSIONS = [
 ]
 WITHDRAWAL_LOG_TIMINGS = ["before_withdrawal", "after_withdrawal"]
 SLOT_HEADERS = ["Slot ID", "Batch #", "Withdrawal Log Timing", "Delay Sec", "Navigation type"]
-BATCH_HEADERS = ["Batch #", "Batch Size", "Batch Diversion", "Inter Batch Delay Sec", "Diversion Sec", "Enabled"]
+BATCH_HEADERS = [
+    "Batch #",
+    "Batch Size",
+    "Batch Diversion",
+    "Inter Batch Delay Sec",
+    "Diversion Sec",
+    "Enabled",
+]
 
 
 def normalize_progress(value: Any) -> str:
@@ -65,7 +73,7 @@ def normalize_progress(value: Any) -> str:
     return text.replace(" ", "_") if text else ""
 
 
-def parse_sheet_date(value: Any) -> Optional[date]:
+def parse_sheet_date(value: Any) -> date | None:
     text = str(value or "").strip()
     if not text:
         return None
@@ -86,7 +94,7 @@ def parse_sheet_date(value: Any) -> Optional[date]:
     return None
 
 
-def parse_days_left(value: Any) -> Optional[int]:
+def parse_days_left(value: Any) -> int | None:
     text = str(value or "").strip()
     if not text:
         return None
@@ -138,24 +146,24 @@ def is_valid_linkedin_profile(value: Any) -> bool:
     return True
 
 
-def header_index(headers: Iterable[Any]) -> Dict[str, int]:
+def header_index(headers: Iterable[Any]) -> dict[str, int]:
     return {str(header or "").strip(): i for i, header in enumerate(headers)}
 
 
-def require_columns(index: Dict[str, int], columns: Iterable[str], tab_name: str) -> None:
+def require_columns(index: dict[str, int], columns: Iterable[str], tab_name: str) -> None:
     missing = [column for column in columns if column not in index]
     if missing:
         raise ValueError(f"{tab_name} is missing required columns: {', '.join(missing)}")
 
 
-def cell(row: List[Any], index: Dict[str, int], column: str) -> str:
+def cell(row: list[Any], index: dict[str, int], column: str) -> str:
     position = index.get(column)
     if position is None or position >= len(row):
         return ""
     return str(row[position] or "").strip()
 
 
-def read_worksheet_rows(worksheet: Any) -> Tuple[List[str], List[List[Any]]]:
+def read_worksheet_rows(worksheet: Any) -> tuple[list[str], list[list[Any]]]:
     values = worksheet.get_all_values()
     if not values:
         return [], []
@@ -175,7 +183,7 @@ def a1(row_number: int, col_number: int) -> str:
     return f"{letters}{row_number}"
 
 
-def batch_update_cells(worksheet: Any, updates: List[Tuple[int, int, Any]]) -> None:
+def batch_update_cells(worksheet: Any, updates: list[tuple[int, int, Any]]) -> None:
     if not updates:
         return
     payload = [
@@ -221,8 +229,10 @@ def engaged_linkedin_column(person_engaged: str) -> str:
     return "P1 LinkedIn"
 
 
-def build_prospect_lookup(rows: List[List[Any]], index: Dict[str, int]) -> Dict[str, Dict[str, str]]:
-    lookup: Dict[str, Dict[str, str]] = {}
+def build_prospect_lookup(
+    rows: list[list[Any]], index: dict[str, int]
+) -> dict[str, dict[str, str]]:
+    lookup: dict[str, dict[str, str]] = {}
     for row in rows:
         prospect_id = cell(row, index, "ID")
         if not prospect_id:
@@ -236,10 +246,10 @@ def build_prospect_lookup(rows: List[List[Any]], index: Dict[str, int]) -> Dict[
 
 
 def resolve_contact_linkedin(
-    row: List[Any],
-    outreach_index: Dict[str, int],
-    prospect_lookup: Dict[str, Dict[str, str]],
-) -> Tuple[str, str]:
+    row: list[Any],
+    outreach_index: dict[str, int],
+    prospect_lookup: dict[str, dict[str, str]],
+) -> tuple[str, str]:
     outreach_value = canonical_linkedin_profile(cell(row, outreach_index, "Contact Linkedin"))
     if is_valid_linkedin_profile(outreach_value):
         return outreach_value, "outreach_log_contact_linkedin"
@@ -256,13 +266,13 @@ def resolve_contact_linkedin(
 
 
 def build_available_targets(
-    rows: List[List[Any]],
-    index: Dict[str, int],
-    prospect_lookup: Dict[str, Dict[str, str]],
+    rows: list[list[Any]],
+    index: dict[str, int],
+    prospect_lookup: dict[str, dict[str, str]],
     today: date,
-) -> Dict[str, Any]:
-    available: List[Dict[str, Any]] = []
-    skipped: List[Dict[str, Any]] = []
+) -> dict[str, Any]:
+    available: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
     counts = {
         "scanned": len(rows),
         "conn_request_rows": 0,
@@ -289,15 +299,17 @@ def build_available_targets(
 
         if not is_valid_linkedin_profile(linkedin):
             counts["skipped_invalid_linkedin"] += 1
-            skipped.append({
-                "reason": "invalid_linkedin",
-                "row_number": offset,
-                "prospect_id": prospect_id,
-                "company": company,
-                "contact_name": contact_name,
-                "contact_linkedin": linkedin,
-                "linkedin_source": linkedin_source,
-            })
+            skipped.append(
+                {
+                    "reason": "invalid_linkedin",
+                    "row_number": offset,
+                    "prospect_id": prospect_id,
+                    "company": company,
+                    "contact_name": contact_name,
+                    "contact_linkedin": linkedin,
+                    "linkedin_source": linkedin_source,
+                }
+            )
             continue
 
         days_left_raw = cell(row, index, "Days Left")
@@ -309,22 +321,26 @@ def build_available_targets(
         if days_left is None:
             if days_left_raw:
                 counts["blocked_non_numeric_days_left"] += 1
-                skipped.append({
-                    "reason": "non_numeric_days_left",
-                    "row_number": offset,
-                    "prospect_id": prospect_id,
-                    "days_left": days_left_raw,
-                })
+                skipped.append(
+                    {
+                        "reason": "non_numeric_days_left",
+                        "row_number": offset,
+                        "prospect_id": prospect_id,
+                        "days_left": days_left_raw,
+                    }
+                )
                 continue
             if not sent_at:
                 counts["blocked_missing_sent_at"] += 1
-                skipped.append({
-                    "reason": "missing_sent_at",
-                    "row_number": offset,
-                    "prospect_id": prospect_id,
-                    "company": company,
-                    "contact_name": contact_name,
-                })
+                skipped.append(
+                    {
+                        "reason": "missing_sent_at",
+                        "row_number": offset,
+                        "prospect_id": prospect_id,
+                        "company": company,
+                        "contact_name": contact_name,
+                    }
+                )
                 continue
             days_left = calculate_days_left(sent_at, today)
             days_left_source = "sent_at_calculated"
@@ -333,31 +349,35 @@ def build_available_targets(
             counts["upcoming"] += 1
             continue
 
-        available.append({
-            "row_number": offset,
-            "prospect_id": prospect_id,
-            "company": company,
-            "person_engaged": cell(row, index, "Person Engaged"),
-            "contact_name": contact_name,
-            "primary_lane": cell(row, index, "Primary Lane"),
-            "contact_linkedin": linkedin,
-            "contact_linkedin_source": linkedin_source,
-            "current_progress": progress,
-            "touch_method": cell(row, index, "Touch Method"),
-            "outcome": cell(row, index, "Outcome"),
-            "last_action_date": cell(row, index, "Last Action Date"),
-            "sent_at": sent_at_raw,
-            "days_left": days_left,
-            "days_left_source": days_left_source,
-            "notes": cell(row, index, "Notes"),
-        })
+        available.append(
+            {
+                "row_number": offset,
+                "prospect_id": prospect_id,
+                "company": company,
+                "person_engaged": cell(row, index, "Person Engaged"),
+                "contact_name": contact_name,
+                "primary_lane": cell(row, index, "Primary Lane"),
+                "contact_linkedin": linkedin,
+                "contact_linkedin_source": linkedin_source,
+                "current_progress": progress,
+                "touch_method": cell(row, index, "Touch Method"),
+                "outcome": cell(row, index, "Outcome"),
+                "last_action_date": cell(row, index, "Last Action Date"),
+                "sent_at": sent_at_raw,
+                "days_left": days_left,
+                "days_left_source": days_left_source,
+                "notes": cell(row, index, "Notes"),
+            }
+        )
 
     counts["available"] = len(available)
     return {"available_targets": available, "skipped": skipped, "counts": counts}
 
 
-def build_seed(run_date: date, targets: List[Dict[str, Any]], user_seed: str = "") -> str:
-    material = "|".join([run_date.isoformat(), user_seed] + [str(t.get("prospect_id", "")) for t in targets])
+def build_seed(run_date: date, targets: list[dict[str, Any]], user_seed: str = "") -> str:
+    material = "|".join(
+        [run_date.isoformat(), user_seed] + [str(t.get("prospect_id", "")) for t in targets]
+    )
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
 
 
@@ -376,7 +396,9 @@ def determine_batch_count(count: int, rng: random.Random) -> int:
     return rng.randint(low, high)
 
 
-def distribute_batches(count: int, batch_count: int, rng: random.Random, max_batch_size: int = 15) -> List[int]:
+def distribute_batches(
+    count: int, batch_count: int, rng: random.Random, max_batch_size: int = 15
+) -> list[int]:
     if count <= 0 or batch_count <= 0:
         return []
     sizes = [1] * batch_count
@@ -384,7 +406,9 @@ def distribute_batches(count: int, batch_count: int, rng: random.Random, max_bat
     while remaining > 0:
         candidates = [i for i, size in enumerate(sizes) if size < max_batch_size]
         if not candidates:
-            raise ValueError(f"Cannot distribute {count} targets into {batch_count} batches capped at {max_batch_size}.")
+            raise ValueError(
+                f"Cannot distribute {count} targets into {batch_count} batches capped at {max_batch_size}."
+            )
         idx = rng.choice(candidates)
         add = rng.randint(1, min(remaining, max_batch_size - sizes[idx]))
         sizes[idx] += add
@@ -393,11 +417,13 @@ def distribute_batches(count: int, batch_count: int, rng: random.Random, max_bat
     return sizes
 
 
-def choose_navigation_types(count: int, rng: random.Random) -> List[str]:
+def choose_navigation_types(count: int, rng: random.Random) -> list[str]:
     if count <= 0:
         return []
     selector_percent = rng.randint(MIN_SELECTOR_BASED_PERCENT, MAX_SELECTOR_BASED_PERCENT)
-    selector_count = max(math.ceil(count * MIN_SELECTOR_BASED_PERCENT / 100), round(count * selector_percent / 100))
+    selector_count = max(
+        math.ceil(count * MIN_SELECTOR_BASED_PERCENT / 100), round(count * selector_percent / 100)
+    )
     selector_count = min(count, selector_count)
     values = ["selector_based"] * selector_count + ["direct_url"] * (count - selector_count)
     rng.shuffle(values)
@@ -405,11 +431,11 @@ def choose_navigation_types(count: int, rng: random.Random) -> List[str]:
 
 
 def prepare_runtime_plan(
-    targets: List[Dict[str, Any]],
+    targets: list[dict[str, Any]],
     run_date: date,
     cap: int,
     user_seed: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     selected = targets[:cap]
     seed = build_seed(run_date, selected, user_seed)
     rng = random.Random(seed)
@@ -421,47 +447,63 @@ def prepare_runtime_plan(
     navigation_types = choose_navigation_types(len(shuffled), rng)
     timing_values = list(WITHDRAWAL_LOG_TIMINGS)
 
-    batches: List[Dict[str, Any]] = []
+    batches: list[dict[str, Any]] = []
     cursor = 0
     for batch_number, batch_size in enumerate(batch_sizes, start=1):
         batch_targets = shuffled[cursor : cursor + batch_size]
         batch_navigation = navigation_types[cursor : cursor + batch_size]
         cursor += batch_size
         diversion_type = rng.choice(BATCH_DIVERSIONS)
-        diversion_target_index = rng.randrange(batch_size) if batch_size and diversion_type != "none" else None
+        diversion_target_index = (
+            rng.randrange(batch_size) if batch_size and diversion_type != "none" else None
+        )
         planned_targets = []
         for target_index, target in enumerate(batch_targets, start=1):
             planned = dict(target)
-            planned.update({
-                "batch_number": batch_number,
-                "target_index": target_index,
-                "delay_sec": rng.randint(*LEAD_DELAY_RANGE_SEC),
-                "navigation_type": batch_navigation[target_index - 1],
-                "withdrawal_log_timing": rng.choice(timing_values),
-                "activity_check": {
-                    "enabled": True,
-                    "basis": "activity_since_sent_at",
-                    "sent_at": target.get("sent_at", ""),
-                    "purpose": "retargeting_rank",
-                    "blocks_withdrawal": False,
-                },
-                "batch_diversion_target": diversion_target_index == target_index - 1,
-                "batch_diversion": diversion_type if diversion_target_index == target_index - 1 else "none",
-            })
+            planned.update(
+                {
+                    "batch_number": batch_number,
+                    "target_index": target_index,
+                    "delay_sec": rng.randint(*LEAD_DELAY_RANGE_SEC),
+                    "navigation_type": batch_navigation[target_index - 1],
+                    "withdrawal_log_timing": rng.choice(timing_values),
+                    "activity_check": {
+                        "enabled": True,
+                        "basis": "activity_since_sent_at",
+                        "sent_at": target.get("sent_at", ""),
+                        "purpose": "retargeting_rank",
+                        "blocks_withdrawal": False,
+                    },
+                    "batch_diversion_target": diversion_target_index == target_index - 1,
+                    "batch_diversion": diversion_type
+                    if diversion_target_index == target_index - 1
+                    else "none",
+                }
+            )
             planned_targets.append(planned)
 
-        batches.append({
-            "batch_number": batch_number,
-            "batch_size": batch_size,
-            "inter_batch_delay_sec": rng.randint(*INTER_BATCH_DELAY_RANGE_SEC) if batch_number < batch_count else 0,
-            "diversion": diversion_type,
-            "diversion_sec": rng.randint(*BATCH_DIVERSION_SEC_RANGE) if diversion_type != "none" else 0,
-            "diversion_target_index": None if diversion_target_index is None else diversion_target_index + 1,
-            "targets": planned_targets,
-        })
+        batches.append(
+            {
+                "batch_number": batch_number,
+                "batch_size": batch_size,
+                "inter_batch_delay_sec": rng.randint(*INTER_BATCH_DELAY_RANGE_SEC)
+                if batch_number < batch_count
+                else 0,
+                "diversion": diversion_type,
+                "diversion_sec": rng.randint(*BATCH_DIVERSION_SEC_RANGE)
+                if diversion_type != "none"
+                else 0,
+                "diversion_target_index": None
+                if diversion_target_index is None
+                else diversion_target_index + 1,
+                "targets": planned_targets,
+            }
+        )
 
     flattened = [target for batch in batches for target in batch["targets"]]
-    selector_based_count = sum(1 for target in flattened if target["navigation_type"] == "selector_based")
+    selector_based_count = sum(
+        1 for target in flattened if target["navigation_type"] == "selector_based"
+    )
     direct_url_count = sum(1 for target in flattened if target["navigation_type"] == "direct_url")
 
     return {
@@ -473,7 +515,9 @@ def prepare_runtime_plan(
         "navigation_mix": {
             "selector_based": selector_based_count,
             "direct_url": direct_url_count,
-            "selector_based_percent": round((selector_based_count / len(flattened)) * 100, 2) if flattened else 0,
+            "selector_based_percent": round((selector_based_count / len(flattened)) * 100, 2)
+            if flattened
+            else 0,
             "minimum_selector_based_percent": MIN_SELECTOR_BASED_PERCENT,
         },
         "batches": batches,
@@ -481,13 +525,15 @@ def prepare_runtime_plan(
     }
 
 
-def sequence_columns(headers: List[str]) -> Dict[str, int]:
-    def find_all(name: str) -> List[int]:
+def sequence_columns(headers: list[str]) -> dict[str, int]:
+    def find_all(name: str) -> list[int]:
         return [i for i, header in enumerate(headers) if str(header or "").strip() == name]
 
     batch_cols = find_all("Batch #")
     if len(batch_cols) < 2:
-        raise ValueError("Withdrawal sequence needs two 'Batch #' columns: slot table and batch table.")
+        raise ValueError(
+            "Withdrawal sequence needs two 'Batch #' columns: slot table and batch table."
+        )
 
     cols = {
         "slot_id": headers.index("Slot ID"),
@@ -513,10 +559,10 @@ def sequence_columns(headers: List[str]) -> Dict[str, int]:
     return cols
 
 
-def ensure_sequence_headers(worksheet: Any) -> List[str]:
+def ensure_sequence_headers(worksheet: Any) -> list[str]:
     values = worksheet.get_all_values()
     headers = [str(header or "").strip() for header in values[0]] if values else []
-    updates: List[Tuple[int, int, Any]] = []
+    updates: list[tuple[int, int, Any]] = []
     for index, header in enumerate(SLOT_HEADERS, start=1):
         if len(headers) < index or headers[index - 1] != header:
             updates.append((1, index, header))
@@ -529,10 +575,10 @@ def ensure_sequence_headers(worksheet: Any) -> List[str]:
     return [str(header or "").strip() for header in worksheet.row_values(1)]
 
 
-def write_sequence_plan(worksheet: Any, plan: Dict[str, Any]) -> None:
+def write_sequence_plan(worksheet: Any, plan: dict[str, Any]) -> None:
     headers = ensure_sequence_headers(worksheet)
     cols = sequence_columns(headers)
-    updates: List[Tuple[int, int, Any]] = []
+    updates: list[tuple[int, int, Any]] = []
     queue = plan["queue"]
     batches = plan["batches"]
     rows_to_clear = max(worksheet.row_count, len(queue) + 1, len(batches) + 1)
@@ -555,40 +601,56 @@ def write_sequence_plan(worksheet: Any, plan: Dict[str, Any]) -> None:
 
     for slot_index, target in enumerate(queue, start=1):
         row_number = slot_index + 1
-        updates.extend([
-            (row_number, cols["slot_id"] + 1, slot_index),
-            (row_number, cols["slot_batch"] + 1, target["batch_number"]),
-            (row_number, cols["withdrawal_log_timing"] + 1, display_withdrawal_log_timing(target["withdrawal_log_timing"])),
-            (row_number, cols["slot_delay_sec"] + 1, target["delay_sec"]),
-            (row_number, cols["navigation_type"] + 1, display_navigation_type(target["navigation_type"])),
-        ])
+        updates.extend(
+            [
+                (row_number, cols["slot_id"] + 1, slot_index),
+                (row_number, cols["slot_batch"] + 1, target["batch_number"]),
+                (
+                    row_number,
+                    cols["withdrawal_log_timing"] + 1,
+                    display_withdrawal_log_timing(target["withdrawal_log_timing"]),
+                ),
+                (row_number, cols["slot_delay_sec"] + 1, target["delay_sec"]),
+                (
+                    row_number,
+                    cols["navigation_type"] + 1,
+                    display_navigation_type(target["navigation_type"]),
+                ),
+            ]
+        )
 
     for batch in batches:
         row_number = int(batch["batch_number"]) + 1
-        updates.extend([
-            (row_number, cols["batch_batch"] + 1, batch["batch_number"]),
-            (row_number, cols["batch_size"] + 1, batch["batch_size"]),
-            (row_number, cols["batch_diversion"] + 1, batch["diversion"]),
-            (row_number, cols["inter_batch_delay_sec"] + 1, batch["inter_batch_delay_sec"]),
-            (row_number, cols["diversion_sec"] + 1, batch["diversion_sec"]),
-            (row_number, cols["enabled"] + 1, "yes"),
-        ])
+        updates.extend(
+            [
+                (row_number, cols["batch_batch"] + 1, batch["batch_number"]),
+                (row_number, cols["batch_size"] + 1, batch["batch_size"]),
+                (row_number, cols["batch_diversion"] + 1, batch["diversion"]),
+                (row_number, cols["inter_batch_delay_sec"] + 1, batch["inter_batch_delay_sec"]),
+                (row_number, cols["diversion_sec"] + 1, batch["diversion_sec"]),
+                (row_number, cols["enabled"] + 1, "yes"),
+            ]
+        )
 
     batch_update_cells(worksheet, updates)
 
 
-def read_sequence_plan(worksheet: Any, selected_targets: List[Dict[str, Any]], generated_plan: Dict[str, Any]) -> Dict[str, Any]:
+def read_sequence_plan(
+    worksheet: Any, selected_targets: list[dict[str, Any]], generated_plan: dict[str, Any]
+) -> dict[str, Any]:
     headers, rows = read_worksheet_rows(worksheet)
     cols = sequence_columns(headers)
     targets_by_slot = {i + 1: dict(target) for i, target in enumerate(selected_targets)}
-    batch_config: Dict[int, Dict[str, Any]] = {}
-    slot_config: Dict[int, Dict[str, Any]] = {}
+    batch_config: dict[int, dict[str, Any]] = {}
+    slot_config: dict[int, dict[str, Any]] = {}
 
     for row in rows:
         batch_raw = row[cols["batch_batch"]] if cols["batch_batch"] < len(row) else ""
         if str(batch_raw).strip():
             batch_number = int(float(str(batch_raw).strip()))
-            enabled = str(row[cols["enabled"]] if cols["enabled"] < len(row) else "").strip().lower()
+            enabled = (
+                str(row[cols["enabled"]] if cols["enabled"] < len(row) else "").strip().lower()
+            )
             if enabled in {"", "yes", "y", "true", "1"}:
                 batch_config[batch_number] = {
                     "batch_number": batch_number,
@@ -607,18 +669,28 @@ def read_sequence_plan(worksheet: Any, selected_targets: List[Dict[str, Any]], g
                 slot_config[slot_id] = {
                     "slot_id": slot_id,
                     "batch_number": batch_number,
-                    "withdrawal_log_timing": normalize_withdrawal_log_timing(row[cols["withdrawal_log_timing"]]),
+                    "withdrawal_log_timing": normalize_withdrawal_log_timing(
+                        row[cols["withdrawal_log_timing"]]
+                    ),
                     "delay_sec": int(float(row[cols["slot_delay_sec"]] or 0)),
                     "navigation_type": normalize_navigation_type(row[cols["navigation_type"]]),
                 }
 
-    batches: List[Dict[str, Any]] = []
-    queue: List[Dict[str, Any]] = []
+    batches: list[dict[str, Any]] = []
+    queue: list[dict[str, Any]] = []
     for batch_number in sorted(batch_config):
         batch = batch_config[batch_number]
-        slots = [slot for slot in sorted(slot_config.values(), key=lambda x: x["slot_id"]) if slot["batch_number"] == batch_number]
+        slots = [
+            slot
+            for slot in sorted(slot_config.values(), key=lambda x: x["slot_id"])
+            if slot["batch_number"] == batch_number
+        ]
         planned_targets = []
-        diversion_target_slot = generated_plan["batches"][batch_number - 1].get("diversion_target_index") if batch_number - 1 < len(generated_plan["batches"]) else None
+        diversion_target_slot = (
+            generated_plan["batches"][batch_number - 1].get("diversion_target_index")
+            if batch_number - 1 < len(generated_plan["batches"])
+            else None
+        )
         if diversion_target_slot and diversion_target_slot > len(slots):
             diversion_target_slot = len(slots) if slots else None
         for local_index, slot in enumerate(slots, start=1):
@@ -626,37 +698,45 @@ def read_sequence_plan(worksheet: Any, selected_targets: List[Dict[str, Any]], g
             if not target:
                 continue
             planned = dict(target)
-            planned.update({
-                "batch_number": batch_number,
-                "target_index": local_index,
-                "slot_id": slot["slot_id"],
-                "delay_sec": slot["delay_sec"],
-                "navigation_type": slot["navigation_type"],
-                "withdrawal_log_timing": slot["withdrawal_log_timing"],
-                "activity_check": {
-                    "enabled": True,
-                    "basis": "activity_since_sent_at",
-                    "sent_at": target.get("sent_at", ""),
-                    "purpose": "retargeting_rank",
-                    "blocks_withdrawal": False,
-                },
-                "batch_diversion_target": diversion_target_slot == local_index,
-                "batch_diversion": batch["diversion"] if diversion_target_slot == local_index else "none",
-            })
+            planned.update(
+                {
+                    "batch_number": batch_number,
+                    "target_index": local_index,
+                    "slot_id": slot["slot_id"],
+                    "delay_sec": slot["delay_sec"],
+                    "navigation_type": slot["navigation_type"],
+                    "withdrawal_log_timing": slot["withdrawal_log_timing"],
+                    "activity_check": {
+                        "enabled": True,
+                        "basis": "activity_since_sent_at",
+                        "sent_at": target.get("sent_at", ""),
+                        "purpose": "retargeting_rank",
+                        "blocks_withdrawal": False,
+                    },
+                    "batch_diversion_target": diversion_target_slot == local_index,
+                    "batch_diversion": batch["diversion"]
+                    if diversion_target_slot == local_index
+                    else "none",
+                }
+            )
             planned_targets.append(planned)
             queue.append(planned)
-        batches.append({
-            "batch_number": batch_number,
-            "batch_size": len(planned_targets),
-            "configured_batch_size": batch["batch_size"],
-            "inter_batch_delay_sec": batch["inter_batch_delay_sec"],
-            "diversion": batch["diversion"],
-            "diversion_sec": batch["diversion_sec"],
-            "diversion_target_index": diversion_target_slot,
-            "targets": planned_targets,
-        })
+        batches.append(
+            {
+                "batch_number": batch_number,
+                "batch_size": len(planned_targets),
+                "configured_batch_size": batch["batch_size"],
+                "inter_batch_delay_sec": batch["inter_batch_delay_sec"],
+                "diversion": batch["diversion"],
+                "diversion_sec": batch["diversion_sec"],
+                "diversion_target_index": diversion_target_slot,
+                "targets": planned_targets,
+            }
+        )
 
-    selector_based_count = sum(1 for target in queue if target["navigation_type"] == "selector_based")
+    selector_based_count = sum(
+        1 for target in queue if target["navigation_type"] == "selector_based"
+    )
     direct_url_count = sum(1 for target in queue if target["navigation_type"] == "direct_url")
     return {
         **generated_plan,
@@ -665,7 +745,9 @@ def read_sequence_plan(worksheet: Any, selected_targets: List[Dict[str, Any]], g
         "navigation_mix": {
             "selector_based": selector_based_count,
             "direct_url": direct_url_count,
-            "selector_based_percent": round((selector_based_count / len(queue)) * 100, 2) if queue else 0,
+            "selector_based_percent": round((selector_based_count / len(queue)) * 100, 2)
+            if queue
+            else 0,
             "minimum_selector_based_percent": MIN_SELECTOR_BASED_PERCENT,
         },
         "batches": batches,
@@ -674,12 +756,14 @@ def read_sequence_plan(worksheet: Any, selected_targets: List[Dict[str, Any]], g
     }
 
 
-def write_json(path: Path, payload: Dict[str, Any]) -> None:
+def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
-def append_jsonl(path: Path, events: Iterable[Dict[str, Any]]) -> None:
+def append_jsonl(path: Path, events: Iterable[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         for event in events:
@@ -687,17 +771,32 @@ def append_jsonl(path: Path, events: Iterable[Dict[str, Any]]) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Prepare overdue connection withdrawals from Outreach Log.")
+    parser = argparse.ArgumentParser(
+        description="Prepare overdue connection withdrawals from Outreach Log."
+    )
     parser.add_argument("--credentials", default=CREDS_PATH)
     parser.add_argument("--sheet-url", default=os.environ.get("OBF_SHEET_URL", OBF_SHEET_URL))
     parser.add_argument("--timezone", default=DEFAULT_TIMEZONE)
-    parser.add_argument("--date", default="", help="Run date as YYYY-MM-DD. Defaults to current date in timezone.")
-    parser.add_argument("--cap", type=int, default=DEFAULT_CAP, help=f"Max queued targets for this run. Hard capped at {MAX_CAP}.")
+    parser.add_argument(
+        "--date", default="", help="Run date as YYYY-MM-DD. Defaults to current date in timezone."
+    )
+    parser.add_argument(
+        "--cap",
+        type=int,
+        default=DEFAULT_CAP,
+        help=f"Max queued targets for this run. Hard capped at {MAX_CAP}.",
+    )
     parser.add_argument("--limit", type=int, default=0, help="Alias for --cap for test runs.")
-    parser.add_argument("--all-due", action="store_true", help="Queue every due target for an intentional catch-up run, bypassing the normal cap.")
+    parser.add_argument(
+        "--all-due",
+        action="store_true",
+        help="Queue every due target for an intentional catch-up run, bypassing the normal cap.",
+    )
     parser.add_argument("--seed", default="", help="Optional deterministic seed salt.")
     parser.add_argument("--sequence-tab", default=WITHDRAWAL_SEQUENCE_TAB)
-    parser.add_argument("--dry-run", action="store_true", help="Do not write local session/journal files.")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Do not write local session/journal files."
+    )
     parser.add_argument("--session", default="", help="Override local session JSON path.")
     parser.add_argument("--journal", default="", help="Override local journal JSONL path.")
     return parser.parse_args()
@@ -705,12 +804,22 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    run_date = parse_sheet_date(args.date) if args.date else datetime.now(ZoneInfo(args.timezone)).date()
+    run_date = (
+        parse_sheet_date(args.date) if args.date else datetime.now(ZoneInfo(args.timezone)).date()
+    )
     if not run_date:
         raise ValueError(f"Invalid --date: {args.date}")
 
-    session_path = Path(args.session) if args.session else ROOT / "state" / "withdrawal_sessions" / f"{run_date.isoformat()}.json"
-    journal_path = Path(args.journal) if args.journal else ROOT / "state" / "withdrawal_journal" / f"{run_date.isoformat()}.jsonl"
+    session_path = (
+        Path(args.session)
+        if args.session
+        else ROOT / "state" / "withdrawal_sessions" / f"{run_date.isoformat()}.json"
+    )
+    journal_path = (
+        Path(args.journal)
+        if args.journal
+        else ROOT / "state" / "withdrawal_journal" / f"{run_date.isoformat()}.jsonl"
+    )
 
     client = get_client(args.credentials)
     spreadsheet = open_sheet(client, args.sheet_url)
@@ -740,11 +849,17 @@ def main() -> int:
         OUTREACH_LOG_TAB,
     )
     require_columns(index, ["Primary Lane"], OUTREACH_LOG_TAB)
-    require_columns(prospects_index, ["ID", "P1 LinkedIn", "P2 LinkedIn", "Engaged Person"], PROSPECTS_TAB)
+    require_columns(
+        prospects_index, ["ID", "P1 LinkedIn", "P2 LinkedIn", "Engaged Person"], PROSPECTS_TAB
+    )
 
     prospect_lookup = build_prospect_lookup(prospects_rows, prospects_index)
     assembled = build_available_targets(rows, index, prospect_lookup, run_date)
-    requested_cap = len(assembled["available_targets"]) if args.all_due else (args.limit if args.limit > 0 else args.cap)
+    requested_cap = (
+        len(assembled["available_targets"])
+        if args.all_due
+        else (args.limit if args.limit > 0 else args.cap)
+    )
     cap = max(1, requested_cap if args.all_due else min(requested_cap, MAX_CAP))
     generated_plan = prepare_runtime_plan(assembled["available_targets"], run_date, cap, args.seed)
     if not args.dry_run:
@@ -780,27 +895,46 @@ def main() -> int:
 
     if not args.dry_run:
         write_json(session_path, payload)
-        append_jsonl(journal_path, [
-            {
-                "event": "withdrawal_queue_prepared",
-                "date": run_date.isoformat(),
-                "session": str(session_path),
-                "summary": summary,
-            },
-            *({"event": "withdrawal_batch_prepared", **{k: v for k, v in batch.items() if k != "targets"}} for batch in plan["batches"]),
-            *({"event": "withdrawal_target_prepared", **target} for target in plan["queue"]),
-        ])
+        append_jsonl(
+            journal_path,
+            [
+                {
+                    "event": "withdrawal_queue_prepared",
+                    "date": run_date.isoformat(),
+                    "session": str(session_path),
+                    "summary": summary,
+                },
+                *(
+                    {
+                        "event": "withdrawal_batch_prepared",
+                        **{k: v for k, v in batch.items() if k != "targets"},
+                    }
+                    for batch in plan["batches"]
+                ),
+                *({"event": "withdrawal_target_prepared", **target} for target in plan["queue"]),
+            ],
+        )
 
-    print(json.dumps({
-        "ok": True,
-        "dry_run": bool(args.dry_run),
-        "session": str(session_path),
-        "journal": str(journal_path),
-        "summary": summary,
-        "first_targets": plan["queue"][:5],
-        "batch_preview": [{k: v for k, v in batch.items() if k != "targets"} for batch in plan["batches"][:5]],
-        "skipped_sample": assembled["skipped"][:5],
-    }, indent=2, ensure_ascii=False, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "dry_run": bool(args.dry_run),
+                "session": str(session_path),
+                "journal": str(journal_path),
+                "summary": summary,
+                "first_targets": plan["queue"][:5],
+                "batch_preview": [
+                    {k: v for k, v in batch.items() if k != "targets"}
+                    for batch in plan["batches"][:5]
+                ],
+                "skipped_sample": assembled["skipped"][:5],
+            },
+            indent=2,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
     return 0
 
 

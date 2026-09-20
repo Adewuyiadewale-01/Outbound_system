@@ -8,9 +8,10 @@ import random
 import re
 import sys
 import time
+from collections.abc import Callable, Sequence
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 import gspread
 
@@ -36,9 +37,15 @@ from linkedin_outreach_session import (  # noqa: E402
     sequence_date_key,
     sheet_date,
 )
-from sheets_helper import get_client, normalize_rows, open_sheet, require_columns  # noqa: E402
+from prefinal_queue import (  # noqa: E402
+    QUEUE_ROW_COLUMNS,
+    enqueue_batch,
+    load_batch,
+    next_activity_batch,
+    update_batch_status,
+)
 from runtime_environment import load_repo_env  # noqa: E402
-from prefinal_queue import QUEUE_ROW_COLUMNS, enqueue_batch, load_batch, next_activity_batch, update_batch_status  # noqa: E402
+from sheets_helper import get_client, normalize_rows, open_sheet, require_columns  # noqa: E402
 
 load_repo_env()
 
@@ -54,12 +61,28 @@ DEFAULT_CREDS = REPO_CREDS if REPO_CREDS.exists() else OPENCLAW_CREDS
 STATE_DIR = ROOT / "state" / "activity_sessions"
 JOURNAL_DIR = ROOT / "state" / "activity_journal"
 
-BASE_COLUMNS = ["ID", "Company", "Website", "Company LinkedIn", "Emp Count", "Source Tab", "Primary Lane", "Use"]
+BASE_COLUMNS = [
+    "ID",
+    "Company",
+    "Website",
+    "Company LinkedIn",
+    "Emp Count",
+    "Source Tab",
+    "Primary Lane",
+    "Use",
+]
 PERSON_COLUMNS = ["Name", "Title", "LinkedIn", "Email"]
 P1_COLUMNS = [f"P1 {column}" for column in PERSON_COLUMNS]
 P2_COLUMNS = [f"P2 {column}" for column in PERSON_COLUMNS]
 ACTIVITY_COLUMNS = ["P1 Activity", "P2 Activity"]
-FINAL_REQUIRED_COLUMNS = BASE_COLUMNS + P1_COLUMNS + ACTIVITY_COLUMNS[:1] + P2_COLUMNS + ACTIVITY_COLUMNS[1:] + ["Category"]
+FINAL_REQUIRED_COLUMNS = (
+    BASE_COLUMNS
+    + P1_COLUMNS
+    + ACTIVITY_COLUMNS[:1]
+    + P2_COLUMNS
+    + ACTIVITY_COLUMNS[1:]
+    + ["Category"]
+)
 CATEGORY_PRIORITY = {"Hyper": 0, "High": 1, "Alpha-medium": 2, "Medium": 3, "Low": 4}
 ACTIVITY_SCORE = {"Very active": 2, "Active": 1, "Not active": 0, "": 0}
 ACTIVITY_VALUES = {"Very active", "Active", "Not active", ""}
@@ -126,13 +149,13 @@ def _parse_positive_int(value: Any, default: int = 0) -> int:
 
 
 def next_activity_retry_record(
-    previous: Optional[Dict[str, Any]],
+    previous: dict[str, Any] | None,
     *,
-    target: Dict[str, Any],
+    target: dict[str, Any],
     reason: str,
     danger: str,
     max_attempts: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build the durable retry state for one profile-level activity failure."""
     prior = previous or {}
     attempts = _parse_positive_int(prior.get("attempts")) + 1
@@ -152,11 +175,11 @@ def next_activity_retry_record(
 def persist_activity_retry_attempt(
     queue_fingerprint: str,
     *,
-    target: Dict[str, Any],
+    target: dict[str, Any],
     reason: str,
     danger: str,
     max_attempts: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Persist retry accounting so the cap survives dates and worker restarts."""
     batch = load_batch(queue_fingerprint)
     retry_state = dict(batch.get("activity_retry_state") or {})
@@ -179,9 +202,9 @@ def persist_activity_retry_attempt(
 def persist_terminal_activity_issue(
     queue_fingerprint: str,
     *,
-    target: Dict[str, Any],
+    target: dict[str, Any],
     terminal_reason: str,
-    retry_record: Dict[str, Any],
+    retry_record: dict[str, Any],
 ) -> None:
     """Make an exhausted profile immediately ineligible for future sessions."""
     batch = load_batch(queue_fingerprint)
@@ -237,7 +260,7 @@ def activity_journal_path(date_value: str) -> Path:
     return JOURNAL_DIR / f"{sequence_date_key(date_value)}.jsonl"
 
 
-def append_jsonl(path: Path, payload: Dict[str, Any]) -> None:
+def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
@@ -271,7 +294,7 @@ def is_blocking_danger(value: Any) -> bool:
     return bool(text and any(pattern in text for pattern in BLOCKING_DANGER_PATTERNS))
 
 
-def hard_read_failure_reason(detail: Dict[str, Any]) -> str:
+def hard_read_failure_reason(detail: dict[str, Any]) -> str:
     if not isinstance(detail, dict) or not detail.get("error"):
         return ""
     danger = clean_text(detail.get("danger"))
@@ -295,15 +318,15 @@ def blocked_result(
     *,
     args: argparse.Namespace,
     date_value: str,
-    targets: List[Dict[str, Any]],
+    targets: list[dict[str, Any]],
     completed: int,
     skipped_resume: int,
     bridged: int,
-    failures: List[Dict[str, Any]],
-    sequence: Dict[str, Any],
-    state: Optional[Dict[str, Any]] = None,
+    failures: list[dict[str, Any]],
+    sequence: dict[str, Any],
+    state: dict[str, Any] | None = None,
     status: str = "blocked",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     result = {
         "ok": False,
         "status": status,
@@ -329,12 +352,14 @@ def blocked_result(
         state["bridged_rows_count"] = bridged
         state["failures"] = failures
         save_session_state(date_value, state)
-        journal_event(date_value, "run_paused" if status.startswith("paused_") else "run_blocked", **result)
+        journal_event(
+            date_value, "run_paused" if status.startswith("paused_") else "run_blocked", **result
+        )
     emit_progress(date_value, status, **result)
     return result
 
 
-def load_session_state(date_value: str) -> Dict[str, Any]:
+def load_session_state(date_value: str) -> dict[str, Any]:
     path = activity_session_path(date_value)
     if not path.exists():
         return {"date": sheet_date(date_value), "targets": {}, "bridged_rows": {}}
@@ -347,26 +372,30 @@ def load_session_state(date_value: str) -> Dict[str, Any]:
     return payload
 
 
-def save_session_state(date_value: str, state: Dict[str, Any]) -> None:
+def save_session_state(date_value: str, state: dict[str, Any]) -> None:
     state["date"] = sheet_date(date_value)
     state["updated_at"] = datetime.now().isoformat(timespec="seconds")
-    activity_session_path(date_value).write_text(json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+    activity_session_path(date_value).write_text(
+        json.dumps(state, indent=2, ensure_ascii=True) + "\n", encoding="utf-8"
+    )
 
 
 def prepare_session_state(
     *,
     date_value: str,
-    state: Dict[str, Any],
-    targets: List[Dict[str, Any]],
-    runtime_plan: List[Dict[str, Any]],
-    sequence: Dict[str, Any],
+    state: dict[str, Any],
+    targets: list[dict[str, Any]],
+    runtime_plan: list[dict[str, Any]],
+    sequence: dict[str, Any],
     queue_fingerprint: str,
     dry_run: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     prepared_targets = []
     for index, target in enumerate(targets):
         plan_item = runtime_plan[index] if index < len(runtime_plan) else {}
-        original_profile_url = clean_text(target.get("original_profile_url")) or clean_text(target.get("profile_url"))
+        original_profile_url = clean_text(target.get("original_profile_url")) or clean_text(
+            target.get("profile_url")
+        )
         profile_url = canonical_linkedin_profile_url(target.get("profile_url"))
         prepared_targets.append(
             {
@@ -403,7 +432,9 @@ def prepare_session_state(
     return state
 
 
-def read_worksheet(credentials_path: Path, sheet_url: str, tab_name: str) -> Tuple[List[str], List[Dict[str, Any]]]:
+def read_worksheet(
+    credentials_path: Path, sheet_url: str, tab_name: str
+) -> tuple[list[str], list[dict[str, Any]]]:
     client = get_client(str(credentials_path))
     spreadsheet = open_sheet(client, sheet_url)
     worksheet = spreadsheet.worksheet(tab_name)
@@ -413,7 +444,7 @@ def read_worksheet(credentials_path: Path, sheet_url: str, tab_name: str) -> Tup
     return values[0], normalize_rows(values)
 
 
-def person_from_row(row: Dict[str, Any], prefix: str) -> Dict[str, str]:
+def person_from_row(row: dict[str, Any], prefix: str) -> dict[str, str]:
     return {
         "name": clean_text(row.get(f"{prefix} Name")),
         "title": clean_text(row.get(f"{prefix} Title")),
@@ -423,7 +454,7 @@ def person_from_row(row: Dict[str, Any], prefix: str) -> Dict[str, str]:
     }
 
 
-def set_person(row: Dict[str, Any], prefix: str, person: Dict[str, str]) -> None:
+def set_person(row: dict[str, Any], prefix: str, person: dict[str, str]) -> None:
     row[f"{prefix} Name"] = clean_text(person.get("name"))
     row[f"{prefix} Title"] = clean_text(person.get("title"))
     row[f"{prefix} LinkedIn"] = normalize_url(person.get("linkedin"))
@@ -446,22 +477,24 @@ def normalize_navigation_type(value: Any) -> str:
 
 
 def navigation_type_key(value: Any) -> str:
-    return "selector_based" if normalize_navigation_type(value) == "Selector-based" else "direct_url"
+    return (
+        "selector_based" if normalize_navigation_type(value) == "Selector-based" else "direct_url"
+    )
 
 
-def target_key(row: Dict[str, Any], prefix: str) -> str:
+def target_key(row: dict[str, Any], prefix: str) -> str:
     lead_id = clean_text(row.get("ID")) or f"row:{row.get('_row_number')}"
     return f"{lead_id}:{prefix}"
 
 
 def extract_targets(
-    rows: List[Dict[str, Any]],
-    recorded_activity: Optional[Dict[str, Any]] = None,
-    recorded_issues: Optional[Dict[str, Any]] = None,
-) -> List[Dict[str, Any]]:
+    rows: list[dict[str, Any]],
+    recorded_activity: dict[str, Any] | None = None,
+    recorded_issues: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     recorded_activity = recorded_activity or {}
     recorded_issues = recorded_issues or {}
-    targets: List[Dict[str, Any]] = []
+    targets: list[dict[str, Any]] = []
     for row in rows:
         if not clean_text(row.get("ID")) and not clean_text(row.get("Company")):
             continue
@@ -473,10 +506,15 @@ def extract_targets(
                 continue
             # Once a durable queue decision exists, this profile is no longer
             # eligible for another Activity Check preparation.
-            if normalize_activity_value((recorded_activity.get(target_key(row, prefix)) or {}).get("activity_value", "")):
+            if normalize_activity_value(
+                (recorded_activity.get(target_key(row, prefix)) or {}).get("activity_value", "")
+            ):
                 continue
             issue = recorded_issues.get(target_key(row, prefix)) or {}
-            if issue.get("terminal") and canonical_linkedin_profile_url(issue.get("profile_url")) == profile_url:
+            if (
+                issue.get("terminal")
+                and canonical_linkedin_profile_url(issue.get("profile_url")) == profile_url
+            ):
                 continue
             targets.append(
                 {
@@ -493,16 +531,20 @@ def extract_targets(
     return targets
 
 
-def is_aggregate_activity_container(activity: Dict[str, Any]) -> bool:
+def is_aggregate_activity_container(activity: dict[str, Any]) -> bool:
     sample = clean_text(activity.get("card_text_sample")).lower()
     return sample.startswith("all activity posts comments") and "loaded " in sample
 
 
-def non_aggregate_entries(tab: Dict[str, Any]) -> List[Dict[str, Any]]:
-    return [item for item in tab.get("activities", []) or [] if not is_aggregate_activity_container(item)]
+def non_aggregate_entries(tab: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        item
+        for item in tab.get("activities", []) or []
+        if not is_aggregate_activity_container(item)
+    ]
 
 
-def count_entries_within(tab: Dict[str, Any], days_limit: int) -> int:
+def count_entries_within(tab: dict[str, Any], days_limit: int) -> int:
     count = 0
     for activity in non_aggregate_entries(tab):
         days = relative_days_from_time_text(activity.get("time_text", ""))
@@ -511,7 +553,7 @@ def count_entries_within(tab: Dict[str, Any], days_limit: int) -> int:
     return count
 
 
-def activity_detail_should_defer(activity_detail: Dict[str, Any]) -> bool:
+def activity_detail_should_defer(activity_detail: dict[str, Any]) -> bool:
     return activity_detail_empty_success_reason(activity_detail) == "activity_feed_not_hydrated"
 
 
@@ -529,25 +571,35 @@ def detail_contains_text(value: Any, needles: Sequence[str]) -> bool:
     return False
 
 
-def activity_detail_empty_success_reason(activity_detail: Dict[str, Any]) -> str:
+def activity_detail_empty_success_reason(activity_detail: dict[str, Any]) -> str:
     if not isinstance(activity_detail, dict) or activity_detail.get("error"):
         return ""
     tabs = activity_detail.get("tabs", {}) or {}
-    checked_tabs = [tabs.get(name, {}) or {} for name in ("posts", "reactions", "comments") if name in tabs]
+    checked_tabs = [
+        tabs.get(name, {}) or {} for name in ("posts", "reactions", "comments") if name in tabs
+    ]
     if detail_contains_text(activity_detail, ("invalid_profile_or_404", "/404/")):
         return "invalid_profile_or_404"
     if not checked_tabs:
         return "activity_feed_not_hydrated"
-    if not activity_level(activity_detail) and any(tab.get("activity_classification_uncertain") for tab in checked_tabs):
+    if not activity_level(activity_detail) and any(
+        tab.get("activity_classification_uncertain") for tab in checked_tabs
+    ):
         return "activity_classification_uncertain"
-    if any(int(tab.get("total_visible", 0) or 0) > 0 or non_aggregate_entries(tab) for tab in checked_tabs):
+    if any(
+        int(tab.get("total_visible", 0) or 0) > 0 or non_aggregate_entries(tab)
+        for tab in checked_tabs
+    ):
         return ""
-    if all(clean_text((tab.get("feed_state") or {}).get("reason")) == "explicit_empty_state" for tab in checked_tabs):
+    if all(
+        clean_text((tab.get("feed_state") or {}).get("reason")) == "explicit_empty_state"
+        for tab in checked_tabs
+    ):
         return ""
     return "activity_feed_not_hydrated"
 
 
-def activity_level(activity_detail: Dict[str, Any]) -> str:
+def activity_level(activity_detail: dict[str, Any]) -> str:
     if not activity_detail or activity_detail.get("error"):
         return ""
     tabs = activity_detail.get("tabs", {}) if isinstance(activity_detail, dict) else {}
@@ -555,33 +607,54 @@ def activity_level(activity_detail: Dict[str, Any]) -> str:
     comments = tabs.get("comments", {}) or {}
     reactions = tabs.get("reactions", {}) or {}
     if not any(non_aggregate_entries(tab) for tab in (posts, comments, reactions)):
-        checked_tabs = [tabs.get(name, {}) or {} for name in ("posts", "reactions", "comments") if name in tabs]
-        all_explicitly_empty = (
-            len(checked_tabs) == 3
-            and all(clean_text((tab.get("feed_state") or {}).get("reason")) == "explicit_empty_state" for tab in checked_tabs)
+        checked_tabs = [
+            tabs.get(name, {}) or {} for name in ("posts", "reactions", "comments") if name in tabs
+        ]
+        all_explicitly_empty = len(checked_tabs) == 3 and all(
+            clean_text((tab.get("feed_state") or {}).get("reason")) == "explicit_empty_state"
+            for tab in checked_tabs
         )
         if all_explicitly_empty:
             return "Not active"
         return ""
-    if count_entries_within(posts, 7) >= 1 or count_entries_within(comments, 7) >= 2 or count_entries_within(reactions, 7) >= 2:
+    if (
+        count_entries_within(posts, 7) >= 1
+        or count_entries_within(comments, 7) >= 2
+        or count_entries_within(reactions, 7) >= 2
+    ):
         return "Very active"
-    if count_entries_within(posts, 14) >= 1 or count_entries_within(comments, 30) + count_entries_within(reactions, 30) >= 5:
+    if (
+        count_entries_within(posts, 14) >= 1
+        or count_entries_within(comments, 30) + count_entries_within(reactions, 30) >= 5
+    ):
         return "Active"
     if any(tab.get("activity_classification_uncertain") for tab in (posts, comments, reactions)):
         return ""
     return "Not active"
 
 
-def activity_evidence(profile_url: str, activity_detail: Dict[str, Any]) -> Dict[str, Any]:
+def activity_evidence(profile_url: str, activity_detail: dict[str, Any]) -> dict[str, Any]:
     tabs = activity_detail.get("tabs", {}) if isinstance(activity_detail, dict) else {}
-    evidence: Dict[str, Any] = {
+    evidence: dict[str, Any] = {
         "profile_url": profile_url,
-        "original_profile_url": activity_detail.get("original_profile_url", "") if isinstance(activity_detail, dict) else "",
-        "canonical_profile_url": activity_detail.get("canonical_profile_url", profile_url) if isinstance(activity_detail, dict) else profile_url,
-        "profile_url_normalized": bool(activity_detail.get("profile_url_normalized")) if isinstance(activity_detail, dict) else False,
-        "navigation_type_used": activity_detail.get("navigation_type_used", "") if isinstance(activity_detail, dict) else "",
-        "fresh_tab_recovery": bool(activity_detail.get("fresh_tab_recovery")) if isinstance(activity_detail, dict) else False,
-        "page_url": activity_detail.get("page_url", "") if isinstance(activity_detail, dict) else "",
+        "original_profile_url": activity_detail.get("original_profile_url", "")
+        if isinstance(activity_detail, dict)
+        else "",
+        "canonical_profile_url": activity_detail.get("canonical_profile_url", profile_url)
+        if isinstance(activity_detail, dict)
+        else profile_url,
+        "profile_url_normalized": bool(activity_detail.get("profile_url_normalized"))
+        if isinstance(activity_detail, dict)
+        else False,
+        "navigation_type_used": activity_detail.get("navigation_type_used", "")
+        if isinstance(activity_detail, dict)
+        else "",
+        "fresh_tab_recovery": bool(activity_detail.get("fresh_tab_recovery"))
+        if isinstance(activity_detail, dict)
+        else False,
+        "page_url": activity_detail.get("page_url", "")
+        if isinstance(activity_detail, dict)
+        else "",
         "reason": activity_detail.get("reason", "") if isinstance(activity_detail, dict) else "",
         "level": activity_level(activity_detail),
         "error": bool(activity_detail.get("error")) if isinstance(activity_detail, dict) else True,
@@ -618,11 +691,18 @@ def should_swap(p1_activity: str, p2_activity: str) -> bool:
     return p2_score > 0 and p2_score > activity_score(p1_activity)
 
 
-def category_for_row(row: Dict[str, Any]) -> str:
-    activities = [normalize_activity_value(row.get("P1 Activity")), normalize_activity_value(row.get("P2 Activity"))]
+def category_for_row(row: dict[str, Any]) -> str:
+    activities = [
+        normalize_activity_value(row.get("P1 Activity")),
+        normalize_activity_value(row.get("P2 Activity")),
+    ]
     if not any(activities):
         return ""
-    linkedin_count = sum(1 for url in (row.get("P1 LinkedIn"), row.get("P2 LinkedIn")) if is_linkedin_profile_url(url))
+    linkedin_count = sum(
+        1
+        for url in (row.get("P1 LinkedIn"), row.get("P2 LinkedIn"))
+        if is_linkedin_profile_url(url)
+    )
     if linkedin_count >= 2:
         if "Very active" in activities:
             return "Hyper"
@@ -638,7 +718,9 @@ def category_for_row(row: Dict[str, Any]) -> str:
     return ""
 
 
-def rank_row_for_final(source_row: Dict[str, Any], activity_by_prefix: Dict[str, str]) -> Dict[str, Any]:
+def rank_row_for_final(
+    source_row: dict[str, Any], activity_by_prefix: dict[str, str]
+) -> dict[str, Any]:
     ranked = {column: clean_text(source_row.get(column)) for column in BASE_COLUMNS}
     p1 = person_from_row(source_row, "P1")
     p2 = person_from_row(source_row, "P2")
@@ -649,11 +731,13 @@ def rank_row_for_final(source_row: Dict[str, Any], activity_by_prefix: Dict[str,
     set_person(ranked, "P1", p1)
     set_person(ranked, "P2", p2)
     ranked["Category"] = category_for_row(ranked)
-    ranked["Engaged Person"] = clean_text(source_row.get("Engaged Person")) or ("Person 1" if is_linkedin_profile_url(ranked.get("P1 LinkedIn")) else "Person 2")
+    ranked["Engaged Person"] = clean_text(source_row.get("Engaged Person")) or (
+        "Person 1" if is_linkedin_profile_url(ranked.get("P1 LinkedIn")) else "Person 2"
+    )
     return ranked
 
 
-def final_sort_key(row: Dict[str, Any]) -> Tuple[int, int, str]:
+def final_sort_key(row: dict[str, Any]) -> tuple[int, int, str]:
     return (
         CATEGORY_PRIORITY.get(clean_text(row.get("Category")), 99),
         0 if is_linkedin_profile_url(row.get("P2 LinkedIn")) else 1,
@@ -663,7 +747,11 @@ def final_sort_key(row: Dict[str, Any]) -> Tuple[int, int, str]:
 
 def is_cdp_transport_exception(exc: Exception) -> bool:
     message = clean_text(exc).lower()
-    return isinstance(exc, (TimeoutError, ConnectionError)) or "cdp command" in message or "websocket" in message
+    return (
+        isinstance(exc, (TimeoutError, ConnectionError))
+        or "cdp command" in message
+        or "websocket" in message
+    )
 
 
 class LiveActivityReader:
@@ -673,9 +761,9 @@ class LiveActivityReader:
         self.session = LinkedInSession()
         self.connected = False
         self.force_selector_on_next_call = False
-        self.last_recovery: Dict[str, Any] = {}
+        self.last_recovery: dict[str, Any] = {}
 
-    def connect(self) -> Dict[str, Any]:
+    def connect(self) -> dict[str, Any]:
         if self.connected:
             return {"ok": True, "status": "already_connected"}
         result = self.session.connect(skip_rate_check=True)
@@ -689,7 +777,7 @@ class LiveActivityReader:
             self.session.disconnect()
             self.connected = False
 
-    def recover_connection(self) -> Dict[str, Any]:
+    def recover_connection(self) -> dict[str, Any]:
         """Discard a frozen page target and reconnect through a clean tab."""
         cdp = self.session.cdp
         health = cdp.health_check()
@@ -722,7 +810,7 @@ class LiveActivityReader:
         # handoffs between profiles and decides when a resting profile returns.
         return {"ok": False, "action": "cdp_unhealthy", "cdp_health": health}
 
-    def __call__(self, profile_url: str, plan_item: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def __call__(self, profile_url: str, plan_item: dict[str, Any] | None = None) -> dict[str, Any]:
         original_profile_url = clean_text(profile_url)
         profile_url = canonical_linkedin_profile_url(profile_url)
         if not profile_url:
@@ -732,17 +820,26 @@ class LiveActivityReader:
                 "reason": "invalid_profile_url",
                 "original_profile_url": original_profile_url,
             }
-        attempts: List[Dict[str, Any]] = []
-        best_detail: Dict[str, Any] = {}
+        attempts: list[dict[str, Any]] = []
+        best_detail: dict[str, Any] = {}
         best_score = -2
         forced_selector = self.force_selector_on_next_call
         self.force_selector_on_next_call = False
-        navigation_type = "selector_based" if forced_selector else navigation_type_key((plan_item or {}).get("navigation_type"))
+        navigation_type = (
+            "selector_based"
+            if forced_selector
+            else navigation_type_key((plan_item or {}).get("navigation_type"))
+        )
         connect_result = self.connect()
         if not connect_result.get("ok"):
-            return {"error": True, "danger": connect_result.get("block_reason", "LinkedIn preflight failed")}
+            return {
+                "error": True,
+                "danger": connect_result.get("block_reason", "LinkedIn preflight failed"),
+            }
         for _ in range(max(0, self.retries) + 1):
-            detail = self.session.read_activity_detail(profile_url, max_seconds=self.timeout, navigation_type=navigation_type)
+            detail = self.session.read_activity_detail(
+                profile_url, max_seconds=self.timeout, navigation_type=navigation_type
+            )
             detail = {
                 **(detail if isinstance(detail, dict) else {}),
                 "original_profile_url": original_profile_url,
@@ -769,7 +866,8 @@ class LiveActivityReader:
                     **(selector_detail if isinstance(selector_detail, dict) else {}),
                     "fallback_from_navigation_type": "direct_url",
                     "fallback_navigation_type": "selector_based",
-                    "fallback_trigger": clean_text(detail.get("reason")) or clean_text(detail.get("danger")),
+                    "fallback_trigger": clean_text(detail.get("reason"))
+                    or clean_text(detail.get("danger")),
                     "direct_url_attempt": activity_evidence(profile_url, detail),
                 }
                 if activity_level(selector_detail) or not hard_read_failure_reason(selector_detail):
@@ -777,10 +875,14 @@ class LiveActivityReader:
                 else:
                     detail = {
                         **detail,
-                        "selector_fallback_attempt": activity_evidence(profile_url, selector_detail),
+                        "selector_fallback_attempt": activity_evidence(
+                            profile_url, selector_detail
+                        ),
                     }
             try:
-                page_state = self.session.cdp and self.session.cdp.evaluate("JSON.stringify({url: window.location.href, text: (document.body && document.body.innerText || '').slice(0, 500)})")
+                page_state = self.session.cdp and self.session.cdp.evaluate(
+                    "JSON.stringify({url: window.location.href, text: (document.body && document.body.innerText || '').slice(0, 500)})"
+                )
                 page_state = json.loads(page_state) if page_state else {}
             except Exception:
                 page_state = {}
@@ -826,7 +928,7 @@ class LiveActivityReader:
         return best_detail
 
     @staticmethod
-    def _should_try_selector_fallback(detail: Dict[str, Any]) -> bool:
+    def _should_try_selector_fallback(detail: dict[str, Any]) -> bool:
         if not isinstance(detail, dict) or activity_level(detail):
             return False
         reason = clean_text(detail.get("reason"))
@@ -844,37 +946,75 @@ class LiveActivityReader:
         return False
 
 
-def build_fixture_reader(fixture_path: str) -> Callable[..., Dict[str, Any]]:
+def build_fixture_reader(fixture_path: str) -> Callable[..., dict[str, Any]]:
     fixture = json.loads(Path(fixture_path).read_text(encoding="utf-8")) if fixture_path else {}
     normalized = {normalized_profile_key(key): value for key, value in fixture.items()}
-    return lambda profile_url, _plan_item=None: normalized.get(normalized_profile_key(profile_url), {})
+    return lambda profile_url, _plan_item=None: normalized.get(
+        normalized_profile_key(profile_url), {}
+    )
 
 
-def build_synthetic_activity_reader() -> Callable[..., Dict[str, Any]]:
+def build_synthetic_activity_reader() -> Callable[..., dict[str, Any]]:
     """Deterministic test-only activity evidence, varied by profile URL."""
-    def reader(profile_url: str, _plan_item: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+
+    def reader(profile_url: str, _plan_item: dict[str, Any] | None = None) -> dict[str, Any]:
         bucket = sum(ord(char) for char in normalized_profile_key(profile_url)) % 3
-        entry = lambda time_text: {"time_text": time_text, "card_text_sample": "Synthetic test activity"}
+
+        def entry(time_text):
+            return {
+                "time_text": time_text,
+                "card_text_sample": "Synthetic test activity",
+            }
+
         if bucket == 0:
-            return {"tabs": {"posts": {"activities": [entry("1d")], "total_visible": 1}, "comments": {"activities": []}, "reactions": {"activities": []}}}
+            return {
+                "tabs": {
+                    "posts": {"activities": [entry("1d")], "total_visible": 1},
+                    "comments": {"activities": []},
+                    "reactions": {"activities": []},
+                }
+            }
         if bucket == 1:
-            return {"tabs": {"posts": {"activities": []}, "comments": {"activities": [entry("10d")] * 5, "total_visible": 5}, "reactions": {"activities": []}}}
-        return {"tabs": {"posts": {"activities": []}, "comments": {"activities": [entry("180d")], "total_visible": 1}, "reactions": {"activities": []}}}
+            return {
+                "tabs": {
+                    "posts": {"activities": []},
+                    "comments": {"activities": [entry("10d")] * 5, "total_visible": 5},
+                    "reactions": {"activities": []},
+                }
+            }
+        return {
+            "tabs": {
+                "posts": {"activities": []},
+                "comments": {"activities": [entry("180d")], "total_visible": 1},
+                "reactions": {"activities": []},
+            }
+        }
+
     return reader
 
 
-def resolve_activity_sequence_columns(headers: List[str]) -> Dict[str, int]:
+def resolve_activity_sequence_columns(headers: list[str]) -> dict[str, int]:
     slot_col = _find_first_index(headers, "Slot ID")
     batch_size_col = _find_first_index(headers, "Batch Size")
     if slot_col is None or batch_size_col is None:
         raise ValueError("Activity Sequence must include Slot ID and Batch Size")
     lead_batch_col = _find_first_index(headers, "Batch #", start=slot_col + 1, end=batch_size_col)
-    timing_col = _find_first_index(headers, "Activity Log Timing", start=slot_col + 1, end=batch_size_col)
+    timing_col = _find_first_index(
+        headers, "Activity Log Timing", start=slot_col + 1, end=batch_size_col
+    )
     delay_col = _find_first_index(headers, "Delay Sec", start=slot_col + 1, end=batch_size_col)
-    diversion_col = _find_first_index(headers, "Lead Diversion", start=slot_col + 1, end=batch_size_col)
-    diversion_sec_col = _find_first_index(headers, "Activity Diversion Sec", start=slot_col + 1, end=batch_size_col)
-    navigation_type_col = _find_first_index(headers, "Navigation type", start=slot_col + 1, end=batch_size_col)
-    batch_batch_col = _find_last_index(headers, "Batch #", start=batch_size_col - 1, end=batch_size_col + 1)
+    diversion_col = _find_first_index(
+        headers, "Lead Diversion", start=slot_col + 1, end=batch_size_col
+    )
+    diversion_sec_col = _find_first_index(
+        headers, "Activity Diversion Sec", start=slot_col + 1, end=batch_size_col
+    )
+    navigation_type_col = _find_first_index(
+        headers, "Navigation type", start=slot_col + 1, end=batch_size_col
+    )
+    batch_batch_col = _find_last_index(
+        headers, "Batch #", start=batch_size_col - 1, end=batch_size_col + 1
+    )
     batch_enabled_col = _find_first_index(headers, "Enabled", start=batch_size_col + 1)
     missing = [
         name
@@ -905,25 +1045,40 @@ def resolve_activity_sequence_columns(headers: List[str]) -> Dict[str, int]:
     }
 
 
-def generated_activity_timing(date_value: str, slot_ids: List[int]) -> Dict[int, str]:
-    rng = random.Random(f"prefinal-activity-timing:{sequence_date_key(date_value)}:{','.join(map(str, slot_ids))}")
-    return {slot_id: rng.choices(["before_diversion", "after_diversion"], weights=[55, 45], k=1)[0] for slot_id in slot_ids}
+def generated_activity_timing(date_value: str, slot_ids: list[int]) -> dict[int, str]:
+    rng = random.Random(
+        f"prefinal-activity-timing:{sequence_date_key(date_value)}:{','.join(map(str, slot_ids))}"
+    )
+    return {
+        slot_id: rng.choices(["before_diversion", "after_diversion"], weights=[55, 45], k=1)[0]
+        for slot_id in slot_ids
+    }
 
 
-def generated_delay_seconds(date_value: str, slot_ids: List[int], min_sec: int, max_sec: int) -> Dict[int, int]:
-    rng = random.Random(f"prefinal-activity-delay:{sequence_date_key(date_value)}:{min_sec}:{max_sec}:{','.join(map(str, slot_ids))}")
+def generated_delay_seconds(
+    date_value: str, slot_ids: list[int], min_sec: int, max_sec: int
+) -> dict[int, int]:
+    rng = random.Random(
+        f"prefinal-activity-delay:{sequence_date_key(date_value)}:{min_sec}:{max_sec}:{','.join(map(str, slot_ids))}"
+    )
     return {slot_id: rng.randint(min_sec, max_sec) for slot_id in slot_ids}
 
 
-def generated_diversions(date_value: str, slot_ids: List[int]) -> Dict[int, str]:
-    rng = random.Random(f"prefinal-activity-diversion:{sequence_date_key(date_value)}:{','.join(map(str, slot_ids))}")
+def generated_diversions(date_value: str, slot_ids: list[int]) -> dict[int, str]:
+    rng = random.Random(
+        f"prefinal-activity-diversion:{sequence_date_key(date_value)}:{','.join(map(str, slot_ids))}"
+    )
     values = [item[0] for item in DIVERSION_OPTIONS]
     weights = [item[1] for item in DIVERSION_OPTIONS]
     return {slot_id: rng.choices(values, weights=weights, k=1)[0] for slot_id in slot_ids}
 
 
-def generated_diversion_seconds(date_value: str, diversions: Dict[int, str]) -> Dict[int, Optional[int]]:
-    rng = random.Random(f"prefinal-activity-diversion-sec:{sequence_date_key(date_value)}:{json.dumps(diversions, sort_keys=True)}")
+def generated_diversion_seconds(
+    date_value: str, diversions: dict[int, str]
+) -> dict[int, int | None]:
+    rng = random.Random(
+        f"prefinal-activity-diversion-sec:{sequence_date_key(date_value)}:{json.dumps(diversions, sort_keys=True)}"
+    )
     bounds = {
         "feed_scroll": (12, 45),
         "engagement_trail": (25, 90),
@@ -931,22 +1086,33 @@ def generated_diversion_seconds(date_value: str, diversions: Dict[int, str]) -> 
         "company_page_browse": (20, 80),
         "recent_post_read": (15, 65),
     }
-    return {slot_id: (None if diversion in {"", "none"} else rng.randint(*bounds.get(diversion, (20, 75)))) for slot_id, diversion in diversions.items()}
+    return {
+        slot_id: (
+            None if diversion in {"", "none"} else rng.randint(*bounds.get(diversion, (20, 75)))
+        )
+        for slot_id, diversion in diversions.items()
+    }
 
 
-def generated_navigation_types(date_value: str, slot_ids: List[int]) -> Dict[int, str]:
-    rng = random.Random(f"prefinal-activity-navigation:{sequence_date_key(date_value)}:{','.join(map(str, slot_ids))}")
+def generated_navigation_types(date_value: str, slot_ids: list[int]) -> dict[int, str]:
+    rng = random.Random(
+        f"prefinal-activity-navigation:{sequence_date_key(date_value)}:{','.join(map(str, slot_ids))}"
+    )
     values = [item[0] for item in NAVIGATION_TYPE_OPTIONS]
     weights = [item[1] for item in NAVIGATION_TYPE_OPTIONS]
     return {slot_id: rng.choices(values, weights=weights, k=1)[0] for slot_id in slot_ids}
 
 
-def generated_batch_gaps(date_value: str, batch_numbers: List[int], min_sec: int, max_sec: int) -> Dict[int, int]:
-    rng = random.Random(f"prefinal-activity-batch-gap:{sequence_date_key(date_value)}:{min_sec}:{max_sec}:{','.join(map(str, batch_numbers))}")
+def generated_batch_gaps(
+    date_value: str, batch_numbers: list[int], min_sec: int, max_sec: int
+) -> dict[int, int]:
+    rng = random.Random(
+        f"prefinal-activity-batch-gap:{sequence_date_key(date_value)}:{min_sec}:{max_sec}:{','.join(map(str, batch_numbers))}"
+    )
     return {batch: rng.randint(min_sec, max_sec) for batch in batch_numbers}
 
 
-def unique_ints_in_order(values: Sequence[int]) -> List[int]:
+def unique_ints_in_order(values: Sequence[int]) -> list[int]:
     seen = set()
     result = []
     for value in values:
@@ -957,7 +1123,9 @@ def unique_ints_in_order(values: Sequence[int]) -> List[int]:
     return result
 
 
-def distribute_slots_to_batches(target_count: int, batch_numbers: Sequence[int], date_value: str) -> Dict[int, int]:
+def distribute_slots_to_batches(
+    target_count: int, batch_numbers: Sequence[int], date_value: str
+) -> dict[int, int]:
     unique_batches = unique_ints_in_order([int(batch) for batch in batch_numbers if int(batch) > 0])
     if target_count <= 0:
         return {}
@@ -965,12 +1133,16 @@ def distribute_slots_to_batches(target_count: int, batch_numbers: Sequence[int],
         raise ValueError("Activity Sequence has no enabled batches")
     active_batches = unique_batches[:target_count]
     if len(active_batches) >= target_count:
-        sizes = {batch: (1 if idx < target_count else 0) for idx, batch in enumerate(unique_batches)}
+        sizes = {
+            batch: (1 if idx < target_count else 0) for idx, batch in enumerate(unique_batches)
+        }
     else:
         chunks = _random_positive_partition(
             target_count,
             len(active_batches),
-            random.Random(f"prefinal-activity-batches:{sequence_date_key(date_value)}:{target_count}:{active_batches}"),
+            random.Random(
+                f"prefinal-activity-batches:{sequence_date_key(date_value)}:{target_count}:{active_batches}"
+            ),
         )
         sizes = {batch: 0 for batch in unique_batches}
         sizes.update({batch: size for batch, size in zip(active_batches, chunks)})
@@ -989,7 +1161,7 @@ def ensure_activity_sequence(
     batch_gap_min_sec: int,
     batch_gap_max_sec: int,
     dry_run: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     client = get_client(creds)
     spreadsheet = open_sheet(client, obf_url)
     worksheet = spreadsheet.worksheet(sequence_tab)
@@ -999,8 +1171,8 @@ def ensure_activity_sequence(
     headers = values[0]
     cols = resolve_activity_sequence_columns(headers)
 
-    existing_slots: List[Dict[str, Any]] = []
-    batch_rows: List[Dict[str, Any]] = []
+    existing_slots: list[dict[str, Any]] = []
+    batch_rows: list[dict[str, Any]] = []
     for idx, row in enumerate(values[1:], start=2):
         padded = row + [""] * (len(headers) - len(row))
         slot_id = _parse_int(padded[cols["slot_col"]])
@@ -1021,8 +1193,8 @@ def ensure_activity_sequence(
     if target_count > 0 and not enabled_batches:
         raise ValueError("Activity Sequence has no enabled batches")
 
-    updates: List[Tuple[int, int, Any]] = []
-    append_rows: List[List[Any]] = []
+    updates: list[tuple[int, int, Any]] = []
+    append_rows: list[list[Any]] = []
     slot_rows = list(existing_slots)
     next_row = len(values) + 1
     next_slot = (max([row["slot_id"] for row in existing_slots]) + 1) if existing_slots else 1
@@ -1047,9 +1219,11 @@ def ensure_activity_sequence(
     diversion_by_slot = generated_diversions(date_value, slot_ids)
     diversion_sec_by_slot = generated_diversion_seconds(date_value, diversion_by_slot)
     navigation_by_slot = generated_navigation_types(date_value, slot_ids)
-    batch_gaps = generated_batch_gaps(date_value, batch_numbers, batch_gap_min_sec, batch_gap_max_sec)
+    batch_gaps = generated_batch_gaps(
+        date_value, batch_numbers, batch_gap_min_sec, batch_gap_max_sec
+    )
 
-    slot_to_batch: Dict[int, int] = {}
+    slot_to_batch: dict[int, int] = {}
     slot_index = 0
     for batch in batch_numbers:
         for _ in range(sizes.get(batch, 0)):
@@ -1063,7 +1237,13 @@ def ensure_activity_sequence(
         )
 
     for batch_row in batch_rows:
-        updates.append((batch_row["row_number"], cols["batch_size_col"] + 1, str(sizes.get(batch_row["batch_number"], "" if batch_row["enabled"] else ""))))
+        updates.append(
+            (
+                batch_row["row_number"],
+                cols["batch_size_col"] + 1,
+                str(sizes.get(batch_row["batch_number"], "" if batch_row["enabled"] else "")),
+            )
+        )
     for row in active_slots:
         slot_id = row["slot_id"]
         updates.extend(
@@ -1072,11 +1252,19 @@ def ensure_activity_sequence(
                 (row["row_number"], cols["timing_col"] + 1, timing_by_slot[slot_id]),
                 (row["row_number"], cols["delay_col"] + 1, delay_by_slot[slot_id]),
                 (row["row_number"], cols["diversion_col"] + 1, diversion_by_slot[slot_id]),
-                (row["row_number"], cols["diversion_sec_col"] + 1, "" if diversion_sec_by_slot[slot_id] is None else diversion_sec_by_slot[slot_id]),
+                (
+                    row["row_number"],
+                    cols["diversion_sec_col"] + 1,
+                    ""
+                    if diversion_sec_by_slot[slot_id] is None
+                    else diversion_sec_by_slot[slot_id],
+                ),
             ]
         )
         if cols["navigation_type_col"] >= 0:
-            updates.append((row["row_number"], cols["navigation_type_col"] + 1, navigation_by_slot[slot_id]))
+            updates.append(
+                (row["row_number"], cols["navigation_type_col"] + 1, navigation_by_slot[slot_id])
+            )
     for row in slot_rows[target_count:]:
         updates.extend(
             [
@@ -1119,26 +1307,42 @@ def ensure_activity_sequence(
         "existing_slots": len(existing_slots),
         "slots_added": max(0, target_count - len(existing_slots)),
         "enabled_batches": len(enabled_batches),
-        "batch_sizes": [{"batch_number": batch, "size": sizes.get(batch, 0), "gap_sec": batch_gaps.get(batch, 0)} for batch in batch_numbers],
+        "batch_sizes": [
+            {
+                "batch_number": batch,
+                "size": sizes.get(batch, 0),
+                "gap_sec": batch_gaps.get(batch, 0),
+            }
+            for batch in batch_numbers
+        ],
         "navigation_type_column": cols["navigation_type_col"] >= 0,
         "navigation_counts": {
             "Direct Url": sum(1 for value in navigation_by_slot.values() if value == "Direct Url"),
-            "Selector-based": sum(1 for value in navigation_by_slot.values() if value == "Selector-based"),
+            "Selector-based": sum(
+                1 for value in navigation_by_slot.values() if value == "Selector-based"
+            ),
         },
         "plan": plan,
         "dry_run": dry_run,
     }
 
 
-def apply_diversion(session: Optional[Any], plan_item: Dict[str, Any], activity_detail: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
-    result: Dict[str, Any] = {"ok": True, "diversion_executed": False}
+def apply_diversion(
+    session: Any | None, plan_item: dict[str, Any], activity_detail: dict[str, Any], dry_run: bool
+) -> dict[str, Any]:
+    result: dict[str, Any] = {"ok": True, "diversion_executed": False}
     if dry_run:
         result["dry_run"] = True
         return result
     diversion = clean_text(plan_item.get("lead_diversion")).lower() or "none"
     diversion_sec = plan_item.get("activity_diversion_sec")
     if session is not None and diversion != "none":
-        diversion_result = _run_diversion(session=session, diversion=diversion, diversion_sec=diversion_sec, activity=activity_detail)
+        diversion_result = _run_diversion(
+            session=session,
+            diversion=diversion,
+            diversion_sec=diversion_sec,
+            activity=activity_detail,
+        )
         result["diversion"] = diversion_result
         result["diversion_executed"] = bool(diversion_result.get("executed"))
         if not diversion_result.get("ok", True):
@@ -1152,9 +1356,9 @@ def write_final_batch_upsert_and_sort(
     credentials_path: Path,
     sheet_url: str,
     final_tab: str,
-    ranked_rows: List[Dict[str, Any]],
+    ranked_rows: list[dict[str, Any]],
     dry_run: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     client = get_client(str(credentials_path))
     spreadsheet = open_sheet(client, sheet_url)
     worksheet = spreadsheet.worksheet(final_tab)
@@ -1164,9 +1368,11 @@ def write_final_batch_upsert_and_sort(
     headers = values[0]
     require_columns(headers, FINAL_REQUIRED_COLUMNS, final_tab)
     rows = normalize_rows(values)
-    final_rows = [dict(row) for row in rows if clean_text(row.get("ID")) or clean_text(row.get("Company"))]
-    updated_existing_ids: List[str] = []
-    inserted_ids: List[str] = []
+    final_rows = [
+        dict(row) for row in rows if clean_text(row.get("ID")) or clean_text(row.get("Company"))
+    ]
+    updated_existing_ids: list[str] = []
+    inserted_ids: list[str] = []
     positions_by_id = {
         clean_text(row.get("ID")): index
         for index, row in enumerate(final_rows)
@@ -1189,7 +1395,9 @@ def write_final_batch_upsert_and_sort(
     if not dry_run:
         if payload:
             end_cell = gspread.utils.rowcol_to_a1(1 + len(payload), len(headers))
-            worksheet.update(range_name=f"A2:{end_cell}", values=payload, value_input_option="USER_ENTERED")
+            worksheet.update(
+                range_name=f"A2:{end_cell}", values=payload, value_input_option="USER_ENTERED"
+            )
     final_positions = {
         clean_text(row.get("ID")): index + 2
         for index, row in enumerate(final_rows)
@@ -1200,12 +1408,14 @@ def write_final_batch_upsert_and_sort(
         "rows_written": len(ranked_rows),
         "updated_existing_ids": updated_existing_ids,
         "inserted_ids": inserted_ids,
-        "final_row_numbers": {lead_id: final_positions.get(lead_id) for lead_id in inserted_ids + updated_existing_ids},
+        "final_row_numbers": {
+            lead_id: final_positions.get(lead_id) for lead_id in inserted_ids + updated_existing_ids
+        },
         "rows_in_final": len(final_rows),
     }
 
 
-def row_activity_from_state(row: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, str]:
+def row_activity_from_state(row: dict[str, Any], state: dict[str, Any]) -> dict[str, str]:
     out = {"P1": "", "P2": ""}
     for prefix in ("P1", "P2"):
         key = target_key(row, prefix)
@@ -1214,28 +1424,36 @@ def row_activity_from_state(row: Dict[str, Any], state: Dict[str, Any]) -> Dict[
     return out
 
 
-def row_targets(row: Dict[str, Any], target_keys: set) -> List[str]:
-    return [target_key(row, prefix) for prefix in ("P1", "P2") if target_key(row, prefix) in target_keys]
+def row_targets(row: dict[str, Any], target_keys: set) -> list[str]:
+    return [
+        target_key(row, prefix) for prefix in ("P1", "P2") if target_key(row, prefix) in target_keys
+    ]
 
 
-def target_has_activity_decision(state: Dict[str, Any], key: str) -> bool:
-    value = normalize_activity_value(state.get("targets", {}).get(key, {}).get("activity_value", ""))
+def target_has_activity_decision(state: dict[str, Any], key: str) -> bool:
+    value = normalize_activity_value(
+        state.get("targets", {}).get(key, {}).get("activity_value", "")
+    )
     return bool(value)
 
 
 def ready_final_rows(
     *,
-    source_rows: List[Dict[str, Any]],
-    state: Dict[str, Any],
+    source_rows: list[dict[str, Any]],
+    state: dict[str, Any],
     all_target_keys: set,
     planned_target_keys: set,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Return fully planned rows whose activity targets are all stored locally."""
-    ranked_rows: List[Dict[str, Any]] = []
+    ranked_rows: list[dict[str, Any]] = []
     seen_lead_ids = set()
     for row in source_rows:
         keys = row_targets(row, all_target_keys)
-        if not keys or not set(keys).issubset(planned_target_keys) or any(not target_has_activity_decision(state, key) for key in keys):
+        if (
+            not keys
+            or not set(keys).issubset(planned_target_keys)
+            or any(not target_has_activity_decision(state, key) for key in keys)
+        ):
             continue
         lead_id = clean_text(row.get("ID")) or f"row:{row.get('_row_number')}"
         if lead_id in seen_lead_ids:
@@ -1245,11 +1463,14 @@ def ready_final_rows(
     return ranked_rows
 
 
-def final_source_row_count(source_rows: List[Dict[str, Any]], all_target_keys: set, planned_target_keys: set) -> int:
+def final_source_row_count(
+    source_rows: list[dict[str, Any]], all_target_keys: set, planned_target_keys: set
+) -> int:
     return sum(
         1
         for row in source_rows
-        if row_targets(row, all_target_keys) and set(row_targets(row, all_target_keys)).issubset(planned_target_keys)
+        if row_targets(row, all_target_keys)
+        and set(row_targets(row, all_target_keys)).issubset(planned_target_keys)
     )
 
 
@@ -1257,9 +1478,9 @@ def bridge_ready_rows_to_final(
     *,
     args: argparse.Namespace,
     date_value: str,
-    state: Dict[str, Any],
-    ranked_rows: List[Dict[str, Any]],
-) -> Dict[str, Any]:
+    state: dict[str, Any],
+    ranked_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
     result = write_final_batch_upsert_and_sort(
         Path(args.credentials), args.sheet_url, args.final_tab, ranked_rows, args.dry_run
     )
@@ -1289,7 +1510,7 @@ def bridge_ready_rows_to_final(
     return bridge_summary
 
 
-def bridge_final_to_prospects(args: argparse.Namespace, date_value: str) -> Dict[str, Any]:
+def bridge_final_to_prospects(args: argparse.Namespace, date_value: str) -> dict[str, Any]:
     """Reuse the idempotent Final -> Prospects bridge without spawning another process."""
     from lead_exec_research import bridge_prefinal_to_prospects, ensure_dirs
 
@@ -1309,14 +1530,14 @@ def bridge_final_to_prospects(args: argparse.Namespace, date_value: str) -> Dict
     return bridge_prefinal_to_prospects(bridge_args)
 
 
-def queue_source_rows(batch: Dict[str, Any]) -> Tuple[List[str], List[Dict[str, Any]]]:
+def queue_source_rows(batch: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]]]:
     rows = []
     for row_number, row in enumerate(batch.get("rows", []), start=2):
         rows.append({**row, "_row_number": row_number})
     return list(QUEUE_ROW_COLUMNS), rows
 
 
-def no_queued_batch_result(args: argparse.Namespace, date_value: str) -> Dict[str, Any]:
+def no_queued_batch_result(args: argparse.Namespace, date_value: str) -> dict[str, Any]:
     result = {
         "ok": True,
         "status": "idle_no_queued_batch",
@@ -1330,14 +1551,23 @@ def no_queued_batch_result(args: argparse.Namespace, date_value: str) -> Dict[st
     return result
 
 
-def resume_final_bridged_batch(args: argparse.Namespace, date_value: str, queue_batch: Dict[str, Any]) -> Dict[str, Any]:
+def resume_final_bridged_batch(
+    args: argparse.Namespace, date_value: str, queue_batch: dict[str, Any]
+) -> dict[str, Any]:
     fingerprint = clean_text(queue_batch.get("fingerprint"))
     try:
         bridge = bridge_final_to_prospects(args, date_value)
     except Exception as exc:
         bridge = {"ok": False, "error": str(exc)}
     if not args.dry_run and bridge.get("ok"):
-        update_batch_status(fingerprint, "prospects_bridged", prospects_bridge={"recovered_at": datetime.now().isoformat(timespec="seconds"), "result": bridge})
+        update_batch_status(
+            fingerprint,
+            "prospects_bridged",
+            prospects_bridge={
+                "recovered_at": datetime.now().isoformat(timespec="seconds"),
+                "result": bridge,
+            },
+        )
     result = {
         "ok": bool(bridge.get("ok")),
         "status": "prospects_recovered" if bridge.get("ok") else "prospects_recovery_blocked",
@@ -1354,11 +1584,11 @@ def finalize_prepared_session(
     *,
     args: argparse.Namespace,
     date_value: str,
-    state: Dict[str, Any],
-    source_rows: List[Dict[str, Any]],
-    all_targets: List[Dict[str, Any]],
+    state: dict[str, Any],
+    source_rows: list[dict[str, Any]],
+    all_targets: list[dict[str, Any]],
     queue_fingerprint: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Bridge a fully prepared session after its sequential worker lanes finish.
 
     This path never connects to Chrome.  It is deliberately the only place a
@@ -1366,31 +1596,44 @@ def finalize_prepared_session(
     second lane's state or publishing a partial batch.
     """
     target_keys = {target["key"] for target in all_targets}
-    planned_target_keys = {target.get("key") for target in state.get("prepared_targets", []) if target.get("key")}
-    source_target_keys = {
-        target["key"] for target in extract_targets(source_rows, recorded_activity={}, recorded_issues={})
+    planned_target_keys = {
+        target.get("key") for target in state.get("prepared_targets", []) if target.get("key")
     }
-    persisted_issues = (load_batch(queue_fingerprint).get("activity_issues") or {}) if queue_fingerprint else {}
-    failures: List[Dict[str, Any]] = []
+    source_target_keys = {
+        target["key"]
+        for target in extract_targets(source_rows, recorded_activity={}, recorded_issues={})
+    }
+    persisted_issues = (
+        (load_batch(queue_fingerprint).get("activity_issues") or {}) if queue_fingerprint else {}
+    )
+    failures: list[dict[str, Any]] = []
     unexpected_targets = target_keys - planned_target_keys
-    decided_target_keys = {key for key in source_target_keys if target_has_activity_decision(state, key)}
+    decided_target_keys = {
+        key for key in source_target_keys if target_has_activity_decision(state, key)
+    }
     current_terminal_issue_keys = {
-        key for key in source_target_keys
+        key
+        for key in source_target_keys
         if state.get("targets", {}).get(key, {}).get("status") == "terminal_error"
     }
     terminal_issue_keys = {
-        key for key, issue in persisted_issues.items()
+        key
+        for key, issue in persisted_issues.items()
         if key in source_target_keys and issue.get("terminal")
     } | current_terminal_issue_keys
-    unaccounted_planned_targets = planned_target_keys - target_keys - decided_target_keys - terminal_issue_keys
+    unaccounted_planned_targets = (
+        planned_target_keys - target_keys - decided_target_keys - terminal_issue_keys
+    )
     if unexpected_targets or unaccounted_planned_targets:
-        failures.append({
-            "error": "prepared_session_target_mismatch",
-            "current_unresolved_targets": len(target_keys),
-            "prepared_targets": len(planned_target_keys),
-            "unexpected_targets": sorted(unexpected_targets),
-            "unaccounted_planned_targets": sorted(unaccounted_planned_targets),
-        })
+        failures.append(
+            {
+                "error": "prepared_session_target_mismatch",
+                "current_unresolved_targets": len(target_keys),
+                "prepared_targets": len(planned_target_keys),
+                "unexpected_targets": sorted(unexpected_targets),
+                "unaccounted_planned_targets": sorted(unaccounted_planned_targets),
+            }
+        )
     resolved_targets = len(decided_target_keys)
     completion_ratio = (resolved_targets / len(source_target_keys)) if source_target_keys else 1.0
     ranked_rows = ready_final_rows(
@@ -1401,11 +1644,8 @@ def finalize_prepared_session(
     )
     source_row_count = final_source_row_count(source_rows, source_target_keys, source_target_keys)
     ready_row_ratio = (len(ranked_rows) / source_row_count) if source_row_count else 1.0
-    final_bridge_eligible = (
-        not failures
-        and bool(ranked_rows)
-    )
-    final_bridge: Dict[str, Any] = {
+    final_bridge_eligible = not failures and bool(ranked_rows)
+    final_bridge: dict[str, Any] = {
         "attempted": False,
         "eligible": final_bridge_eligible,
         "threshold": args.final_bridge_threshold,
@@ -1417,7 +1657,7 @@ def finalize_prepared_session(
         "source_rows": source_row_count,
         "ready_row_ratio": ready_row_ratio,
     }
-    prospects_bridge: Dict[str, Any] = {"attempted": False}
+    prospects_bridge: dict[str, Any] = {"attempted": False}
     bridged = 0
     if final_bridge_eligible:
         final_bridge["attempted"] = True
@@ -1431,9 +1671,22 @@ def finalize_prepared_session(
             if not args.dry_run:
                 state["final_bridge_plan"] = bridge_plan
                 save_session_state(date_value, state)
-                journal_event(date_value, "final_bridge_planned", completion_ratio=completion_ratio, ready_row_ratio=ready_row_ratio, row_count=len(ranked_rows))
-            emit_progress(date_value, "final_bridge_start", ready_rows=len(ranked_rows), completion_ratio=completion_ratio)
-            final_bridge["result"] = bridge_ready_rows_to_final(args=args, date_value=date_value, state=state, ranked_rows=ranked_rows)
+                journal_event(
+                    date_value,
+                    "final_bridge_planned",
+                    completion_ratio=completion_ratio,
+                    ready_row_ratio=ready_row_ratio,
+                    row_count=len(ranked_rows),
+                )
+            emit_progress(
+                date_value,
+                "final_bridge_start",
+                ready_rows=len(ranked_rows),
+                completion_ratio=completion_ratio,
+            )
+            final_bridge["result"] = bridge_ready_rows_to_final(
+                args=args, date_value=date_value, state=state, ranked_rows=ranked_rows
+            )
             bridged = len(ranked_rows)
             emit_progress(date_value, "final_bridge_done", bridged_rows=bridged)
         except Exception as exc:
@@ -1452,7 +1705,9 @@ def finalize_prepared_session(
             emit_progress(date_value, "prospects_bridge_start")
             prospects_bridge["result"] = bridge_final_to_prospects(args, date_value)
             if not prospects_bridge["result"].get("ok", False):
-                failures.append({"error": "prospects_bridge_failed", "detail": prospects_bridge["result"]})
+                failures.append(
+                    {"error": "prospects_bridge_failed", "detail": prospects_bridge["result"]}
+                )
             emit_progress(date_value, "prospects_bridge_done", result=prospects_bridge["result"])
         except Exception as exc:
             failures.append({"error": "prospects_bridge_failed", "detail": str(exc)})
@@ -1461,19 +1716,29 @@ def finalize_prepared_session(
     retryable_unresolved_keys = source_target_keys - decided_target_keys - terminal_issue_keys
     unresolved_count = len(retryable_unresolved_keys)
     if retryable_unresolved_keys:
-        failures.append({
-            "error": "unresolved_activity_targets",
-            "unresolved_targets": unresolved_count,
-            "unresolved_keys": sorted(retryable_unresolved_keys),
-            "resolved_targets": resolved_targets,
-            "source_targets": len(source_target_keys),
-            "prepared_targets": len(planned_target_keys),
-            "retryable": True,
-        })
+        failures.append(
+            {
+                "error": "unresolved_activity_targets",
+                "unresolved_targets": unresolved_count,
+                "unresolved_keys": sorted(retryable_unresolved_keys),
+                "resolved_targets": resolved_targets,
+                "source_targets": len(source_target_keys),
+                "prepared_targets": len(planned_target_keys),
+                "retryable": True,
+            }
+        )
 
-    structural_failures = [item for item in failures if item.get("error") != "unresolved_activity_targets"]
-    status = "blocked" if structural_failures else (
-        "partial" if retryable_unresolved_keys else ("completed_with_exceptions" if terminal_issue_keys else "completed")
+    structural_failures = [
+        item for item in failures if item.get("error") != "unresolved_activity_targets"
+    ]
+    status = (
+        "blocked"
+        if structural_failures
+        else (
+            "partial"
+            if retryable_unresolved_keys
+            else ("completed_with_exceptions" if terminal_issue_keys else "completed")
+        )
     )
     result = {
         "ok": not failures,
@@ -1489,7 +1754,9 @@ def finalize_prepared_session(
         "final_bridge": final_bridge,
         "prospects_bridge": prospects_bridge,
         "failures": failures,
-        "terminal_issues": [state.get("targets", {}).get(key, {}) for key in sorted(terminal_issue_keys)],
+        "terminal_issues": [
+            state.get("targets", {}).get(key, {}) for key in sorted(terminal_issue_keys)
+        ],
         "session_path": str(activity_session_path(date_value)),
         "journal_path": str(activity_journal_path(date_value)),
     }
@@ -1501,46 +1768,72 @@ def finalize_prepared_session(
         elif terminal_issue_keys:
             queue_status = "activity_needs_attention"
         else:
-            queue_status = "prospects_bridged" if prospects_bridge.get("result", {}).get("ok", False) else "final_bridged"
-        update_batch_status(queue_fingerprint, queue_status, activity={
-            "completed_at": datetime.now().isoformat(timespec="seconds"),
-            "completion_ratio": completion_ratio,
-            "ready_row_ratio": ready_row_ratio,
-            "session_path": str(activity_session_path(date_value)),
-        }, activity_issues={
-            key: (
-                {
-                    "terminal": True,
-                    "terminal_reason": state.get("targets", {}).get(key, {}).get("terminal_reason", ""),
-                    "profile_url": state.get("targets", {}).get(key, {}).get("profile_url", ""),
-                    "recorded_at": state.get("targets", {}).get(key, {}).get("recorded_at", ""),
-                    "attempts": state.get("targets", {}).get(key, {}).get("attempt", ""),
-                    "max_attempts": state.get("targets", {}).get(key, {}).get("max_attempts", ""),
-                }
-                if key in current_terminal_issue_keys else persisted_issues.get(key, {})
+            queue_status = (
+                "prospects_bridged"
+                if prospects_bridge.get("result", {}).get("ok", False)
+                else "final_bridged"
             )
-            for key in sorted(terminal_issue_keys)
-        }, final_bridge=final_bridge, prospects_bridge=prospects_bridge)
-        state.update({
-            "status": status,
-            "completed_at": datetime.now().isoformat(timespec="seconds"),
-            "bridged_rows_count": bridged,
-            "final_bridge_run": final_bridge,
-            "prospects_bridge": prospects_bridge,
-            "failures": failures,
-        })
+        update_batch_status(
+            queue_fingerprint,
+            queue_status,
+            activity={
+                "completed_at": datetime.now().isoformat(timespec="seconds"),
+                "completion_ratio": completion_ratio,
+                "ready_row_ratio": ready_row_ratio,
+                "session_path": str(activity_session_path(date_value)),
+            },
+            activity_issues={
+                key: (
+                    {
+                        "terminal": True,
+                        "terminal_reason": state.get("targets", {})
+                        .get(key, {})
+                        .get("terminal_reason", ""),
+                        "profile_url": state.get("targets", {}).get(key, {}).get("profile_url", ""),
+                        "recorded_at": state.get("targets", {}).get(key, {}).get("recorded_at", ""),
+                        "attempts": state.get("targets", {}).get(key, {}).get("attempt", ""),
+                        "max_attempts": state.get("targets", {})
+                        .get(key, {})
+                        .get("max_attempts", ""),
+                    }
+                    if key in current_terminal_issue_keys
+                    else persisted_issues.get(key, {})
+                )
+                for key in sorted(terminal_issue_keys)
+            },
+            final_bridge=final_bridge,
+            prospects_bridge=prospects_bridge,
+        )
+        state.update(
+            {
+                "status": status,
+                "completed_at": datetime.now().isoformat(timespec="seconds"),
+                "bridged_rows_count": bridged,
+                "final_bridge_run": final_bridge,
+                "prospects_bridge": prospects_bridge,
+                "failures": failures,
+            }
+        )
         save_session_state(date_value, state)
     emit_progress(date_value, "final", **result)
     return result
 
 
-def run(args: argparse.Namespace) -> Dict[str, Any]:
+def run(args: argparse.Namespace) -> dict[str, Any]:
     date_value = sheet_date(args.date)
-    queue_batch = load_batch(args.queue_fingerprint) if args.queue_fingerprint else next_activity_batch()
+    queue_batch = (
+        load_batch(args.queue_fingerprint) if args.queue_fingerprint else next_activity_batch()
+    )
     if queue_batch is None and args.enqueue_current_prefinal:
-        headers, legacy_rows = read_worksheet(Path(args.credentials), args.sheet_url, args.prefinal_tab)
+        headers, legacy_rows = read_worksheet(
+            Path(args.credentials), args.sheet_url, args.prefinal_tab
+        )
         require_columns(headers, BASE_COLUMNS + P1_COLUMNS + P2_COLUMNS, args.prefinal_tab)
-        legacy_rows = [row for row in legacy_rows if clean_text(row.get("ID")) or clean_text(row.get("Company"))]
+        legacy_rows = [
+            row
+            for row in legacy_rows
+            if clean_text(row.get("ID")) or clean_text(row.get("Company"))
+        ]
         if legacy_rows:
             queue_batch = enqueue_batch(legacy_rows, "legacy_prefinal_import")
     if queue_batch is None:
@@ -1562,12 +1855,15 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     for key, result in (queue_batch.get("activity_results") or {}).items():
         activity_value = normalize_activity_value((result or {}).get("activity_value", ""))
         if activity_value:
-            state.setdefault("targets", {}).setdefault(key, {
-                "activity_value": activity_value,
-                "status": "recorded",
-                "recorded_at": (result or {}).get("recorded_at", ""),
-                "persisted_from_queue": True,
-            })
+            state.setdefault("targets", {}).setdefault(
+                key,
+                {
+                    "activity_value": activity_value,
+                    "status": "recorded",
+                    "recorded_at": (result or {}).get("recorded_at", ""),
+                    "persisted_from_queue": True,
+                },
+            )
     if args.activity_only and args.prepare_only:
         return blocked_result(
             args=args,
@@ -1577,7 +1873,11 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             skipped_resume=0,
             bridged=0,
             failures=[{"error": "activity_only_prepare_only_conflict"}],
-            sequence={"ok": False, "sequence_tab": args.activity_sequence_tab, "activity_only": True},
+            sequence={
+                "ok": False,
+                "sequence_tab": args.activity_sequence_tab,
+                "activity_only": True,
+            },
             state=state,
         )
     if args.activity_only:
@@ -1596,7 +1896,11 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                         "active_queue_fingerprint": queue_fingerprint,
                     }
                 ],
-                sequence={"ok": False, "sequence_tab": args.activity_sequence_tab, "activity_only": True},
+                sequence={
+                    "ok": False,
+                    "sequence_tab": args.activity_sequence_tab,
+                    "activity_only": True,
+                },
                 state=state,
             )
         prepared_targets = state.get("prepared_targets") or []
@@ -1626,18 +1930,33 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             )
         prepared_pairs = list(zip(prepared_targets, prepared_plan))
         if args.worker_id:
-            assigned_pairs = [pair for pair in prepared_pairs if clean_text(pair[0].get("worker_id")) == args.worker_id]
+            assigned_pairs = [
+                pair
+                for pair in prepared_pairs
+                if clean_text(pair[0].get("worker_id")) == args.worker_id
+            ]
             if not assigned_pairs:
                 return blocked_result(
-                    args=args, date_value=date_value, targets=[], completed=0, skipped_resume=0, bridged=0,
-                    failures=[{"error": "worker_has_no_assigned_targets", "worker_id": args.worker_id}], sequence=sequence, state=state,
+                    args=args,
+                    date_value=date_value,
+                    targets=[],
+                    completed=0,
+                    skipped_resume=0,
+                    bridged=0,
+                    failures=[
+                        {"error": "worker_has_no_assigned_targets", "worker_id": args.worker_id}
+                    ],
+                    sequence=sequence,
+                    state=state,
                 )
             prepared_pairs = assigned_pairs
 
         if args.retry_pending_404:
             prepared_pairs = [
-                pair for pair in prepared_pairs
-                if state.get("targets", {}).get(pair[0]["key"], {}).get("status") == PENDING_404_STATUS
+                pair
+                for pair in prepared_pairs
+                if state.get("targets", {}).get(pair[0]["key"], {}).get("status")
+                == PENDING_404_STATUS
             ]
         targets = [dict(target) for target, _plan in prepared_pairs]
         if args.retry_pending_404:
@@ -1692,13 +2011,15 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     # Execution boundary: prepared sessions may predate URL normalization or
     # may have been edited manually. Never navigate with their raw value.
     for target in targets:
-        original_profile_url = clean_text(target.get("original_profile_url")) or clean_text(target.get("profile_url"))
+        original_profile_url = clean_text(target.get("original_profile_url")) or clean_text(
+            target.get("profile_url")
+        )
         profile_url = canonical_linkedin_profile_url(target.get("profile_url"))
         target["original_profile_url"] = original_profile_url
         target["profile_url"] = profile_url
         target["profile_url_normalized"] = profile_url != original_profile_url.rstrip("/")
 
-    plan_failures: List[Dict[str, Any]] = []
+    plan_failures: list[dict[str, Any]] = []
     if len(runtime_plan) != len(targets):
         plan_failures.append(
             {
@@ -1786,7 +2107,10 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         activity_reader = build_synthetic_activity_reader()
         session = None
     elif args.dry_run and not args.live_dry_run:
-        activity_reader = lambda _url, _plan_item=None: {}
+
+        def activity_reader(_url, _plan_item=None):
+            return {}
+
         session = None
     else:
         activity_reader = LiveActivityReader(args.activity_timeout, args.activity_retries)
@@ -1795,9 +2119,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     completed = 0
     skipped_resume = 0
     bridged = 0
-    failures: List[Dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
     consecutive_hard_failures = 0
-    current_batch: Optional[int] = None
+    current_batch: int | None = None
     test_stop_triggered = False
     if isinstance(activity_reader, LiveActivityReader):
         try:
@@ -1833,33 +2157,66 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                     "session_path": str(activity_session_path(date_value)),
                 },
             )
-        emit_progress(date_value, "started", targets=len(targets), dry_run=args.dry_run, session_path=str(activity_session_path(date_value)))
+        emit_progress(
+            date_value,
+            "started",
+            targets=len(targets),
+            dry_run=args.dry_run,
+            session_path=str(activity_session_path(date_value)),
+        )
         for index, target in enumerate(targets):
             plan_item = runtime_plan[index] if index < len(runtime_plan) else {}
             batch_number = plan_item.get("batch_number")
             if current_batch is not None and batch_number != current_batch and not args.dry_run:
                 previous_gap = int(runtime_plan[index - 1].get("batch_gap_sec") or 0)
-                emit_progress(date_value, "batch_gap_start", batch_number=current_batch, gap_sec=previous_gap, processed=index)
+                emit_progress(
+                    date_value,
+                    "batch_gap_start",
+                    batch_number=current_batch,
+                    gap_sec=previous_gap,
+                    processed=index,
+                )
                 if previous_gap > 0:
                     time.sleep(previous_gap)
-                emit_progress(date_value, "batch_gap_done", batch_number=current_batch, gap_sec=previous_gap, processed=index)
+                emit_progress(
+                    date_value,
+                    "batch_gap_done",
+                    batch_number=current_batch,
+                    gap_sec=previous_gap,
+                    processed=index,
+                )
             current_batch = batch_number
 
             retrying_pending_404 = (
                 args.retry_pending_404
-                and state.get("targets", {}).get(target["key"], {}).get("status") == PENDING_404_STATUS
+                and state.get("targets", {}).get(target["key"], {}).get("status")
+                == PENDING_404_STATUS
             )
             if target["key"] in state.get("targets", {}) and not retrying_pending_404:
                 skipped_resume += 1
                 emit_progress(date_value, "target_resume_skip", processed=index + 1, target=target)
                 continue
 
-            emit_progress(date_value, "target_start", processed=index + 1, target=target, plan=plan_item)
+            emit_progress(
+                date_value, "target_start", processed=index + 1, target=target, plan=plan_item
+            )
             delay_sec = int(plan_item.get("delay_sec") or 0)
             if delay_sec > 0 and not args.dry_run:
-                emit_progress(date_value, "target_pre_delay_start", processed=index + 1, target=target, delay_sec=delay_sec)
+                emit_progress(
+                    date_value,
+                    "target_pre_delay_start",
+                    processed=index + 1,
+                    target=target,
+                    delay_sec=delay_sec,
+                )
                 time.sleep(delay_sec)
-                emit_progress(date_value, "target_pre_delay_done", processed=index + 1, target=target, delay_sec=delay_sec)
+                emit_progress(
+                    date_value,
+                    "target_pre_delay_done",
+                    processed=index + 1,
+                    target=target,
+                    delay_sec=delay_sec,
+                )
             transport_exception = False
             try:
                 detail = activity_reader(target["profile_url"], plan_item)
@@ -1872,7 +2229,13 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                     "error_detail": str(exc),
                 }
             if transport_exception and isinstance(activity_reader, LiveActivityReader):
-                emit_progress(date_value, "cdp_recovery_start", processed=index + 1, target=target, error=detail.get("error_detail", ""))
+                emit_progress(
+                    date_value,
+                    "cdp_recovery_start",
+                    processed=index + 1,
+                    target=target,
+                    error=detail.get("error_detail", ""),
+                )
                 recovery = activity_reader.recover_connection()
                 if not args.dry_run:
                     journal_event(
@@ -1883,20 +2246,35 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                         recovery=recovery,
                     )
                 if not recovery.get("ok"):
-                    failures.append({
-                        "error": "cdp_recovery_failed",
-                        "target": target,
-                        "plan": plan_item,
-                        "initial_error": detail,
-                        "recovery": recovery,
-                    })
+                    failures.append(
+                        {
+                            "error": "cdp_recovery_failed",
+                            "target": target,
+                            "plan": plan_item,
+                            "initial_error": detail,
+                            "recovery": recovery,
+                        }
+                    )
                     return blocked_result(
-                        args=args, date_value=date_value, targets=targets, completed=completed,
-                        skipped_resume=skipped_resume, bridged=bridged, failures=failures,
-                        sequence=sequence, state=state, status="paused_for_browser_recovery",
+                        args=args,
+                        date_value=date_value,
+                        targets=targets,
+                        completed=completed,
+                        skipped_resume=skipped_resume,
+                        bridged=bridged,
+                        failures=failures,
+                        sequence=sequence,
+                        state=state,
+                        status="paused_for_browser_recovery",
                     )
                 session = activity_reader.session
-                emit_progress(date_value, "cdp_recovery_retry", processed=index + 1, target=target, recovery_action=recovery.get("action"))
+                emit_progress(
+                    date_value,
+                    "cdp_recovery_retry",
+                    processed=index + 1,
+                    target=target,
+                    recovery_action=recovery.get("action"),
+                )
                 try:
                     detail = activity_reader(target["profile_url"], plan_item)
                 except Exception as retry_exc:
@@ -1928,19 +2306,28 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                             cleanup=retry_cleanup,
                         )
                     if not retry_cleanup.get("ok"):
-                        failures.append({
-                            "error": "cdp_recovery_retry_cleanup_failed",
-                            "target": target,
-                            "plan": plan_item,
-                            "initial_error": detail,
-                            "retry_error": retry_detail,
-                            "recovery": recovery,
-                            "cleanup": retry_cleanup,
-                        })
+                        failures.append(
+                            {
+                                "error": "cdp_recovery_retry_cleanup_failed",
+                                "target": target,
+                                "plan": plan_item,
+                                "initial_error": detail,
+                                "retry_error": retry_detail,
+                                "recovery": recovery,
+                                "cleanup": retry_cleanup,
+                            }
+                        )
                         return blocked_result(
-                            args=args, date_value=date_value, targets=targets, completed=completed,
-                            skipped_resume=skipped_resume, bridged=bridged, failures=failures,
-                            sequence=sequence, state=state, status="paused_for_browser_recovery",
+                            args=args,
+                            date_value=date_value,
+                            targets=targets,
+                            completed=completed,
+                            skipped_resume=skipped_resume,
+                            bridged=bridged,
+                            failures=failures,
+                            sequence=sequence,
+                            state=state,
+                            status="paused_for_browser_recovery",
                         )
                     session = activity_reader.session
                     detail = retry_detail
@@ -1949,7 +2336,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                 detail = {
                     **detail,
                     "error": True,
-                    "danger": "invalid_profile_or_404" if empty_success_reason == "invalid_profile_or_404" else "activity_read_timeout",
+                    "danger": "invalid_profile_or_404"
+                    if empty_success_reason == "invalid_profile_or_404"
+                    else "activity_read_timeout",
                     "reason": empty_success_reason,
                     "deferred_empty_extract": empty_success_reason == "activity_feed_not_hydrated",
                 }
@@ -1993,7 +2382,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                     save_session_state(date_value, state)
                     journal_event(
                         date_value,
-                        "target_activity_error" if args.retry_pending_404 else "target_activity_retry_pending",
+                        "target_activity_error"
+                        if args.retry_pending_404
+                        else "target_activity_retry_pending",
                         **record,
                     )
                 completed += 1
@@ -2021,9 +2412,13 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                     "reason": reason_text,
                     "deferred_empty_extract": True,
                 }
-            retryable_reason = hard_reason or (reason_text if reason_text in DEFER_ACTIVITY_REASONS else "")
+            retryable_reason = hard_reason or (
+                reason_text if reason_text in DEFER_ACTIVITY_REASONS else ""
+            )
             if retryable_reason:
-                event_type = "target_activity_retryable_error" if hard_reason else "target_activity_deferred"
+                event_type = (
+                    "target_activity_retryable_error" if hard_reason else "target_activity_deferred"
+                )
                 retry_record = next_activity_retry_record(
                     (queue_batch.get("activity_retry_state") or {}).get(target["key"]),
                     target=target,
@@ -2143,17 +2538,28 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                     journal_event(date_value, "target_activity", **record)
                 diversion = apply_diversion(session, plan_item, detail, args.dry_run)
                 if not diversion.get("ok", True):
-                    failures.append({"target": target, "error": diversion.get("error", "diversion_failed")})
+                    failures.append(
+                        {"target": target, "error": diversion.get("error", "diversion_failed")}
+                    )
                     break
             else:
                 diversion = apply_diversion(session, plan_item, detail, args.dry_run)
                 if not diversion.get("ok", True):
-                    failures.append({"target": target, "error": diversion.get("error", "diversion_failed")})
+                    failures.append(
+                        {"target": target, "error": diversion.get("error", "diversion_failed")}
+                    )
                     break
                 if not args.dry_run:
                     journal_event(date_value, "target_activity", **record)
             completed += 1
-            emit_progress(date_value, "target_done", processed=index + 1, completed=completed, target=target, activity_value=level)
+            emit_progress(
+                date_value,
+                "target_done",
+                processed=index + 1,
+                completed=completed,
+                target=target,
+                activity_value=level,
+            )
             if (
                 args.test_stop_cdp_after_completed
                 and not test_stop_triggered
@@ -2164,9 +2570,17 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                 # shutdown; the next target must exercise the real unhealthy
                 # CDP handoff rather than a mocked result.
                 test_stop_triggered = True
-                emit_progress(date_value, "test_cdp_shutdown", processed=index + 1, completed=completed, target=target)
+                emit_progress(
+                    date_value,
+                    "test_cdp_shutdown",
+                    processed=index + 1,
+                    completed=completed,
+                    target=target,
+                )
                 if not args.dry_run:
-                    journal_event(date_value, "test_cdp_shutdown", target=target, completed=completed)
+                    journal_event(
+                        date_value, "test_cdp_shutdown", target=target, completed=completed
+                    )
                 try:
                     activity_reader.session.cdp.send("Browser.close", timeout=5)
                 except Exception:
@@ -2177,7 +2591,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             close()
 
     resolved_targets = sum(
-        1 for target in targets
+        1
+        for target in targets
         if target["key"] in state.get("targets", {})
         and state["targets"][target["key"]].get("status") != PENDING_404_STATUS
     )
@@ -2198,7 +2613,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         and ready_row_ratio >= args.final_bridge_threshold
         and bool(ranked_rows)
     )
-    final_bridge: Dict[str, Any] = {
+    final_bridge: dict[str, Any] = {
         "attempted": False,
         "eligible": final_bridge_eligible,
         "threshold": args.final_bridge_threshold,
@@ -2209,7 +2624,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         "source_rows": source_row_count,
         "ready_row_ratio": ready_row_ratio,
     }
-    prospects_bridge: Dict[str, Any] = {"attempted": False}
+    prospects_bridge: dict[str, Any] = {"attempted": False}
     if final_bridge_eligible:
         final_bridge["attempted"] = True
         if ranked_rows:
@@ -2230,7 +2645,12 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                         ready_row_ratio=ready_row_ratio,
                         row_count=len(ranked_rows),
                     )
-                emit_progress(date_value, "final_bridge_start", ready_rows=len(ranked_rows), completion_ratio=completion_ratio)
+                emit_progress(
+                    date_value,
+                    "final_bridge_start",
+                    ready_rows=len(ranked_rows),
+                    completion_ratio=completion_ratio,
+                )
                 final_bridge["result"] = bridge_ready_rows_to_final(
                     args=args, date_value=date_value, state=state, ranked_rows=ranked_rows
                 )
@@ -2245,19 +2665,27 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             delay_seconds = max(0, args.prospects_bridge_delay_sec)
             prospects_bridge = {"attempted": True, "delay_seconds": delay_seconds}
             if delay_seconds and not args.dry_run:
-                emit_progress(date_value, "prospects_bridge_wait_start", delay_seconds=delay_seconds)
+                emit_progress(
+                    date_value, "prospects_bridge_wait_start", delay_seconds=delay_seconds
+                )
                 remaining = delay_seconds
                 while remaining > 0:
                     wait_seconds = min(60, remaining)
                     time.sleep(wait_seconds)
                     remaining -= wait_seconds
-                    emit_progress(date_value, "prospects_bridge_wait_progress", remaining_seconds=remaining)
+                    emit_progress(
+                        date_value, "prospects_bridge_wait_progress", remaining_seconds=remaining
+                    )
             try:
                 emit_progress(date_value, "prospects_bridge_start")
                 prospects_bridge["result"] = bridge_final_to_prospects(args, date_value)
                 if not prospects_bridge["result"].get("ok", False):
-                    failures.append({"error": "prospects_bridge_failed", "detail": prospects_bridge["result"]})
-                emit_progress(date_value, "prospects_bridge_done", result=prospects_bridge["result"])
+                    failures.append(
+                        {"error": "prospects_bridge_failed", "detail": prospects_bridge["result"]}
+                    )
+                emit_progress(
+                    date_value, "prospects_bridge_done", result=prospects_bridge["result"]
+                )
             except Exception as exc:
                 failures.append({"error": "prospects_bridge_failed", "detail": str(exc)})
                 prospects_bridge["error"] = str(exc)
@@ -2303,7 +2731,12 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                     "session_path": str(activity_session_path(date_value)),
                 },
                 activity_results={
-                    key: {"activity_value": normalize_activity_value(record.get("activity_value", "")), "recorded_at": record.get("recorded_at", "")}
+                    key: {
+                        "activity_value": normalize_activity_value(
+                            record.get("activity_value", "")
+                        ),
+                        "recorded_at": record.get("recorded_at", ""),
+                    }
                     for key, record in state.get("targets", {}).items()
                     if normalize_activity_value(record.get("activity_value", ""))
                 },
@@ -2329,7 +2762,12 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                 queue_fingerprint,
                 "activity_in_progress",
                 activity_results={
-                    key: {"activity_value": normalize_activity_value(record.get("activity_value", "")), "recorded_at": record.get("recorded_at", "")}
+                    key: {
+                        "activity_value": normalize_activity_value(
+                            record.get("activity_value", "")
+                        ),
+                        "recorded_at": record.get("recorded_at", ""),
+                    }
                     for key, record in state.get("targets", {}).items()
                     if normalize_activity_value(record.get("activity_value", ""))
                 },
@@ -2359,7 +2797,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     return result
 
 
-def fake_activity(*, posts: Sequence[str] = (), comments: Sequence[str] = (), reactions: Sequence[str] = ()) -> Dict[str, Any]:
+def fake_activity(
+    *, posts: Sequence[str] = (), comments: Sequence[str] = (), reactions: Sequence[str] = ()
+) -> dict[str, Any]:
     return {
         "tabs": {
             "posts": {"activities": [{"time_text": value} for value in posts]},
@@ -2401,30 +2841,55 @@ def run_self_tests() -> None:
     locale_targets = extract_targets([locale_row])
     assert len(locale_targets) == 1
     assert locale_targets[0]["profile_url"] == "https://www.linkedin.com/in/example-person"
-    assert locale_targets[0]["original_profile_url"] == "https://nl.linkedin.com/in/example-person/nl?trk=test"
+    assert (
+        locale_targets[0]["original_profile_url"]
+        == "https://nl.linkedin.com/in/example-person/nl?trk=test"
+    )
     assert locale_targets[0]["profile_url_normalized"] is True
     assert activity_level(fake_activity(posts=["6d"])) == "Very active"
     assert activity_level(fake_activity(comments=["1d", "6d"])) == "Very active"
     assert activity_level(fake_activity(reactions=["1d", "6d"])) == "Very active"
     assert activity_level(fake_activity(posts=["13d"])) == "Active"
-    assert activity_level(fake_activity(comments=["20d", "21d", "22d"], reactions=["23d", "24d"])) == "Active"
+    assert (
+        activity_level(fake_activity(comments=["20d", "21d", "22d"], reactions=["23d", "24d"]))
+        == "Active"
+    )
     assert activity_level(fake_activity(comments=["300d"])) == "Not active"
     proven_recent_with_uncertain_tab = fake_activity(posts=["6d"])
     proven_recent_with_uncertain_tab["tabs"]["comments"]["activity_classification_uncertain"] = True
     assert activity_level(proven_recent_with_uncertain_tab) == "Very active"
-    proven_active_with_uncertain_tab = fake_activity(comments=["20d", "21d", "22d"], reactions=["23d", "24d"])
+    proven_active_with_uncertain_tab = fake_activity(
+        comments=["20d", "21d", "22d"], reactions=["23d", "24d"]
+    )
     proven_active_with_uncertain_tab["tabs"]["posts"]["activity_classification_uncertain"] = True
     assert activity_level(proven_active_with_uncertain_tab) == "Active"
     old_only_with_uncertain_tab = fake_activity(comments=["300d"])
     old_only_with_uncertain_tab["tabs"]["reactions"]["activity_classification_uncertain"] = True
     assert activity_level(old_only_with_uncertain_tab) == ""
-    assert activity_detail_empty_success_reason(old_only_with_uncertain_tab) == "activity_classification_uncertain"
+    assert (
+        activity_detail_empty_success_reason(old_only_with_uncertain_tab)
+        == "activity_classification_uncertain"
+    )
     canonical_example = "https://www.linkedin.com/in/example-person"
-    assert canonical_linkedin_profile_url("https://nl.linkedin.com/in/example-person/nl?trk=test") == canonical_example
-    assert canonical_linkedin_profile_url("https://www.nl.linkedin.com/in/example-person/") == canonical_example
+    assert (
+        canonical_linkedin_profile_url("https://nl.linkedin.com/in/example-person/nl?trk=test")
+        == canonical_example
+    )
+    assert (
+        canonical_linkedin_profile_url("https://www.nl.linkedin.com/in/example-person/")
+        == canonical_example
+    )
     assert canonical_linkedin_profile_url("linkedin.com/in/example-person") == canonical_example
-    assert canonical_linkedin_profile_url("https://rs.linkedin.com/in/example-person#:~:text=Example") == canonical_example
-    assert canonical_linkedin_profile_url("https://www.linkedin.com/in/example-person/recent-activity/reactions/") == canonical_example
+    assert (
+        canonical_linkedin_profile_url("https://rs.linkedin.com/in/example-person#:~:text=Example")
+        == canonical_example
+    )
+    assert (
+        canonical_linkedin_profile_url(
+            "https://www.linkedin.com/in/example-person/recent-activity/reactions/"
+        )
+        == canonical_example
+    )
     assert canonical_linkedin_profile_url("https://example.com/in/example-person") == ""
     assert canonical_linkedin_profile_url("https://www.linkedin.com/company/example-person") == ""
     assert canonical_linkedin_profile_url("https://www.linkedin.com/jobs/view/123") == ""
@@ -2471,15 +2936,30 @@ def run_self_tests() -> None:
             "comments": {"total_visible": 0, "activities": []},
         },
     }
-    assert activity_detail_empty_success_reason(ambiguous_empty_success) == "activity_feed_not_hydrated"
+    assert (
+        activity_detail_empty_success_reason(ambiguous_empty_success)
+        == "activity_feed_not_hydrated"
+    )
     invalid_empty_success = {**ambiguous_empty_success, "page_url": "https://www.linkedin.com/404/"}
     assert activity_detail_empty_success_reason(invalid_empty_success) == "invalid_profile_or_404"
     explicit_empty_success = {
         "error": False,
         "tabs": {
-            "posts": {"total_visible": 0, "activities": [], "feed_state": {"reason": "explicit_empty_state"}},
-            "reactions": {"total_visible": 0, "activities": [], "feed_state": {"reason": "explicit_empty_state"}},
-            "comments": {"total_visible": 0, "activities": [], "feed_state": {"reason": "explicit_empty_state"}},
+            "posts": {
+                "total_visible": 0,
+                "activities": [],
+                "feed_state": {"reason": "explicit_empty_state"},
+            },
+            "reactions": {
+                "total_visible": 0,
+                "activities": [],
+                "feed_state": {"reason": "explicit_empty_state"},
+            },
+            "comments": {
+                "total_visible": 0,
+                "activities": [],
+                "feed_state": {"reason": "explicit_empty_state"},
+            },
         },
     }
     assert activity_detail_empty_success_reason(explicit_empty_success) == ""
@@ -2493,30 +2973,51 @@ def run_self_tests() -> None:
         def __init__(self) -> None:
             self.calls = 0
 
-        def read_activity_detail(self, _profile_url: str, max_seconds: float, navigation_type: str) -> Dict[str, Any]:
+        def read_activity_detail(
+            self, _profile_url: str, max_seconds: float, navigation_type: str
+        ) -> dict[str, Any]:
             self.calls += 1
-            return {"error": True, "danger": "invalid_profile_or_404", "reason": "invalid_profile_or_404"}
+            return {
+                "error": True,
+                "danger": "invalid_profile_or_404",
+                "reason": "invalid_profile_or_404",
+            }
 
         def _check_danger(self) -> str:
             return ""
 
     fake_session = FakeSession()
     reader.session = fake_session
-    retained_error = reader("https://www.linkedin.com/in/missing", {"navigation_type": "Direct Url"})
+    retained_error = reader(
+        "https://www.linkedin.com/in/missing", {"navigation_type": "Direct Url"}
+    )
     assert retained_error.get("reason") == "invalid_profile_or_404"
     assert len(retained_error.get("_attempts", [])) == 2
 
 
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Check Pre-final P1/P2 activity, then bridge Final and Prospects in stages.")
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Check Pre-final P1/P2 activity, then bridge Final and Prospects in stages."
+    )
     parser.add_argument("--date", default=date.today().isoformat())
-    parser.add_argument("--sheet-url", default=os.environ.get("LEAD_RESEARCH_SHEET_URL", DEFAULT_LEADS_SHEET_URL))
-    parser.add_argument("--prefinal-tab", default=os.environ.get("LEAD_RESEARCH_PREFINAL_TAB", DEFAULT_PREFINAL_TAB))
-    parser.add_argument("--final-tab", default=os.environ.get("LEAD_RESEARCH_FINAL_TAB", DEFAULT_FINAL_TAB))
+    parser.add_argument(
+        "--sheet-url", default=os.environ.get("LEAD_RESEARCH_SHEET_URL", DEFAULT_LEADS_SHEET_URL)
+    )
+    parser.add_argument(
+        "--prefinal-tab", default=os.environ.get("LEAD_RESEARCH_PREFINAL_TAB", DEFAULT_PREFINAL_TAB)
+    )
+    parser.add_argument(
+        "--final-tab", default=os.environ.get("LEAD_RESEARCH_FINAL_TAB", DEFAULT_FINAL_TAB)
+    )
     parser.add_argument("--obf-url", default=os.environ.get("OBF_SHEET_URL", OBF_SHEET_URL))
     parser.add_argument("--prospects-tab", default=os.environ.get("OBF_PROSPECTS_TAB", "Prospects"))
-    parser.add_argument("--activity-sequence-tab", default=os.environ.get("ACTIVITY_SEQUENCE_TAB", DEFAULT_ACTIVITY_SEQUENCE_TAB))
-    parser.add_argument("--credentials", default=os.environ.get("GOOGLE_SHEETS_CREDENTIALS", str(DEFAULT_CREDS)))
+    parser.add_argument(
+        "--activity-sequence-tab",
+        default=os.environ.get("ACTIVITY_SEQUENCE_TAB", DEFAULT_ACTIVITY_SEQUENCE_TAB),
+    )
+    parser.add_argument(
+        "--credentials", default=os.environ.get("GOOGLE_SHEETS_CREDENTIALS", str(DEFAULT_CREDS))
+    )
     parser.add_argument("--activity-timeout", type=float, default=180.0)
     parser.add_argument("--activity-retries", type=int, default=1)
     parser.add_argument("--max-consecutive-hard-failures", type=int, default=3)
@@ -2527,22 +3028,77 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Terminally skip one profile after this many unresolved Activity Check attempts (default: 4).",
     )
     parser.add_argument("--activity-fixture", default="")
-    parser.add_argument("--test-synthetic-activity", action="store_true", help="Test only: generate deterministic synthetic activity evidence; requires test destinations.")
-    parser.add_argument("--queue-fingerprint", default="", help="Run one explicit queued batch instead of the oldest open batch.")
+    parser.add_argument(
+        "--test-synthetic-activity",
+        action="store_true",
+        help="Test only: generate deterministic synthetic activity evidence; requires test destinations.",
+    )
+    parser.add_argument(
+        "--queue-fingerprint",
+        default="",
+        help="Run one explicit queued batch instead of the oldest open batch.",
+    )
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--live-dry-run", action="store_true", help="In dry-run mode, still read LinkedIn live activity.")
-    parser.add_argument("--prepare-only", action="store_true", help="Prepare Activity Sequence/local session state, then exit before LinkedIn reads or Final writes.")
-    parser.add_argument("--activity-only", action="store_true", help="Run only from an existing prepared local session; do not regenerate Activity Sequence.")
-    parser.add_argument("--worker-id", default="", help="Run only targets assigned to one prepared activity worker.")
-    parser.add_argument("--retry-pending-404", action="store_true", help="Fresh-session retry of only targets deferred after an initial 404-like result.")
-    parser.add_argument("--no-bridges", action="store_true", help="Record this lane only; defer Final/Prospects bridges to a later finalizer.")
-    parser.add_argument("--finalize-only", action="store_true", help="Bridge the prepared session without opening LinkedIn or running activity reads.")
-    parser.add_argument("--test-stop-cdp-after-completed", type=int, default=0, help="E2E test only: cleanly close this worker's Chrome after N completed targets.")
-    parser.add_argument("--enqueue-current-prefinal", action="store_true", help="One-time bootstrap: snapshot the currently visible Pre-final rows into the local queue before activity work.")
-    parser.add_argument("--final-bridge-threshold", type=float, default=0.90, help="Minimum resolved activity share required before the staged Final bridge (default: 0.90).")
-    parser.add_argument("--prospects-bridge-delay-sec", type=int, default=300, help="Delay after a successful Final bridge before Final -> Prospects (default: 300).")
-    parser.add_argument("--no-prospects-bridge", action="store_true", help="Stop after the staged Final bridge.")
+    parser.add_argument(
+        "--live-dry-run",
+        action="store_true",
+        help="In dry-run mode, still read LinkedIn live activity.",
+    )
+    parser.add_argument(
+        "--prepare-only",
+        action="store_true",
+        help="Prepare Activity Sequence/local session state, then exit before LinkedIn reads or Final writes.",
+    )
+    parser.add_argument(
+        "--activity-only",
+        action="store_true",
+        help="Run only from an existing prepared local session; do not regenerate Activity Sequence.",
+    )
+    parser.add_argument(
+        "--worker-id", default="", help="Run only targets assigned to one prepared activity worker."
+    )
+    parser.add_argument(
+        "--retry-pending-404",
+        action="store_true",
+        help="Fresh-session retry of only targets deferred after an initial 404-like result.",
+    )
+    parser.add_argument(
+        "--no-bridges",
+        action="store_true",
+        help="Record this lane only; defer Final/Prospects bridges to a later finalizer.",
+    )
+    parser.add_argument(
+        "--finalize-only",
+        action="store_true",
+        help="Bridge the prepared session without opening LinkedIn or running activity reads.",
+    )
+    parser.add_argument(
+        "--test-stop-cdp-after-completed",
+        type=int,
+        default=0,
+        help="E2E test only: cleanly close this worker's Chrome after N completed targets.",
+    )
+    parser.add_argument(
+        "--enqueue-current-prefinal",
+        action="store_true",
+        help="One-time bootstrap: snapshot the currently visible Pre-final rows into the local queue before activity work.",
+    )
+    parser.add_argument(
+        "--final-bridge-threshold",
+        type=float,
+        default=0.90,
+        help="Minimum resolved activity share required before the staged Final bridge (default: 0.90).",
+    )
+    parser.add_argument(
+        "--prospects-bridge-delay-sec",
+        type=int,
+        default=300,
+        help="Delay after a successful Final bridge before Final -> Prospects (default: 300).",
+    )
+    parser.add_argument(
+        "--no-prospects-bridge", action="store_true", help="Stop after the staged Final bridge."
+    )
     parser.add_argument("--delay-min-sec", type=int, default=5)
     parser.add_argument("--delay-max-sec", type=int, default=20)
     parser.add_argument("--batch-gap-min-sec", type=int, default=10)
@@ -2556,7 +3112,9 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     if args.max_target_attempts < 1:
         parser.error("--max-target-attempts must be >= 1.")
     if args.worker_id and not args.activity_only:
-        parser.error("--worker-id requires --activity-only so the prepared assignment cannot change.")
+        parser.error(
+            "--worker-id requires --activity-only so the prepared assignment cannot change."
+        )
     if args.finalize_only and not args.activity_only:
         parser.error("--finalize-only requires --activity-only.")
     if args.finalize_only and args.worker_id:
@@ -2564,17 +3122,23 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     if args.finalize_only and args.no_bridges:
         parser.error("--finalize-only cannot be combined with --no-bridges.")
     if args.retry_pending_404 and (not args.activity_only or args.finalize_only):
-        parser.error("--retry-pending-404 requires --activity-only and cannot be used with --finalize-only.")
+        parser.error(
+            "--retry-pending-404 requires --activity-only and cannot be used with --finalize-only."
+        )
     if args.test_stop_cdp_after_completed < 0:
         parser.error("--test-stop-cdp-after-completed must be >= 0.")
     if args.test_stop_cdp_after_completed and not args.worker_id:
         parser.error("--test-stop-cdp-after-completed requires --worker-id.")
-    if args.test_synthetic_activity and (not args.final_tab.endswith(" - Test") or not args.prospects_tab.endswith(" - Test")):
-        parser.error("--test-synthetic-activity requires --final-tab and --prospects-tab ending in ' - Test'.")
+    if args.test_synthetic_activity and (
+        not args.final_tab.endswith(" - Test") or not args.prospects_tab.endswith(" - Test")
+    ):
+        parser.error(
+            "--test-synthetic-activity requires --final-tab and --prospects-tab ending in ' - Test'."
+        )
     return args
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     if args.self_test:
         run_self_tests()

@@ -14,9 +14,10 @@ import argparse
 import json
 import os
 import sys
+from collections.abc import Iterable
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,7 +47,7 @@ def normalize_progress(value: Any) -> str:
     return text.replace(" ", "_") if text else ""
 
 
-def parse_sheet_date(value: Any) -> Optional[date]:
+def parse_sheet_date(value: Any) -> date | None:
     text = str(value or "").strip()
     if not text:
         return None
@@ -76,17 +77,17 @@ def calculate_days_left(sent_at: date, today: date) -> int:
     return WITHDRAWAL_WINDOW_DAYS - elapsed
 
 
-def header_index(headers: Iterable[Any]) -> Dict[str, int]:
+def header_index(headers: Iterable[Any]) -> dict[str, int]:
     return {normalize_header(header): i + 1 for i, header in enumerate(headers)}
 
 
-def require_columns(index: Dict[str, int], columns: Iterable[str], tab_name: str) -> None:
+def require_columns(index: dict[str, int], columns: Iterable[str], tab_name: str) -> None:
     missing = [column for column in columns if column not in index]
     if missing:
         raise ValueError(f"{tab_name} is missing required columns: {', '.join(missing)}")
 
 
-def row_value(row: List[Any], index: Dict[str, int], column: str) -> str:
+def row_value(row: list[Any], index: dict[str, int], column: str) -> str:
     position = index.get(column)
     if not position:
         return ""
@@ -95,7 +96,7 @@ def row_value(row: List[Any], index: Dict[str, int], column: str) -> str:
     return str(row[position - 1] or "").strip()
 
 
-def read_rows(worksheet: Any) -> Tuple[List[str], List[List[Any]]]:
+def read_rows(worksheet: Any) -> tuple[list[str], list[list[Any]]]:
     values = worksheet.get_all_values()
     if not values:
         return [], []
@@ -107,8 +108,10 @@ def read_rows(worksheet: Any) -> Tuple[List[str], List[List[Any]]]:
     return headers, rows
 
 
-def build_prospect_date_queued(prospects_rows: List[List[Any]], prospects_index: Dict[str, int]) -> Dict[str, str]:
-    result: Dict[str, str] = {}
+def build_prospect_date_queued(
+    prospects_rows: list[list[Any]], prospects_index: dict[str, int]
+) -> dict[str, str]:
+    result: dict[str, str] = {}
     for row in prospects_rows:
         prospect_id = row_value(row, prospects_index, "ID")
         date_queued = row_value(row, prospects_index, "Date Queued")
@@ -126,7 +129,7 @@ def a1(row_number: int, col_number: int) -> str:
     return f"{letters}{row_number}"
 
 
-def batch_update_cells(worksheet: Any, updates: List[Tuple[int, int, Any]]) -> None:
+def batch_update_cells(worksheet: Any, updates: list[tuple[int, int, Any]]) -> None:
     if not updates:
         return
     payload = [
@@ -136,7 +139,7 @@ def batch_update_cells(worksheet: Any, updates: List[Tuple[int, int, Any]]) -> N
     worksheet.batch_update(payload, value_input_option="USER_ENTERED")
 
 
-def append_jsonl(path: Path, events: Iterable[Dict[str, Any]]) -> None:
+def append_jsonl(path: Path, events: Iterable[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         for event in events:
@@ -144,14 +147,14 @@ def append_jsonl(path: Path, events: Iterable[Dict[str, Any]]) -> None:
 
 
 def build_backfill(
-    outreach_rows: List[List[Any]],
-    outreach_index: Dict[str, int],
-    prospect_date_queued: Dict[str, str],
+    outreach_rows: list[list[Any]],
+    outreach_index: dict[str, int],
+    prospect_date_queued: dict[str, str],
     today: date,
     allow_last_action_fallback: bool,
-) -> Tuple[List[Tuple[int, int, Any]], List[Dict[str, Any]], Dict[str, Any]]:
-    updates: List[Tuple[int, int, Any]] = []
-    events: List[Dict[str, Any]] = []
+) -> tuple[list[tuple[int, int, Any]], list[dict[str, Any]], dict[str, Any]]:
+    updates: list[tuple[int, int, Any]] = []
+    events: list[dict[str, Any]] = []
     summary = {
         "scanned": len(outreach_rows),
         "conn_request_rows": 0,
@@ -194,27 +197,33 @@ def build_backfill(
             if prospects_date:
                 sent_at_raw = prospects_date
                 source = "prospects_date_queued"
-                updates.append((offset, sent_at_col, format_date(parse_sheet_date(prospects_date) or today)))
+                updates.append(
+                    (offset, sent_at_col, format_date(parse_sheet_date(prospects_date) or today))
+                )
                 summary["sent_at_backfilled_from_prospects"] += 1
             elif allow_last_action_fallback:
                 last_action = row_value(row, outreach_index, "Last Action Date")
                 if last_action:
                     sent_at_raw = last_action
                     source = "last_action_date"
-                    updates.append((offset, sent_at_col, format_date(parse_sheet_date(last_action) or today)))
+                    updates.append(
+                        (offset, sent_at_col, format_date(parse_sheet_date(last_action) or today))
+                    )
                     summary["sent_at_backfilled_from_last_action"] += 1
 
         sent_at = parse_sheet_date(sent_at_raw)
         if not sent_at:
             summary["blocked_missing_sent_at" if not sent_at_raw else "invalid_sent_at"] += 1
-            events.append({
-                "event": "blocked_missing_sent_at" if not sent_at_raw else "invalid_sent_at",
-                "row_number": offset,
-                "prospect_id": prospect_id,
-                "company": company,
-                "contact_name": contact_name,
-                "sent_at_raw": sent_at_raw,
-            })
+            events.append(
+                {
+                    "event": "blocked_missing_sent_at" if not sent_at_raw else "invalid_sent_at",
+                    "row_number": offset,
+                    "prospect_id": prospect_id,
+                    "company": company,
+                    "contact_name": contact_name,
+                    "sent_at_raw": sent_at_raw,
+                }
+            )
             continue
 
         days_left = calculate_days_left(sent_at, today)
@@ -224,7 +233,9 @@ def build_backfill(
             summary["upcoming"] += 1
 
         try:
-            existing_days_left = int(str(days_left_raw).strip()) if str(days_left_raw).strip() else None
+            existing_days_left = (
+                int(str(days_left_raw).strip()) if str(days_left_raw).strip() else None
+            )
         except ValueError:
             existing_days_left = None
         if days_left_raw:
@@ -236,28 +247,34 @@ def build_backfill(
             updates.append((offset, days_left_col, days_left))
             summary["days_left_backfilled"] += 1
 
-        events.append({
-            "event": "countdown_backfill_evaluated",
-            "row_number": offset,
-            "prospect_id": prospect_id,
-            "company": company,
-            "contact_name": contact_name,
-            "sent_at": format_date(sent_at),
-            "sent_at_source": source,
-            "days_left": days_left,
-            "days_left_was_blank": not bool(days_left_raw),
-        })
+        events.append(
+            {
+                "event": "countdown_backfill_evaluated",
+                "row_number": offset,
+                "prospect_id": prospect_id,
+                "company": company,
+                "contact_name": contact_name,
+                "sent_at": format_date(sent_at),
+                "sent_at_source": source,
+                "days_left": days_left,
+                "days_left_was_blank": not bool(days_left_raw),
+            }
+        )
 
     summary["cell_updates"] = len(updates)
     return updates, events, summary
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Backfill withdrawal countdown fields in OBF Outreach Log.")
+    parser = argparse.ArgumentParser(
+        description="Backfill withdrawal countdown fields in OBF Outreach Log."
+    )
     parser.add_argument("--credentials", default=CREDS_PATH)
     parser.add_argument("--sheet-url", default=os.environ.get("OBF_SHEET_URL", OBF_SHEET_URL))
     parser.add_argument("--timezone", default=DEFAULT_TIMEZONE)
-    parser.add_argument("--dry-run", action="store_true", help="Calculate and journal without writing sheet cells.")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Calculate and journal without writing sheet cells."
+    )
     parser.add_argument(
         "--allow-last-action-fallback",
         action="store_true",
@@ -270,7 +287,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     today = datetime.now(ZoneInfo(args.timezone)).date()
-    journal = Path(args.journal) if args.journal else ROOT / "state" / "withdrawal_journal" / f"{today.isoformat()}-backfill.jsonl"
+    journal = (
+        Path(args.journal)
+        if args.journal
+        else ROOT / "state" / "withdrawal_journal" / f"{today.isoformat()}-backfill.jsonl"
+    )
 
     client = get_client(args.credentials)
     spreadsheet = open_sheet(client, args.sheet_url)
@@ -283,7 +304,15 @@ def main() -> int:
     prospects_index = header_index(prospects_headers)
     require_columns(
         outreach_index,
-        ["Prospect ID", "Company", "Contact Name", "Current Progress", "Last Action Date", "Sent At", "Days Left"],
+        [
+            "Prospect ID",
+            "Company",
+            "Contact Name",
+            "Current Progress",
+            "Last Action Date",
+            "Sent At",
+            "Days Left",
+        ],
         OUTREACH_LOG_TAB,
     )
     require_columns(prospects_index, ["ID", "Date Queued"], PROSPECTS_TAB)
@@ -309,12 +338,18 @@ def main() -> int:
     if not args.dry_run:
         batch_update_cells(outreach_ws, updates)
 
-    print(json.dumps({
-        "ok": True,
-        "dry_run": bool(args.dry_run),
-        "journal": str(journal),
-        "summary": summary,
-    }, indent=2, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "dry_run": bool(args.dry_run),
+                "journal": str(journal),
+                "summary": summary,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
     return 0
 
 

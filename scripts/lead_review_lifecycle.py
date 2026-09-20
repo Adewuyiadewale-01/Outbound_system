@@ -11,14 +11,14 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Iterable, Sequence
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any
 
 import gspread
 from gspread.utils import ValidationConditionType
-
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPERS = ROOT / "helpers"
@@ -36,7 +36,6 @@ from lead_exec_research import (  # noqa: E402
     ResearchArchive,
     build_destination_row_from_computation,
     clean_text,
-    computation_rows_for_write,
     filter_ready_prefinal_rows,
     load_run,
     save_run,
@@ -45,7 +44,6 @@ from lead_exec_research import (  # noqa: E402
 )
 from prefinal_queue import enqueue_batch, record_prefinal_publish  # noqa: E402
 from sheets_helper import get_client, get_worksheet, open_sheet  # noqa: E402
-
 
 DEFAULT_ARCHIVE_TAB = "Lead Archive"
 DEFAULT_THRESHOLD = 20
@@ -95,7 +93,7 @@ def checked(value: Any) -> bool:
     return clean_text(value).lower() in {"true", "yes", "y", "1", "checked", "x"}
 
 
-def parse_review_slice(value: Any) -> Optional[Dict[str, int]]:
+def parse_review_slice(value: Any) -> dict[str, int] | None:
     raw = clean_text(value).lower()
     if not raw or raw in {"all", "none"}:
         return None
@@ -122,14 +120,14 @@ def normalized_lane(value: Any) -> str:
 
 
 def classify_review_rows(
-    rows: Sequence[Dict[str, Any]],
+    rows: Sequence[dict[str, Any]],
     *,
     threshold: int = DEFAULT_THRESHOLD,
     checkpoint: str = "first",
     lane_scope: str = "all",
     review_slice: str = "",
     approval_required: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return the group action and the exact per-lead destination.
 
     A non-empty Use value means the Design row was reviewed, including values
@@ -152,7 +150,8 @@ def classify_review_rows(
         routed_rows = normalized
         if normalized_scope in {"design", "automation"}:
             routed_rows = [
-                row for row in normalized
+                row
+                for row in normalized
                 if normalized_lane(row.get("Primary Lane")).lower() == normalized_scope
             ]
         prefinal = []
@@ -211,18 +210,18 @@ def classify_review_rows(
             "total": len(normalized),
         }
 
-    prefinal: List[Dict[str, Any]] = []
-    archive: List[Dict[str, Any]] = []
+    prefinal: list[dict[str, Any]] = []
+    archive: list[dict[str, Any]] = []
     routed_rows = normalized
     if normalized_scope in {"design", "automation"}:
         routed_rows = [
-            row for row in normalized
+            row
+            for row in normalized
             if normalized_lane(row.get("Primary Lane")).lower() == normalized_scope
         ]
     elif checkpoint == "first" and not slice_info:
         routed_rows = [
-            row for row in normalized
-            if normalized_lane(row.get("Primary Lane")) == "Design"
+            row for row in normalized if normalized_lane(row.get("Primary Lane")) == "Design"
         ]
 
     for row in routed_rows:
@@ -254,14 +253,14 @@ def classify_review_rows(
 
 
 def classify_computation_leads(
-    leads: Sequence[Dict[str, Any]],
+    leads: Sequence[dict[str, Any]],
     *,
     threshold: int = DEFAULT_THRESHOLD,
     checkpoint: str = "first",
     lane_scope: str = "all",
     review_slice: str = "",
     approval_required: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     review_rows = []
     by_id = {}
     for lead in leads:
@@ -298,11 +297,11 @@ def classify_computation_leads(
 
 
 def archive_promotion_plan(
-    rows: Sequence[Dict[str, Any]],
+    rows: Sequence[dict[str, Any]],
     *,
     design_threshold: int = DEFAULT_THRESHOLD,
     automation_limit: int = DEFAULT_THRESHOLD,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     available = [row for row in rows if clean_text(row.get("Status") or "Available") == "Available"]
     approved_design = [
         row
@@ -333,18 +332,21 @@ def archive_promotion_plan(
     }
 
 
-def computation_next_action(computation: Dict[str, Any]) -> Dict[str, Any]:
+def computation_next_action(computation: dict[str, Any]) -> dict[str, Any]:
     leads = computation.get("leads", [])
     research_pending = [
-        lead for lead in leads
+        lead
+        for lead in leads
         if lead.get("status") == "research_pending" and not lead.get("executives")
     ]
     reconciliation_pending = [
-        lead for lead in leads
+        lead
+        for lead in leads
         if lead.get("executives") and lead.get("status") == "reconciliation_pending"
     ]
     pending_search = [
-        task for task in computation.get("search_tasks", [])
+        task
+        for task in computation.get("search_tasks", [])
         if task.get("status", "pending") == "pending"
     ]
     conflicts = [lead for lead in leads if lead.get("status") == "archive_conflict"]
@@ -354,7 +356,8 @@ def computation_next_action(computation: Dict[str, Any]) -> Dict[str, Any]:
     elif research_pending:
         action = "research_batch"
     elif reconciliation_pending or (
-        computation.get("status") == "reconciliation_pending" and not computation.get("search_tasks")
+        computation.get("status") == "reconciliation_pending"
+        and not computation.get("search_tasks")
     ):
         action = "reconcile_existing"
     elif pending_search:
@@ -381,11 +384,16 @@ def ensure_archive_worksheet(spreadsheet, tab_name: str = DEFAULT_ARCHIVE_TAB):
         worksheet = spreadsheet.worksheet(tab_name)
     except gspread.WorksheetNotFound:
         worksheet = spreadsheet.add_worksheet(title=tab_name, rows=2000, cols=len(ARCHIVE_COLUMNS))
-        worksheet.update(range_name="A1", values=[ARCHIVE_COLUMNS], value_input_option="USER_ENTERED")
+        worksheet.update(
+            range_name="A1", values=[ARCHIVE_COLUMNS], value_input_option="USER_ENTERED"
+        )
         worksheet.freeze(rows=1)
         worksheet.format(
             f"A1:{gspread.utils.rowcol_to_a1(1, len(ARCHIVE_COLUMNS))}",
-            {"backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}, "textFormat": {"bold": True}},
+            {
+                "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9},
+                "textFormat": {"bold": True},
+            },
         )
         worksheet.columns_auto_resize(0, len(ARCHIVE_COLUMNS))
         worksheet.set_basic_filter(
@@ -413,13 +421,13 @@ def ensure_archive_worksheet(spreadsheet, tab_name: str = DEFAULT_ARCHIVE_TAB):
 
 
 def archive_sheet_row(
-    lead: Dict[str, Any],
+    lead: dict[str, Any],
     *,
     archive_entry_id: str,
     batch_id: str,
     group_date: str,
     archived_at: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     destination = build_destination_row_from_computation(lead)
     return {
         "Archive Entry ID": archive_entry_id,
@@ -440,14 +448,14 @@ def archive_sheet_row(
 
 def sync_archive_rows(
     spreadsheet,
-    leads: Sequence[Dict[str, Any]],
+    leads: Sequence[dict[str, Any]],
     *,
     archive: ResearchArchive,
     computation_file: Path,
     source_run_file: str,
     group_date: str,
     tab_name: str = DEFAULT_ARCHIVE_TAB,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     worksheet = ensure_archive_worksheet(spreadsheet, tab_name)
     headers = worksheet.row_values(1)
     existing = worksheet.get_all_records(default_blank="")
@@ -479,7 +487,9 @@ def sync_archive_rows(
         )
         payload = [row.get(header, "") for header in headers]
         if entry_id in row_by_entry:
-            worksheet.update(f"A{row_by_entry[entry_id]}", [payload], value_input_option="USER_ENTERED")
+            worksheet.update(
+                f"A{row_by_entry[entry_id]}", [payload], value_input_option="USER_ENTERED"
+            )
             updated += 1
         else:
             worksheet.append_row(payload, value_input_option="USER_ENTERED")
@@ -490,13 +500,13 @@ def sync_archive_rows(
 
 def publish_prefinal_subset(
     spreadsheet,
-    leads: Sequence[Dict[str, Any]],
+    leads: Sequence[dict[str, Any]],
     *,
     computation_file: Path,
     destination_tab: str = DEFAULT_DESTINATION_TAB,
     credentials: Path = DEFAULT_CREDS,
     sheet_url: str = DEFAULT_SHEET_URL,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     rows = [build_destination_row_from_computation(lead) for lead in leads]
     ready, skipped = filter_ready_prefinal_rows(rows, require_p2=False, include_unresolved=False)
     if skipped:
@@ -510,11 +520,20 @@ def publish_prefinal_subset(
         count = write_destination_rows(credentials, sheet_url, destination_tab, ready, start_row=2)
         verified = verify_destination_rows(credentials, sheet_url, destination_tab, ready, 2)
         if not verified:
-            record_prefinal_publish(queue_batch["fingerprint"], start_row=2, verified=False, error="readback_fingerprint_mismatch")
+            record_prefinal_publish(
+                queue_batch["fingerprint"],
+                start_row=2,
+                verified=False,
+                error="readback_fingerprint_mismatch",
+            )
             raise RuntimeError("Pre-final lifecycle write failed readback verification")
-        queue_batch = record_prefinal_publish(queue_batch["fingerprint"], start_row=2, verified=True)
+        queue_batch = record_prefinal_publish(
+            queue_batch["fingerprint"], start_row=2, verified=True
+        )
     except Exception as exc:
-        record_prefinal_publish(queue_batch["fingerprint"], start_row=2, verified=False, error=str(exc))
+        record_prefinal_publish(
+            queue_batch["fingerprint"], start_row=2, verified=False, error=str(exc)
+        )
         raise
     return {"rows_written": count, "queue_batch": queue_batch, "rows": ready}
 
@@ -546,8 +565,14 @@ def update_review_statuses(
             continue
         updates.extend(
             [
-                {"range": gspread.utils.rowcol_to_a1(row_number, status_column), "values": [[status]]},
-                {"range": gspread.utils.rowcol_to_a1(row_number, notes_column), "values": [[notes]]},
+                {
+                    "range": gspread.utils.rowcol_to_a1(row_number, status_column),
+                    "values": [[status]],
+                },
+                {
+                    "range": gspread.utils.rowcol_to_a1(row_number, notes_column),
+                    "values": [[notes]],
+                },
             ]
         )
     if updates:
@@ -563,14 +588,13 @@ def update_review_group_status(
     notes: str,
     review_complete: bool,
     review_tab: str = DEFAULT_REVIEW_TAB,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     if not source_run_file or not Path(source_run_file).exists():
         return {"updated": False, "reason": "source_run_file_missing"}
     run = load_run(Path(source_run_file))
-    group_row = (
-        run.get("review", {}).get("write", {}).get("group_row")
-        or run.get("review_write", {}).get("group_row")
-    )
+    group_row = run.get("review", {}).get("write", {}).get("group_row") or run.get(
+        "review_write", {}
+    ).get("group_row")
     if not group_row:
         return {"updated": False, "reason": "group_row_missing"}
     worksheet = get_worksheet(spreadsheet, review_tab)
@@ -594,13 +618,13 @@ def update_review_group_status(
     return {"updated": bool(updates), "group_row": int(group_row), "status": status}
 
 
-def load_slice_state() -> Dict[str, Any]:
+def load_slice_state() -> dict[str, Any]:
     if not SLICE_STATE_PATH.exists():
         return {}
     return json.loads(SLICE_STATE_PATH.read_text())
 
 
-def save_slice_state(state: Dict[str, Any]) -> None:
+def save_slice_state(state: dict[str, Any]) -> None:
     SLICE_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     SLICE_STATE_PATH.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n")
 
@@ -617,7 +641,7 @@ def record_slice_completion(
     review_slice: str,
     prefinal_count: int,
     archive_count: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     parsed = parse_review_slice(review_slice)
     if not parsed:
         return {"sliced": False, "all_slices_complete": True}
@@ -662,7 +686,9 @@ def record_slice_completion(
     }
 
 
-def read_archive_rows(spreadsheet, tab_name: str = DEFAULT_ARCHIVE_TAB) -> Tuple[Any, List[Dict[str, Any]]]:
+def read_archive_rows(
+    spreadsheet, tab_name: str = DEFAULT_ARCHIVE_TAB
+) -> tuple[Any, list[dict[str, Any]]]:
     worksheet = ensure_archive_worksheet(spreadsheet, tab_name)
     rows = worksheet.get_all_records(default_blank="")
     for index, row in enumerate(rows, start=2):
@@ -676,13 +702,15 @@ def archive_status(
     sheet_url: str = DEFAULT_SHEET_URL,
     archive_tab: str = DEFAULT_ARCHIVE_TAB,
     threshold: int = DEFAULT_THRESHOLD,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     spreadsheet = open_sheet(get_client(str(credentials)), sheet_url)
     _worksheet, rows = read_archive_rows(spreadsheet, archive_tab)
     plan = archive_promotion_plan(rows, design_threshold=threshold, automation_limit=threshold)
     return {
         "tab": archive_tab,
-        "available_count": len([row for row in rows if clean_text(row.get("Status") or "Available") == "Available"]),
+        "available_count": len(
+            [row for row in rows if clean_text(row.get("Status") or "Available") == "Available"]
+        ),
         "next_action": "promote_archive" if plan["ready"] else "skip_archive_below_threshold",
         "approved_design_count": plan["approved_design_count"],
         "automation_available_count": plan["automation_available_count"],
@@ -698,7 +726,7 @@ def promote_archive(
     sheet_url: str = DEFAULT_SHEET_URL,
     archive_tab: str = DEFAULT_ARCHIVE_TAB,
     threshold: int = DEFAULT_THRESHOLD,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     spreadsheet = open_sheet(get_client(str(credentials)), sheet_url)
     worksheet, rows = read_archive_rows(spreadsheet, archive_tab)
     plan = archive_promotion_plan(rows, design_threshold=threshold, automation_limit=threshold)
@@ -714,21 +742,51 @@ def promote_archive(
         routed["Primary Lane"] = "Automation"
         selected.append(routed)
     destination_rows = [
-        {column: row.get(column, "") for column in (
-            "ID", "Company", "Website", "Company LinkedIn", "Emp Count", "Source Tab",
-            "P1 Name", "P1 Title", "P1 LinkedIn", "P1 Email",
-            "P2 Name", "P2 Title", "P2 LinkedIn", "P2 Email",
-            "P3 Name", "P3 Title", "P3 LinkedIn", "P3 Email", "Use", "Primary Lane",
-        )}
+        {
+            column: row.get(column, "")
+            for column in (
+                "ID",
+                "Company",
+                "Website",
+                "Company LinkedIn",
+                "Emp Count",
+                "Source Tab",
+                "P1 Name",
+                "P1 Title",
+                "P1 LinkedIn",
+                "P1 Email",
+                "P2 Name",
+                "P2 Title",
+                "P2 LinkedIn",
+                "P2 Email",
+                "P3 Name",
+                "P3 Title",
+                "P3 LinkedIn",
+                "P3 Email",
+                "Use",
+                "Primary Lane",
+            )
+        }
         for row in selected
     ]
-    ready, skipped = filter_ready_prefinal_rows(destination_rows, require_p2=False, include_unresolved=False)
+    ready, skipped = filter_ready_prefinal_rows(
+        destination_rows, require_p2=False, include_unresolved=False
+    )
     if skipped:
-        raise ValueError(f"Refusing archive promotion: {len(skipped)} selected archive rows are unresolved")
+        raise ValueError(
+            f"Refusing archive promotion: {len(skipped)} selected archive rows are unresolved"
+        )
     queue_batch = enqueue_batch(ready, f"{archive_tab}:promotion")
-    count = write_destination_rows(credentials, sheet_url, DEFAULT_DESTINATION_TAB, ready, start_row=2)
+    count = write_destination_rows(
+        credentials, sheet_url, DEFAULT_DESTINATION_TAB, ready, start_row=2
+    )
     if not verify_destination_rows(credentials, sheet_url, DEFAULT_DESTINATION_TAB, ready, 2):
-        record_prefinal_publish(queue_batch["fingerprint"], start_row=2, verified=False, error="readback_fingerprint_mismatch")
+        record_prefinal_publish(
+            queue_batch["fingerprint"],
+            start_row=2,
+            verified=False,
+            error="readback_fingerprint_mismatch",
+        )
         raise RuntimeError("Archive promotion failed Pre-final readback verification")
     queue_batch = record_prefinal_publish(queue_batch["fingerprint"], start_row=2, verified=True)
     headers = worksheet.row_values(1)
@@ -744,8 +802,14 @@ def promote_archive(
         source_ids.append(clean_text(row.get("Source Run ID") or row.get("ID")))
         updates.extend(
             [
-                {"range": gspread.utils.rowcol_to_a1(row_number, status_column), "values": [["Bridged"]]},
-                {"range": gspread.utils.rowcol_to_a1(row_number, bridged_column), "values": [[bridged_at]]},
+                {
+                    "range": gspread.utils.rowcol_to_a1(row_number, status_column),
+                    "values": [["Bridged"]],
+                },
+                {
+                    "range": gspread.utils.rowcol_to_a1(row_number, bridged_column),
+                    "values": [[bridged_at]],
+                },
             ]
         )
     worksheet.batch_update(updates, value_input_option="USER_ENTERED")
@@ -776,7 +840,7 @@ def finalize_computation(
     credentials: Path = DEFAULT_CREDS,
     sheet_url: str = DEFAULT_SHEET_URL,
     archive_tab: str = DEFAULT_ARCHIVE_TAB,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     computation = load_run(computation_file)
     lane_scope = clean_text(computation.get("review_lane_scope") or "all").lower()
     review_slice = clean_text(computation.get("review_slice"))
@@ -809,15 +873,19 @@ def finalize_computation(
         credentials=credentials,
         sheet_url=sheet_url,
     )
-    archive_result = sync_archive_rows(
-        spreadsheet,
-        plan["archive"],
-        archive=archive,
-        computation_file=computation_file,
-        source_run_file=source_run_file,
-        group_date=group_date,
-        tab_name=archive_tab,
-    ) if plan["archive"] else {"entry_ids": [], "appended": 0, "updated": 0, "tab": archive_tab}
+    archive_result = (
+        sync_archive_rows(
+            spreadsheet,
+            plan["archive"],
+            archive=archive,
+            computation_file=computation_file,
+            source_run_file=source_run_file,
+            group_date=group_date,
+            tab_name=archive_tab,
+        )
+        if plan["archive"]
+        else {"entry_ids": [], "appended": 0, "updated": 0, "tab": archive_tab}
+    )
 
     prefinal_ids = [clean_text(lead.get("lead_id")) for lead in plan["prefinal"]]
     archive_ids = [clean_text(lead.get("lead_id")) for lead in plan["archive"]]
@@ -857,7 +925,9 @@ def finalize_computation(
             **slice_completion,
         }
     else:
-        aggregate_prefinal = int(slice_completion.get("aggregate_prefinal_count", len(prefinal_ids)))
+        aggregate_prefinal = int(
+            slice_completion.get("aggregate_prefinal_count", len(prefinal_ids))
+        )
         aggregate_archive = int(slice_completion.get("aggregate_archive_count", len(archive_ids)))
         aggregate_status = (
             "Processed — Mixed"
@@ -892,7 +962,13 @@ def finalize_computation(
         "archive_tab": archive_tab,
         "group_status": group_status,
     }
-    computation["status"] = "processed_mixed" if prefinal_ids and archive_ids else "processed_prefinal" if prefinal_ids else "processed_archived"
+    computation["status"] = (
+        "processed_mixed"
+        if prefinal_ids and archive_ids
+        else "processed_prefinal"
+        if prefinal_ids
+        else "processed_archived"
+    )
     computation.setdefault("writes", []).append(
         {
             "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -949,41 +1025,73 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "plan":
         rows = json.loads(Path(args.input).read_text(encoding="utf-8"))
-        print(json.dumps(
-            classify_review_rows(
-                rows,
-                threshold=args.threshold,
-                checkpoint=args.checkpoint,
-                lane_scope=args.lane_scope,
-                review_slice=args.review_slice,
-            ),
-            indent=2,
-        ))
+        print(
+            json.dumps(
+                classify_review_rows(
+                    rows,
+                    threshold=args.threshold,
+                    checkpoint=args.checkpoint,
+                    lane_scope=args.lane_scope,
+                    review_slice=args.review_slice,
+                ),
+                indent=2,
+            )
+        )
         return 0
     if args.command == "ensure-archive-tab":
         spreadsheet = open_sheet(get_client(args.credentials), args.sheet_url)
         worksheet = ensure_archive_worksheet(spreadsheet, args.archive_tab)
-        print(json.dumps({"ok": True, "tab": worksheet.title, "sheet_id": worksheet.id, "headers": worksheet.row_values(1)}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "tab": worksheet.title,
+                    "sheet_id": worksheet.id,
+                    "headers": worksheet.row_values(1),
+                },
+                indent=2,
+            )
+        )
         return 0
     if args.command == "status-computation":
         computation = load_run(Path(args.computation_file))
-        print(json.dumps({"computation_file": args.computation_file, **computation_next_action(computation)}, indent=2))
+        print(
+            json.dumps(
+                {"computation_file": args.computation_file, **computation_next_action(computation)},
+                indent=2,
+            )
+        )
         return 0
     if args.command == "archive-status":
-        print(json.dumps(archive_status(
-            credentials=Path(args.credentials), sheet_url=args.sheet_url,
-            archive_tab=args.archive_tab, threshold=args.threshold,
-        ), indent=2))
+        print(
+            json.dumps(
+                archive_status(
+                    credentials=Path(args.credentials),
+                    sheet_url=args.sheet_url,
+                    archive_tab=args.archive_tab,
+                    threshold=args.threshold,
+                ),
+                indent=2,
+            )
+        )
         return 0
     if args.command == "promote-archive":
-        print(json.dumps(promote_archive(
-            credentials=Path(args.credentials), sheet_url=args.sheet_url,
-            archive_tab=args.archive_tab, threshold=args.threshold,
-        ), indent=2, default=str))
+        print(
+            json.dumps(
+                promote_archive(
+                    credentials=Path(args.credentials),
+                    sheet_url=args.sheet_url,
+                    archive_tab=args.archive_tab,
+                    threshold=args.threshold,
+                ),
+                indent=2,
+                default=str,
+            )
+        )
         return 0
     result = finalize_computation(
         Path(args.computation_file),

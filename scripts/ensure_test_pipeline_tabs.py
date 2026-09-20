@@ -8,8 +8,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "helpers"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from sheets_helper import get_client, open_sheet  # noqa: E402
 from lead_exec_research import DEFAULT_OBF_SHEET_URL, DEFAULT_SHEET_URL  # noqa: E402
+from sheets_helper import get_client, open_sheet  # noqa: E402
 
 CREDS = ROOT / "credentials" / "google-sheets.json"
 if not CREDS.exists():

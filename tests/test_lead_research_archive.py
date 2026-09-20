@@ -4,7 +4,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
@@ -80,11 +79,19 @@ class NormalizationTests(unittest.TestCase):
         )
 
     def test_reusable_research_requires_a_real_contact(self):
-        self.assertFalse(has_reusable_research({"destination_row": {"P1 Name": "", "P1 LinkedIn": ""}}))
-        self.assertFalse(has_reusable_research({"executives": [{"name": "Ada", "linkedin_url": ""}]}))
+        self.assertFalse(
+            has_reusable_research({"destination_row": {"P1 Name": "", "P1 LinkedIn": ""}})
+        )
+        self.assertFalse(
+            has_reusable_research({"executives": [{"name": "Ada", "linkedin_url": ""}]})
+        )
         self.assertTrue(
             has_reusable_research(
-                {"executives": [{"name": "Ada Lovelace", "linkedin_url": "https://linkedin.com/in/ada"}]}
+                {
+                    "executives": [
+                        {"name": "Ada Lovelace", "linkedin_url": "https://linkedin.com/in/ada"}
+                    ]
+                }
             )
         )
 

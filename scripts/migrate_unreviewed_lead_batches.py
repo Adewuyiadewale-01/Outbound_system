@@ -7,7 +7,7 @@ import argparse
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any
 
 from lead_exec_research import (
     COMPUTATIONS_DIR,
@@ -21,7 +21,6 @@ from lead_exec_research import (
 from lead_research_archive import ResearchArchive, has_reusable_research
 from prefinal_queue import list_batches, update_batch_status
 from sheets_helper import get_client, open_sheet
-
 
 DEFAULT_DATES = (
     "2026-07-16",
@@ -40,19 +39,15 @@ def clean(value: Any) -> str:
     return str(value or "").strip()
 
 
-def tab_ids(spreadsheet, tab: str) -> Set[str]:
+def tab_ids(spreadsheet, tab: str) -> set[str]:
     values = spreadsheet.worksheet(tab).get_all_values()
     if not values or "ID" not in values[0]:
         return set()
     index = values[0].index("ID")
-    return {
-        clean(row[index])
-        for row in values[1:]
-        if len(row) > index and clean(row[index])
-    }
+    return {clean(row[index]) for row in values[1:] if len(row) > index and clean(row[index])}
 
 
-def target_computations(dates: List[str]) -> List[Path]:
+def target_computations(dates: list[str]) -> list[Path]:
     paths = []
     for date in dates:
         prefix = date.replace("-", "")
@@ -63,7 +58,7 @@ def target_computations(dates: List[str]) -> List[Path]:
     return paths
 
 
-def review_groups(worksheet, target_dates: Set[str]) -> List[Dict[str, Any]]:
+def review_groups(worksheet, target_dates: set[str]) -> list[dict[str, Any]]:
     values = worksheet.get_all_values()
     headers = values[0]
     date_index = headers.index("Date")
@@ -100,7 +95,7 @@ def iso_to_sheet_date(value: str) -> str:
     return f"{parsed.month}/{parsed.day}/{parsed.year}"
 
 
-def build_audit(dates: List[str]) -> Dict[str, Any]:
+def build_audit(dates: list[str]) -> dict[str, Any]:
     client = get_client(str(DEFAULT_CREDS))
     leads_sheet = open_sheet(client, DEFAULT_SHEET_URL)
     obf_sheet = open_sheet(client, DEFAULT_OBF_SHEET_URL)
@@ -141,17 +136,23 @@ def build_audit(dates: List[str]) -> Dict[str, Any]:
     }
 
 
-def apply_migration(audit: Dict[str, Any]) -> Dict[str, Any]:
+def apply_migration(audit: dict[str, Any]) -> dict[str, Any]:
     if audit["already_in_final"] or audit["already_in_prospects"]:
-        raise ValueError("Refusing migration because target leads already reached an outreach destination.")
+        raise ValueError(
+            "Refusing migration because target leads already reached an outreach destination."
+        )
     if audit["prefinal_non_target_ids"]:
         raise ValueError("Refusing to clear Pre-final because it contains non-target leads.")
-    if audit["review_group_ids_missing_from_computations"] or audit["computation_ids_missing_from_review_groups"]:
+    if (
+        audit["review_group_ids_missing_from_computations"]
+        or audit["computation_ids_missing_from_review_groups"]
+    ):
         raise ValueError("Refusing migration because review groups and computations do not match.")
     if audit["review_group_count"] != len(audit["dates"]):
         raise ValueError("Refusing migration because one or more target review groups are missing.")
     reviewed = [
-        group for group in audit["groups"]
+        group
+        for group in audit["groups"]
         if clean(group.get("review_complete")).lower() in {"true", "yes", "1", "checked"}
     ]
     if reviewed:

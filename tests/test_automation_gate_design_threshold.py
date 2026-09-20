@@ -5,7 +5,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
@@ -20,12 +19,10 @@ class DesignThresholdTests(unittest.TestCase):
 
     def test_automation_approvals_do_not_satisfy_design_threshold(self):
         rows = [
-            {"Run ID": f"d-{i}", "Primary Lane": "Design", "Approved": i < 19}
-            for i in range(25)
+            {"Run ID": f"d-{i}", "Primary Lane": "Design", "Approved": i < 19} for i in range(25)
         ]
         rows += [
-            {"Run ID": f"a-{i}", "Primary Lane": "Automation", "Approved": True}
-            for i in range(25)
+            {"Run ID": f"a-{i}", "Primary Lane": "Automation", "Approved": True} for i in range(25)
         ]
         group = {
             "headers": ["Run ID", "Primary Lane", "Approved"],
@@ -34,12 +31,11 @@ class DesignThresholdTests(unittest.TestCase):
             "group_date": "2026-08-09",
             "review_complete": False,
         }
-        with tempfile.TemporaryDirectory() as directory, patch.object(
-            automation_gate, "CLAIMS_DIR", Path(directory)
-        ), patch.object(
-            automation_gate, "read_current_review_group", return_value=group
-        ), patch.object(
-            automation_gate, "dns_preflight_with_retries", return_value={"ok": True}
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(automation_gate, "CLAIMS_DIR", Path(directory)),
+            patch.object(automation_gate, "read_current_review_group", return_value=group),
+            patch.object(automation_gate, "dns_preflight_with_retries", return_value={"ok": True}),
         ):
             result = automation_gate.status_payload(self.args())
 
@@ -49,11 +45,21 @@ class DesignThresholdTests(unittest.TestCase):
 
     def test_all_leads_can_be_scoped_to_design_lane(self):
         rows = [
-            {"Run ID": f"d-{i}", "Company Name": f"Design {i}", "Primary Lane": "Design", "Approved": i < 20}
+            {
+                "Run ID": f"d-{i}",
+                "Company Name": f"Design {i}",
+                "Primary Lane": "Design",
+                "Approved": i < 20,
+            }
             for i in range(25)
         ]
         rows += [
-            {"Run ID": f"a-{i}", "Company Name": f"Automation {i}", "Primary Lane": "Automation", "Approved": False}
+            {
+                "Run ID": f"a-{i}",
+                "Company Name": f"Automation {i}",
+                "Primary Lane": "Automation",
+                "Approved": False,
+            }
             for i in range(25)
         ]
         group = {
@@ -64,12 +70,11 @@ class DesignThresholdTests(unittest.TestCase):
             "review_complete": False,
         }
         args = argparse.Namespace(threshold=20, all_leads=True, lane_scope="design")
-        with tempfile.TemporaryDirectory() as directory, patch.object(
-            automation_gate, "CLAIMS_DIR", Path(directory)
-        ), patch.object(
-            automation_gate, "read_current_review_group", return_value=group
-        ), patch.object(
-            automation_gate, "dns_preflight_with_retries", return_value={"ok": True}
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(automation_gate, "CLAIMS_DIR", Path(directory)),
+            patch.object(automation_gate, "read_current_review_group", return_value=group),
+            patch.object(automation_gate, "dns_preflight_with_retries", return_value={"ok": True}),
         ):
             result = automation_gate.status_payload(args)
 
@@ -80,11 +85,21 @@ class DesignThresholdTests(unittest.TestCase):
 
     def test_all_leads_can_be_scoped_to_automation_lane(self):
         rows = [
-            {"Run ID": f"d-{i}", "Company Name": f"Design {i}", "Primary Lane": "Design", "Approved": True}
+            {
+                "Run ID": f"d-{i}",
+                "Company Name": f"Design {i}",
+                "Primary Lane": "Design",
+                "Approved": True,
+            }
             for i in range(20)
         ]
         rows += [
-            {"Run ID": f"a-{i}", "Company Name": f"Automation {i}", "Primary Lane": "Automation", "Approved": False}
+            {
+                "Run ID": f"a-{i}",
+                "Company Name": f"Automation {i}",
+                "Primary Lane": "Automation",
+                "Approved": False,
+            }
             for i in range(30)
         ]
         group = {
@@ -95,12 +110,11 @@ class DesignThresholdTests(unittest.TestCase):
             "review_complete": False,
         }
         args = argparse.Namespace(threshold=20, all_leads=True, lane_scope="automation")
-        with tempfile.TemporaryDirectory() as directory, patch.object(
-            automation_gate, "CLAIMS_DIR", Path(directory)
-        ), patch.object(
-            automation_gate, "read_current_review_group", return_value=group
-        ), patch.object(
-            automation_gate, "dns_preflight_with_retries", return_value={"ok": True}
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(automation_gate, "CLAIMS_DIR", Path(directory)),
+            patch.object(automation_gate, "read_current_review_group", return_value=group),
+            patch.object(automation_gate, "dns_preflight_with_retries", return_value={"ok": True}),
         ):
             result = automation_gate.status_payload(args)
 
@@ -111,7 +125,12 @@ class DesignThresholdTests(unittest.TestCase):
 
     def test_review_slice_splits_selected_rows_into_stable_thirds(self):
         rows = [
-            {"Run ID": f"lead-{i}", "Company Name": f"Company {i}", "Primary Lane": "Design", "Approved": True}
+            {
+                "Run ID": f"lead-{i}",
+                "Company Name": f"Company {i}",
+                "Primary Lane": "Design",
+                "Approved": True,
+            }
             for i in range(100)
         ]
         group = {
@@ -130,12 +149,13 @@ class DesignThresholdTests(unittest.TestCase):
                 lane_scope="all",
                 review_slice=review_slice,
             )
-            with tempfile.TemporaryDirectory() as directory, patch.object(
-                automation_gate, "CLAIMS_DIR", Path(directory)
-            ), patch.object(
-                automation_gate, "read_current_review_group", return_value=group
-            ), patch.object(
-                automation_gate, "dns_preflight_with_retries", return_value={"ok": True}
+            with (
+                tempfile.TemporaryDirectory() as directory,
+                patch.object(automation_gate, "CLAIMS_DIR", Path(directory)),
+                patch.object(automation_gate, "read_current_review_group", return_value=group),
+                patch.object(
+                    automation_gate, "dns_preflight_with_retries", return_value={"ok": True}
+                ),
             ):
                 result = automation_gate.status_payload(args)
             counts.append(result["selected_count"])

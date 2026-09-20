@@ -8,17 +8,18 @@ import os
 import socket
 import sys
 import time
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPERS = ROOT / "helpers"
 if str(HELPERS) not in sys.path:
     sys.path.insert(0, str(HELPERS))
 
-from sheets_helper import get_client, get_worksheet, normalize_rows, open_sheet  # noqa: E402
 from runtime_environment import load_repo_env  # noqa: E402
+from sheets_helper import get_client, get_worksheet, normalize_rows, open_sheet  # noqa: E402
 
 load_repo_env()
 
@@ -55,7 +56,7 @@ def resolve_all_leads(args: argparse.Namespace) -> bool:
     return not approval_gate_enabled()
 
 
-def parse_review_slice(value: Any) -> Optional[Dict[str, int]]:
+def parse_review_slice(value: Any) -> dict[str, int] | None:
     raw = clean_text(value).lower()
     if not raw or raw in {"all", "none"}:
         return None
@@ -72,7 +73,7 @@ def parse_review_slice(value: Any) -> Optional[Dict[str, int]]:
     return {"index": index, "total": total}
 
 
-def apply_review_slice(rows: List[Dict[str, Any]], value: Any) -> List[Dict[str, Any]]:
+def apply_review_slice(rows: list[dict[str, Any]], value: Any) -> list[dict[str, Any]]:
     parsed = parse_review_slice(value)
     if not parsed:
         return rows
@@ -93,7 +94,7 @@ def parse_review_group_date(value: Any):
     return None
 
 
-def read_current_review_group(args: argparse.Namespace) -> Dict[str, Any]:
+def read_current_review_group(args: argparse.Namespace) -> dict[str, Any]:
     client = get_client(str(Path(args.credentials)))
     worksheet = get_worksheet(open_sheet(client, args.sheet_url), args.review_tab)
     values = worksheet.get_all_values()
@@ -102,13 +103,18 @@ def read_current_review_group(args: argparse.Namespace) -> Dict[str, Any]:
     headers = values[0]
     if "Date" not in headers or "Run ID" not in headers:
         rows = normalize_rows(values)
-        return {"headers": headers, "rows": [row for row in rows if clean_text(row.get("Run ID"))], "group_row": None, "group_date": ""}
+        return {
+            "headers": headers,
+            "rows": [row for row in rows if clean_text(row.get("Run ID"))],
+            "group_row": None,
+            "group_date": "",
+        }
 
     date_idx = headers.index("Date")
     run_idx = headers.index("Run ID")
     today = datetime.now().date()
-    groups: List[Dict[str, Any]] = []
-    current: Optional[Dict[str, Any]] = None
+    groups: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
     for row_number, row in enumerate(values[1:], start=2):
         padded = row + [""] * (len(headers) - len(row))
         parsed_date = parse_review_group_date(padded[date_idx])
@@ -126,7 +132,10 @@ def read_current_review_group(args: argparse.Namespace) -> Dict[str, Any]:
             }
             continue
         if current and clean_text(padded[run_idx]):
-            item = {header: padded[index] if index < len(padded) else "" for index, header in enumerate(headers)}
+            item = {
+                header: padded[index] if index < len(padded) else ""
+                for index, header in enumerate(headers)
+            }
             item["_row_number"] = row_number
             current["rows"].append(item)
     if current:
@@ -148,20 +157,20 @@ def read_current_review_group(args: argparse.Namespace) -> Dict[str, Any]:
     }
 
 
-def read_review_rows(args: argparse.Namespace) -> List[Dict[str, Any]]:
+def read_review_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
     return read_current_review_group(args)["rows"]
 
 
-def approved_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def approved_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [row for row in rows if checkbox_truthy(row.get("Approved"))]
 
 
 def selected_rows(
-    rows: List[Dict[str, Any]],
+    rows: list[dict[str, Any]],
     all_leads: bool = False,
     lane_scope: str = "all",
     review_slice: str = "",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Return the rows selected for a processing checkpoint."""
     if all_leads:
         selected = [row for row in rows if clean_text(row.get("Run ID"))]
@@ -177,8 +186,10 @@ def selected_rows(
     return apply_review_slice(selected, review_slice)
 
 
-def approval_fingerprint(rows: List[Dict[str, Any]]) -> str:
-    lead_ids = sorted(clean_text(row.get("Run ID")) for row in rows if clean_text(row.get("Run ID")))
+def approval_fingerprint(rows: list[dict[str, Any]]) -> str:
+    lead_ids = sorted(
+        clean_text(row.get("Run ID")) for row in rows if clean_text(row.get("Run ID"))
+    )
     digest = hashlib.sha256("\n".join(lead_ids).encode("utf-8")).hexdigest()[:16]
     return digest
 
@@ -186,7 +197,8 @@ def approval_fingerprint(rows: List[Dict[str, Any]]) -> str:
 def claim_path(fingerprint: str) -> Path:
     return CLAIMS_DIR / f"{fingerprint}.json"
 
-def dns_preflight(host: str, port: int = 443) -> Dict[str, Any]:
+
+def dns_preflight(host: str, port: int = 443) -> dict[str, Any]:
     started_at = datetime.now().isoformat(timespec="seconds")
     try:
         socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
@@ -200,10 +212,11 @@ def dns_preflight(host: str, port: int = 443) -> Dict[str, Any]:
         }
     return {"started_at": started_at, "host": host, "port": port, "ok": True, "error": ""}
 
-def dns_preflight_with_retries(host: str, port: int = 443) -> Dict[str, Any]:
+
+def dns_preflight_with_retries(host: str, port: int = 443) -> dict[str, Any]:
     attempts = int(os.environ.get("AUTOMATION_GATE_DNS_ATTEMPTS", "5") or "5")
     delay_seconds = float(os.environ.get("AUTOMATION_GATE_DNS_DELAY_SECONDS", "3") or "3")
-    attempt_results: List[Dict[str, Any]] = []
+    attempt_results: list[dict[str, Any]] = []
     for attempt in range(1, max(attempts, 1) + 1):
         result = dns_preflight(host, port)
         result["attempt"] = attempt
@@ -222,7 +235,7 @@ def dns_preflight_with_retries(host: str, port: int = 443) -> Dict[str, Any]:
     }
 
 
-def status_payload(args: argparse.Namespace) -> Dict[str, Any]:
+def status_payload(args: argparse.Namespace) -> dict[str, Any]:
     diagnostics = {"oauth2_dns": dns_preflight_with_retries("oauth2.googleapis.com", 443)}
     if not diagnostics["oauth2_dns"].get("ok"):
         print(
@@ -238,9 +251,7 @@ def status_payload(args: argparse.Namespace) -> Dict[str, Any]:
         group = {"headers": [], "rows": [], "group_row": None, "group_date": today}
     approved = approved_rows(group["rows"])
     approved_design = [
-        row
-        for row in approved
-        if clean_text(row.get("Primary Lane")).lower() == "design"
+        row for row in approved if clean_text(row.get("Primary Lane")).lower() == "design"
     ]
     lane_scope = getattr(args, "lane_scope", "all")
     review_slice = getattr(args, "review_slice", "")
@@ -256,7 +267,8 @@ def status_payload(args: argparse.Namespace) -> Dict[str, Any]:
         lane_scope=lane_scope,
         review_slice=review_slice,
     )
-    def overlap_status(row: Dict[str, Any]) -> str:
+
+    def overlap_status(row: dict[str, Any]) -> str:
         return clean_text(row.get("Overlap Status") or row.get("Research Source"))
 
     archive_matches = [row for row in group["rows"] if overlap_status(row) == "Archive Match"]
@@ -297,7 +309,7 @@ def status_payload(args: argparse.Namespace) -> Dict[str, Any]:
     }
 
 
-def claim(args: argparse.Namespace) -> Dict[str, Any]:
+def claim(args: argparse.Namespace) -> dict[str, Any]:
     payload = status_payload(args)
     if not payload["ready"]:
         payload["claimed"] = False
@@ -318,7 +330,7 @@ def claim(args: argparse.Namespace) -> Dict[str, Any]:
     return claim_data
 
 
-def mark(args: argparse.Namespace, status: str) -> Dict[str, Any]:
+def mark(args: argparse.Namespace, status: str) -> dict[str, Any]:
     if not args.fingerprint:
         raise SystemExit("--fingerprint is required.")
     path = claim_path(args.fingerprint)
@@ -335,11 +347,19 @@ def mark(args: argparse.Namespace, status: str) -> Dict[str, Any]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Approval threshold and duplicate guard for lead automations")
+    parser = argparse.ArgumentParser(
+        description="Approval threshold and duplicate guard for lead automations"
+    )
     parser.add_argument("command", choices=["status", "claim", "mark-processed", "mark-failed"])
-    parser.add_argument("--sheet-url", default=os.environ.get("LEAD_RESEARCH_SHEET_URL", DEFAULT_SHEET_URL))
-    parser.add_argument("--review-tab", default=os.environ.get("LEAD_RESEARCH_REVIEW_TAB", DEFAULT_REVIEW_TAB))
-    parser.add_argument("--credentials", default=os.environ.get("GOOGLE_SHEETS_CREDENTIALS", str(DEFAULT_CREDS)))
+    parser.add_argument(
+        "--sheet-url", default=os.environ.get("LEAD_RESEARCH_SHEET_URL", DEFAULT_SHEET_URL)
+    )
+    parser.add_argument(
+        "--review-tab", default=os.environ.get("LEAD_RESEARCH_REVIEW_TAB", DEFAULT_REVIEW_TAB)
+    )
+    parser.add_argument(
+        "--credentials", default=os.environ.get("GOOGLE_SHEETS_CREDENTIALS", str(DEFAULT_CREDS))
+    )
     parser.add_argument("--threshold", type=int, default=20)
     approval_mode = parser.add_mutually_exclusive_group()
     approval_mode.add_argument(
@@ -371,7 +391,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.threshold < 1:
         raise SystemExit("--threshold must be >= 1.")

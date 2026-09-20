@@ -8,9 +8,10 @@ import os
 import re
 import sys
 import time
+from collections.abc import Callable, Sequence
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 import gspread
 
@@ -21,8 +22,8 @@ if str(HELPERS) not in sys.path:
 
 from linkedin_helper import LinkedInSession, relative_days_from_time_text  # noqa: E402
 from linkedin_outreach_session import _run_diversion, sequence_date_key  # noqa: E402
-from sheets_helper import get_client, normalize_rows, open_sheet, require_columns  # noqa: E402
 from runtime_environment import load_repo_env  # noqa: E402
+from sheets_helper import get_client, normalize_rows, open_sheet, require_columns  # noqa: E402
 
 load_repo_env()
 
@@ -50,7 +51,14 @@ PERSON_COLUMNS = ["Name", "Title", "LinkedIn", "Email"]
 P1_COLUMNS = [f"P1 {column}" for column in PERSON_COLUMNS]
 P2_COLUMNS = [f"P2 {column}" for column in PERSON_COLUMNS]
 ACTIVITY_COLUMNS = ["P1 Activity", "P2 Activity"]
-FINAL_REQUIRED_COLUMNS = BASE_COLUMNS + P1_COLUMNS + ACTIVITY_COLUMNS[:1] + P2_COLUMNS + ACTIVITY_COLUMNS[1:] + ["Category"]
+FINAL_REQUIRED_COLUMNS = (
+    BASE_COLUMNS
+    + P1_COLUMNS
+    + ACTIVITY_COLUMNS[:1]
+    + P2_COLUMNS
+    + ACTIVITY_COLUMNS[1:]
+    + ["Category"]
+)
 CATEGORY_PRIORITY = {
     "Hyper": 0,
     "High": 1,
@@ -65,7 +73,7 @@ def prepared_session_path_for_date(date_value: str) -> Path:
     return OUTREACH_SEQUENCE_STATE_DIR / f"{sequence_date_key(date_value)}-prepared.json"
 
 
-def load_runtime_plan(path: str, date_value: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+def load_runtime_plan(path: str, date_value: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     plan_path = Path(path).expanduser() if path else prepared_session_path_for_date(date_value)
     if not plan_path.exists():
         raise ValueError(f"Runtime plan not found: {plan_path}")
@@ -82,7 +90,7 @@ def load_runtime_plan(path: str, date_value: str) -> Tuple[List[Dict[str, Any]],
     }
 
 
-def runtime_plan_item_summary(plan_item: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def runtime_plan_item_summary(plan_item: dict[str, Any] | None) -> dict[str, Any]:
     if not plan_item:
         return {}
     return {
@@ -94,14 +102,14 @@ def runtime_plan_item_summary(plan_item: Optional[Dict[str, Any]]) -> Dict[str, 
 
 
 def apply_runtime_plan_after_lead(
-    session: Optional[LinkedInSession],
-    plan_item: Optional[Dict[str, Any]],
+    session: LinkedInSession | None,
+    plan_item: dict[str, Any] | None,
     *,
     is_last: bool,
     enabled: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     summary = runtime_plan_item_summary(plan_item)
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         **summary,
         "enabled": bool(enabled and plan_item),
         "diversion_executed": False,
@@ -162,7 +170,9 @@ def normalized_profile_key(value: Any) -> str:
     return url
 
 
-def read_worksheet(credentials_path: Path, sheet_url: str, tab_name: str) -> Tuple[List[str], List[Dict[str, Any]]]:
+def read_worksheet(
+    credentials_path: Path, sheet_url: str, tab_name: str
+) -> tuple[list[str], list[dict[str, Any]]]:
     client = get_client(str(credentials_path))
     spreadsheet = open_sheet(client, sheet_url)
     worksheet = spreadsheet.worksheet(tab_name)
@@ -172,7 +182,7 @@ def read_worksheet(credentials_path: Path, sheet_url: str, tab_name: str) -> Tup
     return values[0], normalize_rows(values)
 
 
-def person_from_row(row: Dict[str, Any], prefix: str) -> Dict[str, str]:
+def person_from_row(row: dict[str, Any], prefix: str) -> dict[str, str]:
     return {
         "name": clean_text(row.get(f"{prefix} Name")),
         "title": clean_text(row.get(f"{prefix} Title")),
@@ -182,7 +192,7 @@ def person_from_row(row: Dict[str, Any], prefix: str) -> Dict[str, str]:
     }
 
 
-def set_person(row: Dict[str, Any], prefix: str, person: Dict[str, str]) -> None:
+def set_person(row: dict[str, Any], prefix: str, person: dict[str, str]) -> None:
     row[f"{prefix} Name"] = clean_text(person.get("name"))
     row[f"{prefix} Title"] = clean_text(person.get("title"))
     row[f"{prefix} LinkedIn"] = normalize_url(person.get("linkedin"))
@@ -190,7 +200,7 @@ def set_person(row: Dict[str, Any], prefix: str, person: Dict[str, str]) -> None
     row[f"{prefix} Activity"] = clean_text(person.get("activity"))
 
 
-def count_entries_within(tab: Dict[str, Any], days_limit: int) -> int:
+def count_entries_within(tab: dict[str, Any], days_limit: int) -> int:
     count = 0
     for activity in tab.get("activities", []) or []:
         if is_aggregate_activity_container(activity):
@@ -201,12 +211,12 @@ def count_entries_within(tab: Dict[str, Any], days_limit: int) -> int:
     return count
 
 
-def is_aggregate_activity_container(activity: Dict[str, Any]) -> bool:
+def is_aggregate_activity_container(activity: dict[str, Any]) -> bool:
     sample = clean_text(activity.get("card_text_sample")).lower()
     return sample.startswith("all activity posts comments") and "loaded " in sample
 
 
-def activity_level(activity_detail: Dict[str, Any]) -> str:
+def activity_level(activity_detail: dict[str, Any]) -> str:
     if not activity_detail or activity_detail.get("error"):
         return ""
     tabs = activity_detail.get("tabs", {}) if isinstance(activity_detail, dict) else {}
@@ -233,14 +243,16 @@ def activity_level(activity_detail: Dict[str, Any]) -> str:
     return "Not active"
 
 
-def row_has_uncertain_activity(row: Dict[str, Any]) -> bool:
+def row_has_uncertain_activity(row: dict[str, Any]) -> bool:
     for prefix in ("P1", "P2"):
-        if is_linkedin_profile_url(row.get(f"{prefix} LinkedIn")) and not clean_text(row.get(f"{prefix} Activity")):
+        if is_linkedin_profile_url(row.get(f"{prefix} LinkedIn")) and not clean_text(
+            row.get(f"{prefix} Activity")
+        ):
             return True
     return False
 
 
-def category_for_row(row: Dict[str, Any]) -> str:
+def category_for_row(row: dict[str, Any]) -> str:
     usable_linkedins = [
         row.get("P1 LinkedIn", ""),
         row.get("P2 LinkedIn", ""),
@@ -271,10 +283,10 @@ def should_swap(p1_activity: str, p2_activity: str) -> bool:
 
 
 def rank_row(
-    row: Dict[str, Any],
-    activity_reader: Callable[[str], Dict[str, Any]],
-    activity_cache: Dict[str, Dict[str, Any]],
-) -> Optional[Dict[str, Any]]:
+    row: dict[str, Any],
+    activity_reader: Callable[[str], dict[str, Any]],
+    activity_cache: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
     ranked = {column: clean_text(row.get(column)) for column in BASE_COLUMNS}
     p1 = person_from_row(row, "P1")
     p2 = person_from_row(row, "P2")
@@ -300,7 +312,7 @@ def rank_row(
     return ranked
 
 
-def final_sort_key(row: Dict[str, Any]) -> Tuple[int, int, str]:
+def final_sort_key(row: dict[str, Any]) -> tuple[int, int, str]:
     return (
         CATEGORY_PRIORITY.get(clean_text(row.get("Category")), 99),
         0 if is_linkedin_profile_url(row.get("P2 LinkedIn")) else 1,
@@ -308,11 +320,11 @@ def final_sort_key(row: Dict[str, Any]) -> Tuple[int, int, str]:
     )
 
 
-def build_fixture_reader(fixture_path: str) -> Callable[[str], Dict[str, Any]]:
+def build_fixture_reader(fixture_path: str) -> Callable[[str], dict[str, Any]]:
     fixture = json.loads(Path(fixture_path).read_text()) if fixture_path else {}
     normalized = {normalized_profile_key(key): value for key, value in fixture.items()}
 
-    def reader(profile_url: str) -> Dict[str, Any]:
+    def reader(profile_url: str) -> dict[str, Any]:
         return normalized.get(normalized_profile_key(profile_url), {})
 
     return reader
@@ -325,7 +337,7 @@ class LiveActivityReader:
         self.session = LinkedInSession()
         self.connected = False
 
-    def connect(self) -> Dict[str, Any]:
+    def connect(self) -> dict[str, Any]:
         if self.connected:
             return {"ok": True, "status": "already_connected"}
         connect_result = self.session.connect(skip_rate_check=True)
@@ -339,15 +351,18 @@ class LiveActivityReader:
             self.session.disconnect()
             self.connected = False
 
-    def read_once(self, profile_url: str) -> Dict[str, Any]:
+    def read_once(self, profile_url: str) -> dict[str, Any]:
         connect_result = self.connect()
         if not connect_result.get("ok"):
-            return {"error": True, "danger": connect_result.get("block_reason", "LinkedIn preflight failed")}
+            return {
+                "error": True,
+                "danger": connect_result.get("block_reason", "LinkedIn preflight failed"),
+            }
         return self.session.read_activity_detail(profile_url, max_seconds=self.timeout)
 
-    def __call__(self, profile_url: str) -> Dict[str, Any]:
-        attempts: List[Dict[str, Any]] = []
-        best_detail: Dict[str, Any] = {}
+    def __call__(self, profile_url: str) -> dict[str, Any]:
+        attempts: list[dict[str, Any]] = []
+        best_detail: dict[str, Any] = {}
         best_score = -1
         for _attempt_index in range(max(0, self.retries) + 1):
             detail = self.read_once(profile_url)
@@ -358,7 +373,9 @@ class LiveActivityReader:
                 best_detail = detail
                 best_score = score
             if score > 0:
-                best_detail["_attempts"] = [activity_evidence(profile_url, item) for item in attempts]
+                best_detail["_attempts"] = [
+                    activity_evidence(profile_url, item) for item in attempts
+                ]
                 return best_detail
         if best_detail:
             best_detail["_attempts"] = [activity_evidence(profile_url, item) for item in attempts]
@@ -369,18 +386,24 @@ def build_live_reader(timeout: float, retries: int) -> LiveActivityReader:
     return LiveActivityReader(timeout, retries)
 
 
-def non_aggregate_entries(tab: Dict[str, Any]) -> List[Dict[str, Any]]:
-    return [item for item in tab.get("activities", []) or [] if not is_aggregate_activity_container(item)]
+def non_aggregate_entries(tab: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        item
+        for item in tab.get("activities", []) or []
+        if not is_aggregate_activity_container(item)
+    ]
 
 
-def activity_evidence(profile_url: str, activity_detail: Dict[str, Any]) -> Dict[str, Any]:
+def activity_evidence(profile_url: str, activity_detail: dict[str, Any]) -> dict[str, Any]:
     tabs = activity_detail.get("tabs", {}) if isinstance(activity_detail, dict) else {}
-    evidence: Dict[str, Any] = {
+    evidence: dict[str, Any] = {
         "profile_url": profile_url,
         "level": activity_level(activity_detail),
         "error": bool(activity_detail.get("error")) if isinstance(activity_detail, dict) else True,
         "danger": activity_detail.get("danger", "") if isinstance(activity_detail, dict) else "",
-        "attempts": activity_detail.get("_attempts", []) if isinstance(activity_detail, dict) else [],
+        "attempts": activity_detail.get("_attempts", [])
+        if isinstance(activity_detail, dict)
+        else [],
         "tabs": {},
     }
     for tab_name in ("posts", "comments", "reactions"):
@@ -404,12 +427,14 @@ def activity_evidence(profile_url: str, activity_detail: Dict[str, Any]) -> Dict
     return evidence
 
 
-def source_rows_for_ranking(rows: List[Dict[str, Any]], limit: int = 0) -> List[Dict[str, Any]]:
+def source_rows_for_ranking(rows: list[dict[str, Any]], limit: int = 0) -> list[dict[str, Any]]:
     selected = []
     for row in rows:
         if not clean_text(row.get("ID")) and not clean_text(row.get("Company")):
             continue
-        if not is_linkedin_profile_url(row.get("P1 LinkedIn")) and not is_linkedin_profile_url(row.get("P2 LinkedIn")):
+        if not is_linkedin_profile_url(row.get("P1 LinkedIn")) and not is_linkedin_profile_url(
+            row.get("P2 LinkedIn")
+        ):
             continue
         selected.append(row)
         if limit and len(selected) >= limit:
@@ -421,7 +446,7 @@ def write_final_rows(
     credentials_path: Path,
     sheet_url: str,
     final_tab: str,
-    rows: List[Dict[str, Any]],
+    rows: list[dict[str, Any]],
     dry_run: bool,
 ) -> int:
     client = get_client(str(credentials_path))
@@ -439,7 +464,9 @@ def write_final_rows(
     payload = [[row.get(header, "") for header in headers] for row in rows]
     start_cell = gspread.utils.rowcol_to_a1(2, 1)
     end_cell = gspread.utils.rowcol_to_a1(1 + len(payload), len(headers))
-    worksheet.update(range_name=f"{start_cell}:{end_cell}", values=payload, value_input_option="USER_ENTERED")
+    worksheet.update(
+        range_name=f"{start_cell}:{end_cell}", values=payload, value_input_option="USER_ENTERED"
+    )
     return len(rows)
 
 
@@ -448,20 +475,24 @@ def state_path() -> Path:
     return STATE_DIR / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
 
 
-def run(args: argparse.Namespace) -> Dict[str, Any]:
+def run(args: argparse.Namespace) -> dict[str, Any]:
     headers, source_rows = read_worksheet(Path(args.credentials), args.sheet_url, args.prefinal_tab)
     require_columns(headers, BASE_COLUMNS + P1_COLUMNS + P2_COLUMNS, args.prefinal_tab)
 
-    runtime_plan: List[Dict[str, Any]] = []
-    runtime_plan_source: Dict[str, Any] = {}
+    runtime_plan: list[dict[str, Any]] = []
+    runtime_plan_source: dict[str, Any] = {}
     runtime_enabled = bool(not args.activity_fixture and not args.no_runtime_plan)
     candidate_limit = args.limit
     if runtime_enabled:
-        runtime_plan, runtime_plan_source = load_runtime_plan(args.runtime_plan_path, args.sequence_date)
+        runtime_plan, runtime_plan_source = load_runtime_plan(
+            args.runtime_plan_path, args.sequence_date
+        )
         available_slots = len(runtime_plan)
         candidate_limit = min(args.limit, available_slots) if args.limit else available_slots
         runtime_plan_source["candidate_limit"] = candidate_limit
-        runtime_plan_source["limited_by"] = "cli_limit" if args.limit and args.limit < available_slots else "runtime_plan_slots"
+        runtime_plan_source["limited_by"] = (
+            "cli_limit" if args.limit and args.limit < available_slots else "runtime_plan_slots"
+        )
 
     candidates = source_rows_for_ranking(source_rows, limit=candidate_limit)
     if runtime_enabled:
@@ -473,9 +504,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     else:
         activity_reader = build_live_reader(args.activity_timeout, args.activity_retries)
 
-    activity_cache: Dict[str, Dict[str, Any]] = {}
-    ranked_rows: List[Dict[str, Any]] = []
-    runtime_events: List[Dict[str, Any]] = []
+    activity_cache: dict[str, dict[str, Any]] = {}
+    ranked_rows: list[dict[str, Any]] = []
+    runtime_events: list[dict[str, Any]] = []
     try:
         for index, row in enumerate(candidates):
             plan_item = runtime_plan[index] if index < len(runtime_plan) else None
@@ -524,7 +555,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     blocked_uncertain = bool(uncertain_rows and not args.dry_run and not args.allow_uncertain_write)
     rows_written = 0
     if not blocked_uncertain and not blocked_runtime:
-        rows_written = write_final_rows(Path(args.credentials), args.sheet_url, args.final_tab, ranked_rows, args.dry_run)
+        rows_written = write_final_rows(
+            Path(args.credentials), args.sheet_url, args.final_tab, ranked_rows, args.dry_run
+        )
     status = "dry_run" if args.dry_run else "written"
     if blocked_runtime:
         status = "blocked_runtime_plan"
@@ -552,19 +585,24 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             "enabled": runtime_enabled,
             "source": runtime_plan_source,
             "events": runtime_events,
-            "delays_applied": len([event for event in runtime_events if event.get("delay_applied")]),
-            "diversions_executed": len([event for event in runtime_events if event.get("diversion_executed")]),
+            "delays_applied": len(
+                [event for event in runtime_events if event.get("delay_applied")]
+            ),
+            "diversions_executed": len(
+                [event for event in runtime_events if event.get("diversion_executed")]
+            ),
         },
     }
     path = state_path()
     payload = {
         **result,
         "created_at": datetime.now().isoformat(timespec="seconds"),
-        "fingerprint": hashlib.sha256(json.dumps(ranked_rows, sort_keys=True).encode("utf-8")).hexdigest()[:16],
+        "fingerprint": hashlib.sha256(
+            json.dumps(ranked_rows, sort_keys=True).encode("utf-8")
+        ).hexdigest()[:16],
         "rows": ranked_rows,
         "activity_evidence": {
-            key: activity_evidence(key, detail)
-            for key, detail in sorted(activity_cache.items())
+            key: activity_evidence(key, detail) for key, detail in sorted(activity_cache.items())
         },
     }
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
@@ -572,7 +610,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     return result
 
 
-def fake_activity(*, posts: Sequence[str] = (), comments: Sequence[str] = (), reactions: Sequence[str] = ()) -> Dict[str, Any]:
+def fake_activity(
+    *, posts: Sequence[str] = (), comments: Sequence[str] = (), reactions: Sequence[str] = ()
+) -> dict[str, Any]:
     return {
         "tabs": {
             "posts": {"activities": [{"time_text": value} for value in posts]},
@@ -582,7 +622,7 @@ def fake_activity(*, posts: Sequence[str] = (), comments: Sequence[str] = (), re
     }
 
 
-def fake_aggregate_activity() -> Dict[str, Any]:
+def fake_aggregate_activity() -> dict[str, Any]:
     return {
         "tabs": {
             "posts": {"activities": []},
@@ -593,8 +633,14 @@ def fake_aggregate_activity() -> Dict[str, Any]:
                         "time_text": "1w",
                         "card_text_sample": "All activity\nPosts\nComments\nImages\nReactions\nLoaded 20 Reactions posts\nFeed post number 1",
                     },
-                    {"time_text": "1w", "card_text_sample": "Feed post number 1\nArno van Brakel likes this"},
-                    {"time_text": "2w", "card_text_sample": "Feed post number 2\nArno van Brakel likes this"},
+                    {
+                        "time_text": "1w",
+                        "card_text_sample": "Feed post number 1\nArno van Brakel likes this",
+                    },
+                    {
+                        "time_text": "2w",
+                        "card_text_sample": "Feed post number 2\nArno van Brakel likes this",
+                    },
                 ]
             },
         }
@@ -606,7 +652,10 @@ def run_self_tests() -> None:
     assert activity_level(fake_activity(comments=["1d", "6d"])) == "Very active"
     assert activity_level(fake_activity(reactions=["1d", "6d"])) == "Very active"
     assert activity_level(fake_activity(posts=["13d"])) == "Active"
-    assert activity_level(fake_activity(comments=["20d", "21d", "22d"], reactions=["23d", "24d"])) == "Active"
+    assert (
+        activity_level(fake_activity(comments=["20d", "21d", "22d"], reactions=["23d", "24d"]))
+        == "Active"
+    )
     assert activity_level(fake_activity()) == ""
     assert activity_level(fake_activity(comments=["300d"])) == "Not active"
     assert activity_level(fake_aggregate_activity()) == "Not active"
@@ -667,17 +716,32 @@ def run_self_tests() -> None:
     assert inactive["Category"] == "Low"
 
 
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Rank Pre-final leads into Final using P1/P2 activity")
-    parser.add_argument("--sheet-url", default=os.environ.get("LEAD_RESEARCH_SHEET_URL", DEFAULT_SHEET_URL))
-    parser.add_argument("--prefinal-tab", default=os.environ.get("LEAD_RESEARCH_PREFINAL_TAB", DEFAULT_PREFINAL_TAB))
-    parser.add_argument("--final-tab", default=os.environ.get("LEAD_RESEARCH_FINAL_TAB", DEFAULT_FINAL_TAB))
-    parser.add_argument("--credentials", default=os.environ.get("GOOGLE_SHEETS_CREDENTIALS", str(DEFAULT_CREDS)))
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Rank Pre-final leads into Final using P1/P2 activity"
+    )
+    parser.add_argument(
+        "--sheet-url", default=os.environ.get("LEAD_RESEARCH_SHEET_URL", DEFAULT_SHEET_URL)
+    )
+    parser.add_argument(
+        "--prefinal-tab", default=os.environ.get("LEAD_RESEARCH_PREFINAL_TAB", DEFAULT_PREFINAL_TAB)
+    )
+    parser.add_argument(
+        "--final-tab", default=os.environ.get("LEAD_RESEARCH_FINAL_TAB", DEFAULT_FINAL_TAB)
+    )
+    parser.add_argument(
+        "--credentials", default=os.environ.get("GOOGLE_SHEETS_CREDENTIALS", str(DEFAULT_CREDS))
+    )
     parser.add_argument("--activity-timeout", type=float, default=45.0)
     parser.add_argument("--activity-retries", type=int, default=1)
     parser.add_argument("--activity-fixture", default="")
-    parser.add_argument("--sequence-date", default=os.environ.get("OUTREACH_SEQUENCE_DATE", date.today().isoformat()))
-    parser.add_argument("--runtime-plan-path", default=os.environ.get("OUTREACH_RUNTIME_PLAN_PATH", ""))
+    parser.add_argument(
+        "--sequence-date",
+        default=os.environ.get("OUTREACH_SEQUENCE_DATE", date.today().isoformat()),
+    )
+    parser.add_argument(
+        "--runtime-plan-path", default=os.environ.get("OUTREACH_RUNTIME_PLAN_PATH", "")
+    )
     parser.add_argument("--no-runtime-plan", action="store_true")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true")
@@ -686,7 +750,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     if args.self_test:
         run_self_tests()

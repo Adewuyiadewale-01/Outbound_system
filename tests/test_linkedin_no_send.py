@@ -3,7 +3,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "helpers"))
 
@@ -84,7 +83,13 @@ class NoSendModalTests(unittest.TestCase):
 
         result = linkedin_outreach_session._run_connection_modal_checks(
             session=session,
-            selected=[{"id": "lead-1", "company": "One", "contact_linkedin": "https://linkedin.com/in/one"}],
+            selected=[
+                {
+                    "id": "lead-1",
+                    "company": "One",
+                    "contact_linkedin": "https://linkedin.com/in/one",
+                }
+            ],
         )
 
         self.assertFalse(result["ok"])
@@ -94,7 +99,9 @@ class NoSendModalTests(unittest.TestCase):
     def test_connect_click_waits_for_the_real_modal_before_failing(self):
         cdp = Mock()
         with (
-            patch.object(linkedin_helper, "_wait_for_connect_modal", side_effect=[False, True]) as wait,
+            patch.object(
+                linkedin_helper, "_wait_for_connect_modal", side_effect=[False, True]
+            ) as wait,
             patch.object(cdp, "evaluate", return_value=True),
         ):
             self.assertTrue(linkedin_helper._click_connect_button(cdp, self.sim, "connect_direct"))

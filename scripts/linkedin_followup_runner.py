@@ -16,9 +16,10 @@ import re
 import signal
 import sys
 import time
+from collections.abc import Iterable
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -67,7 +68,14 @@ PIPELINE_REQUIRED_COLUMNS = [
 ]
 TEMPLATE_HEADERS = ["Step", "Enabled", "Message Body", "Notes"]
 MESSAGE_DRAFT_HEADERS = ["Prospect ID", "Stage", "Draft Message", "Status"]
-FOLLOWUP_SLOT_HEADERS = ["Slot ID", "Batch #", "Delay Sec", "Pre-Send Pause Sec", "After Send Delay Sec", "Enabled"]
+FOLLOWUP_SLOT_HEADERS = [
+    "Slot ID",
+    "Batch #",
+    "Delay Sec",
+    "Pre-Send Pause Sec",
+    "After Send Delay Sec",
+    "Enabled",
+]
 FOLLOWUP_BATCH_HEADERS = ["Batch #", "Batch Size", "Batch Pause Sec", "Enabled"]
 LOCAL_USER_NAME = "Anthony Adewuyi"
 
@@ -90,13 +98,13 @@ def journal_path(day: str) -> Path:
     return JOURNAL_DIR / f"{day}.jsonl"
 
 
-def append_jsonl(path: Path, event: Dict[str, Any]) -> None:
+def append_jsonl(path: Path, event: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
 
 
-def read_json(path: Path) -> Dict[str, Any]:
+def read_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
@@ -105,40 +113,44 @@ def read_json(path: Path) -> Dict[str, Any]:
         return {}
 
 
-def write_json(path: Path, payload: Dict[str, Any]) -> None:
+def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
-def read_guard() -> Dict[str, Any]:
+def read_guard() -> dict[str, Any]:
     return read_json(RUN_GUARD_PATH)
 
 
 SHUTDOWN_REQUESTED = False
 
+
 def handle_shutdown(signum, frame):
     global SHUTDOWN_REQUESTED
     SHUTDOWN_REQUESTED = True
-    print(f"\nGraceful shutdown requested (signal {signum}). Will exit after current target finishes.", file=sys.stderr)
+    print(
+        f"\nGraceful shutdown requested (signal {signum}). Will exit after current target finishes.",
+        file=sys.stderr,
+    )
+
 
 signal.signal(signal.SIGTERM, handle_shutdown)
 signal.signal(signal.SIGINT, handle_shutdown)
 
 
-def read_guard() -> Dict[str, Any]:
-    return read_json(RUN_GUARD_PATH)
-
-def write_guard(payload: Dict[str, Any]) -> None:
+def write_guard(payload: dict[str, Any]) -> None:
     write_json(RUN_GUARD_PATH, payload)
 
 
-def read_history() -> Dict[str, Any]:
+def read_history() -> dict[str, Any]:
     history = read_json(HISTORY_PATH)
     history.setdefault("sent_messages", {})
     return history
 
 
-def write_history(payload: Dict[str, Any]) -> None:
+def write_history(payload: dict[str, Any]) -> None:
     payload.setdefault("sent_messages", {})
     write_json(HISTORY_PATH, payload)
 
@@ -168,7 +180,7 @@ def safe_filename_stem(value: Any) -> str:
     return text or "audit"
 
 
-def audit_pdf_path(company: str) -> Optional[Path]:
+def audit_pdf_path(company: str) -> Path | None:
     AUDIT_DIR.mkdir(parents=True, exist_ok=True)
     expected = AUDIT_DIR / f"{safe_filename_stem(company)}.pdf"
     if expected.exists():
@@ -197,24 +209,24 @@ def a1(row_number: int, col_number: int) -> str:
     return f"{letters}{row_number}"
 
 
-def header_index(headers: Iterable[Any]) -> Dict[str, int]:
+def header_index(headers: Iterable[Any]) -> dict[str, int]:
     return {str(header or "").strip(): i for i, header in enumerate(headers)}
 
 
-def require_columns(index: Dict[str, int], columns: Iterable[str], tab: str) -> None:
+def require_columns(index: dict[str, int], columns: Iterable[str], tab: str) -> None:
     missing = [column for column in columns if column not in index]
     if missing:
         raise ValueError(f"{tab} is missing required columns: {', '.join(missing)}")
 
 
-def cell(row: List[Any], index: Dict[str, int], column: str) -> str:
+def cell(row: list[Any], index: dict[str, int], column: str) -> str:
     pos = index.get(column)
     if pos is None or pos >= len(row):
         return ""
     return str(row[pos] or "").strip()
 
 
-def parse_sheet_date(value: Any) -> Optional[date]:
+def parse_sheet_date(value: Any) -> date | None:
     text = str(value or "").strip()
     if not text:
         return None
@@ -249,7 +261,7 @@ def skip_sunday(value: date) -> date:
     return value
 
 
-def next_pipeline_step(sent_step: str, sent_date: date) -> Tuple[str, str]:
+def next_pipeline_step(sent_step: str, sent_date: date) -> tuple[str, str]:
     rule = PIPELINE_SEQUENCE.get(sent_step)
     if not rule:
         return "", ""
@@ -278,10 +290,14 @@ def ensure_templates_tab(spreadsheet: Any) -> Any:
     try:
         worksheet = get_worksheet(spreadsheet, FOLLOWUP_TEMPLATES_TAB)
     except Exception:
-        worksheet = spreadsheet.add_worksheet(title=FOLLOWUP_TEMPLATES_TAB, rows=100, cols=len(TEMPLATE_HEADERS))
+        worksheet = spreadsheet.add_worksheet(
+            title=FOLLOWUP_TEMPLATES_TAB, rows=100, cols=len(TEMPLATE_HEADERS)
+        )
     headers = [str(h or "").strip() for h in worksheet.row_values(1)]
     if headers[: len(TEMPLATE_HEADERS)] != TEMPLATE_HEADERS:
-        worksheet.update(range_name="A1:D1", values=[TEMPLATE_HEADERS], value_input_option="USER_ENTERED")
+        worksheet.update(
+            range_name="A1:D1", values=[TEMPLATE_HEADERS], value_input_option="USER_ENTERED"
+        )
     if worksheet.row_count < 10:
         worksheet.resize(rows=100, cols=max(len(TEMPLATE_HEADERS), worksheet.col_count))
     values = worksheet.get_all_values()
@@ -296,14 +312,14 @@ def ensure_templates_tab(spreadsheet: Any) -> Any:
     return worksheet
 
 
-def load_templates(worksheet: Any) -> Dict[str, Dict[str, str]]:
+def load_templates(worksheet: Any) -> dict[str, dict[str, str]]:
     values = worksheet.get_all_values()
     if not values:
         return {}
     headers = [str(h or "").strip() for h in values[0]]
     index = header_index(headers)
     require_columns(index, TEMPLATE_HEADERS, FOLLOWUP_TEMPLATES_TAB)
-    templates: Dict[str, Dict[str, str]] = {}
+    templates: dict[str, dict[str, str]] = {}
     for row in values[1:]:
         row = row + [""] * max(0, len(headers) - len(row))
         step = normalize_step(cell(row, index, "Step"))
@@ -318,7 +334,7 @@ def load_templates(worksheet: Any) -> Dict[str, Dict[str, str]]:
     return templates
 
 
-def load_first_message_drafts(spreadsheet: Any) -> Dict[str, Dict[str, str]]:
+def load_first_message_drafts(spreadsheet: Any) -> dict[str, dict[str, str]]:
     try:
         worksheet = get_worksheet(spreadsheet, MESSAGE_DRAFTS_TAB)
     except Exception:
@@ -331,7 +347,7 @@ def load_first_message_drafts(spreadsheet: Any) -> Dict[str, Dict[str, str]]:
     missing = [header for header in MESSAGE_DRAFT_HEADERS if header not in index]
     if missing:
         return {}
-    drafts: Dict[str, Dict[str, str]] = {}
+    drafts: dict[str, dict[str, str]] = {}
     for row in values[1:]:
         row = row + [""] * max(0, len(headers) - len(row))
         prospect_id = cell(row, index, "Prospect ID")
@@ -350,9 +366,9 @@ def load_first_message_drafts(spreadsheet: Any) -> Dict[str, Dict[str, str]]:
 def expected_previous_for_target(
     prospect_id: str,
     current_progress: str,
-    history: Dict[str, Any],
-    first_message_drafts: Dict[str, Dict[str, str]],
-) -> Dict[str, str]:
+    history: dict[str, Any],
+    first_message_drafts: dict[str, dict[str, str]],
+) -> dict[str, str]:
     if current_progress == "First Message":
         draft = first_message_drafts.get(prospect_id) or {}
         return {
@@ -369,8 +385,10 @@ def expected_previous_for_target(
     }
 
 
-def render_template(body: str, target: Dict[str, Any]) -> str:
-    first_name = clean(target.get("contact_name")).split(" ")[0] if clean(target.get("contact_name")) else ""
+def render_template(body: str, target: dict[str, Any]) -> str:
+    first_name = (
+        clean(target.get("contact_name")).split(" ")[0] if clean(target.get("contact_name")) else ""
+    )
     replacements = {
         "First Name": first_name,
         "FirstName": first_name,
@@ -390,21 +408,21 @@ def render_template(body: str, target: Dict[str, Any]) -> str:
 
 def build_due_targets(
     pipeline_ws: Any,
-    templates: Dict[str, Dict[str, str]],
+    templates: dict[str, dict[str, str]],
     today: date,
     limit: int = 0,
-    history: Optional[Dict[str, Any]] = None,
-    first_message_drafts: Optional[Dict[str, Dict[str, str]]] = None,
-    only_prospect_ids: Optional[Iterable[str]] = None,
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    history: dict[str, Any] | None = None,
+    first_message_drafts: dict[str, dict[str, str]] | None = None,
+    only_prospect_ids: Iterable[str] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     values = pipeline_ws.get_all_values()
     if not values:
         return [], []
     headers = [str(h or "").strip() for h in values[0]]
     index = header_index(headers)
     require_columns(index, PIPELINE_REQUIRED_COLUMNS, PIPELINE_TAB)
-    targets: List[Dict[str, Any]] = []
-    skipped: List[Dict[str, Any]] = []
+    targets: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
     allowed_ids = {clean(value) for value in (only_prospect_ids or []) if clean(value)}
     for row_number, row in enumerate(values[1:], start=2):
         row = row + [""] * max(0, len(headers) - len(row))
@@ -418,7 +436,14 @@ def build_due_targets(
             continue
         outcome = clean(cell(row, index, "Outcome")).lower()
         if outcome in {"replied", "unsure"}:
-            skipped.append({"row_number": row_number, "prospect_id": prospect_id, "reason": "terminal_or_manual_review_outcome", "outcome": cell(row, index, "Outcome")})
+            skipped.append(
+                {
+                    "row_number": row_number,
+                    "prospect_id": prospect_id,
+                    "reason": "terminal_or_manual_review_outcome",
+                    "outcome": cell(row, index, "Outcome"),
+                }
+            )
             continue
         due_date = parse_sheet_date(cell(row, index, "Next Action Due"))
         if due_date:
@@ -427,21 +452,30 @@ def build_due_targets(
             continue
         template = templates.get(next_action)
         if not template or template.get("enabled") != "yes" or not template.get("body"):
-            skipped.append({"row_number": row_number, "prospect_id": prospect_id, "reason": "missing_or_disabled_template", "step": next_action})
+            skipped.append(
+                {
+                    "row_number": row_number,
+                    "prospect_id": prospect_id,
+                    "reason": "missing_or_disabled_template",
+                    "step": next_action,
+                }
+            )
             continue
         company = cell(row, index, "Company")
         requires_pdf = template_requires_pdf(template["body"])
         pdf_path = audit_pdf_path(company) if requires_pdf else None
         if requires_pdf and not pdf_path:
-            skipped.append({
-                "row_number": row_number,
-                "prospect_id": prospect_id,
-                "reason": "missing_audit_pdf",
-                "step": next_action,
-                "company": company,
-                "expected_folder": str(AUDIT_DIR),
-                "expected_filename": f"{safe_filename_stem(company)}.pdf",
-            })
+            skipped.append(
+                {
+                    "row_number": row_number,
+                    "prospect_id": prospect_id,
+                    "reason": "missing_audit_pdf",
+                    "step": next_action,
+                    "company": company,
+                    "expected_folder": str(AUDIT_DIR),
+                    "expected_filename": f"{safe_filename_stem(company)}.pdf",
+                }
+            )
             continue
         current_progress = normalize_step(cell(row, index, "Current Progress"))
         expected_previous = expected_previous_for_target(
@@ -491,12 +525,14 @@ def normalize_existing_sunday_due_dates(pipeline_ws: Any) -> int:
         due_date = parse_sheet_date(cell(row, index, "Next Action Due"))
         if not due_date or due_date.weekday() != 6:
             continue
-        update_row_fields(pipeline_ws, row_number, {"Next Action Due": skip_sunday(due_date).isoformat()})
+        update_row_fields(
+            pipeline_ws, row_number, {"Next Action Due": skip_sunday(due_date).isoformat()}
+        )
         changed += 1
     return changed
 
 
-def bucket_for_presence(presence: Dict[str, Any], monitor_attempts: int, mode: str) -> str:
+def bucket_for_presence(presence: dict[str, Any], monitor_attempts: int, mode: str) -> str:
     if mode == "evening":
         return "send"
     if mode == "monitor" and monitor_attempts >= 1:
@@ -504,7 +540,9 @@ def bucket_for_presence(presence: Dict[str, Any], monitor_attempts: int, mode: s
     status = presence.get("presence_status")
     if status == "active_now":
         return "send"
-    if status == "recent_today" and recent_presence_within_minutes(presence.get("last_seen_text"), 60):
+    if status == "recent_today" and recent_presence_within_minutes(
+        presence.get("last_seen_text"), 60
+    ):
         return "send"
     if status == "recent_today":
         return "monitor"
@@ -530,7 +568,7 @@ def recent_presence_within_minutes(last_seen_text: Any, limit_minutes: int) -> b
     return False
 
 
-def update_row_fields(worksheet: Any, row_number: int, fields: Dict[str, Any]) -> None:
+def update_row_fields(worksheet: Any, row_number: int, fields: dict[str, Any]) -> None:
     for attempt in range(5):
         try:
             headers = [str(h or "").strip() for h in worksheet.row_values(1)]
@@ -543,10 +581,10 @@ def update_row_fields(worksheet: Any, row_number: int, fields: Dict[str, Any]) -
             if updates:
                 worksheet.batch_update(updates, value_input_option="USER_ENTERED")
             return
-        except Exception as e:
+        except Exception:
             if attempt == 4:
                 raise
-            time.sleep(2 ** attempt + random.uniform(0, 1))
+            time.sleep(2**attempt + random.uniform(0, 1))
 
 
 def rand_seconds(minimum: int, maximum: int) -> int:
@@ -567,14 +605,14 @@ def ensure_followup_sequence_tab(spreadsheet: Any) -> Any:
     return worksheet
 
 
-def distribute_batches(total: int) -> List[int]:
+def distribute_batches(total: int) -> list[int]:
     if total <= 0:
         return []
     if total <= 6:
         return [total]
     batch_count = max(2, (total + 5) // 6)
     remaining = total
-    sizes: List[int] = []
+    sizes: list[int] = []
     for idx in range(batch_count):
         slots_left = batch_count - idx
         if slots_left == 1:
@@ -589,13 +627,17 @@ def distribute_batches(total: int) -> List[int]:
     return sizes
 
 
-def build_followup_runtime_plan(spreadsheet: Any, target_count: int, cap: int = DEFAULT_RUN_SEND_CAP) -> List[Dict[str, Any]]:
+def build_followup_runtime_plan(
+    spreadsheet: Any, target_count: int, cap: int = DEFAULT_RUN_SEND_CAP
+) -> list[dict[str, Any]]:
     worksheet = ensure_followup_sequence_tab(spreadsheet)
     planned_count = max(0, target_count)
     batch_sizes = distribute_batches(planned_count)
-    batch_pause_by_batch = {batch_index: rand_seconds(30, 180) for batch_index in range(1, len(batch_sizes) + 1)}
-    plan: List[Dict[str, Any]] = []
-    slot_rows: List[List[Any]] = []
+    batch_pause_by_batch = {
+        batch_index: rand_seconds(30, 180) for batch_index in range(1, len(batch_sizes) + 1)
+    }
+    plan: list[dict[str, Any]] = []
+    slot_rows: list[list[Any]] = []
     slot_id = 1
     for batch_index, size in enumerate(batch_sizes, start=1):
         for _ in range(size):
@@ -609,29 +651,46 @@ def build_followup_runtime_plan(spreadsheet: Any, target_count: int, cap: int = 
                 "enabled": "yes",
             }
             plan.append(item)
-            slot_rows.append([
-                item["slot_id"],
-                item["batch"],
-                item["delay_sec"],
-                item["pre_send_pause_sec"],
-                item["after_send_delay_sec"],
-                item["enabled"],
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-            ])
+            slot_rows.append(
+                [
+                    item["slot_id"],
+                    item["batch"],
+                    item["delay_sec"],
+                    item["pre_send_pause_sec"],
+                    item["after_send_delay_sec"],
+                    item["enabled"],
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                ]
+            )
             slot_id += 1
     for empty_slot in range(len(slot_rows) + 1, max(20, len(slot_rows)) + 1):
         slot_rows.append([empty_slot, "", "", "", "", "", "", "", "", "", "", ""])
-    batch_rows: List[List[Any]] = []
+    batch_rows: list[list[Any]] = []
     for batch_index, size in enumerate(batch_sizes, start=1):
-        batch_rows.append(["", "", "", "", "", "", "", "", batch_index, size, batch_pause_by_batch[batch_index], "yes"])
+        batch_rows.append(
+            [
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                batch_index,
+                size,
+                batch_pause_by_batch[batch_index],
+                "yes",
+            ]
+        )
     for _ in range(len(batch_rows) + 1, max(5, len(batch_rows)) + 1):
         batch_rows.append(["", "", "", "", "", "", "", "", "", "", "", ""])
-    rows_by_number: Dict[int, List[Any]] = {}
+    rows_by_number: dict[int, list[Any]] = {}
     for offset, row in enumerate(slot_rows, start=2):
         rows_by_number[offset] = row
     for offset, row in enumerate(batch_rows, start=2):
@@ -642,7 +701,9 @@ def build_followup_runtime_plan(spreadsheet: Any, target_count: int, cap: int = 
         if worksheet.row_count < max_row:
             worksheet.resize(rows=max_row, cols=max(12, worksheet.col_count))
         values = [rows_by_number.get(row_number, [""] * 12) for row_number in range(2, max_row + 1)]
-        worksheet.update(range_name=f"A2:L{max_row}", values=values, value_input_option="USER_ENTERED")
+        worksheet.update(
+            range_name=f"A2:L{max_row}", values=values, value_input_option="USER_ENTERED"
+        )
     return plan
 
 
@@ -656,7 +717,7 @@ def sleep_seconds(seconds: Any, dry_run: bool = False) -> None:
     time.sleep(value)
 
 
-def open_messaging(session: LinkedInSession) -> Dict[str, Any]:
+def open_messaging(session: LinkedInSession) -> dict[str, Any]:
     session.cdp.navigate(MESSAGING_URL, wait_load=False, timeout=10)
     time.sleep(random.uniform(2.5, 4.0))
     danger = check_circuit_breakers(session.cdp)
@@ -676,7 +737,9 @@ def open_messaging(session: LinkedInSession) -> Dict[str, Any]:
     return result if isinstance(result, dict) else {"ok": False, "raw": result}
 
 
-def open_thread_by_name(session: LinkedInSession, contact_name: str, max_steps: int = 8) -> Dict[str, Any]:
+def open_thread_by_name(
+    session: LinkedInSession, contact_name: str, max_steps: int = 8
+) -> dict[str, Any]:
     if not clean(contact_name):
         return {"ok": False, "reason": "contact_name_missing"}
     script = f"""
@@ -733,14 +796,19 @@ def open_thread_by_name(session: LinkedInSession, contact_name: str, max_steps: 
     return result if isinstance(result, dict) else {"ok": False, "raw": result}
 
 
-def extract_profile_name_from_url(session: LinkedInSession, profile_url: str) -> Dict[str, Any]:
+def extract_profile_name_from_url(session: LinkedInSession, profile_url: str) -> dict[str, Any]:
     if not clean(profile_url):
         return {"ok": False, "reason": "profile_url_missing"}
     session.cdp.navigate(profile_url, wait_load=False, timeout=15)
     time.sleep(random.uniform(2.5, 4.0))
     danger = check_circuit_breakers(session.cdp)
     if danger:
-        return {"ok": False, "reason": "profile_preflight_blocked", "danger": danger, "url": profile_url}
+        return {
+            "ok": False,
+            "reason": "profile_preflight_blocked",
+            "danger": danger,
+            "url": profile_url,
+        }
     script = """
     (() => {
       const norm = s => (s || "").replace(/\\s+/g, " ").trim();
@@ -811,8 +879,8 @@ def extract_profile_name_from_url(session: LinkedInSession, profile_url: str) ->
     return result if isinstance(result, dict) else {"ok": False, "raw": result, "url": profile_url}
 
 
-def name_search_terms(*names: Any) -> List[str]:
-    terms: List[str] = []
+def name_search_terms(*names: Any) -> list[str]:
+    terms: list[str] = []
     seen = set()
     suffixes = {"ll.m", "llm", "mba", "msc", "phd", "cfa", "cfp", "mr", "dr"}
     for name in names:
@@ -820,7 +888,11 @@ def name_search_terms(*names: Any) -> List[str]:
         if not text:
             continue
         parts = [re.sub(r"[^A-Za-zÀ-ÖØ-öø-ÿ.'’\\-]", "", part).strip(".") for part in text.split()]
-        parts = [part for part in parts if len(part) >= 2 and part.lower().replace(".", "") not in suffixes]
+        parts = [
+            part
+            for part in parts
+            if len(part) >= 2 and part.lower().replace(".", "") not in suffixes
+        ]
         candidates = []
         if parts:
             candidates.append(parts[0])
@@ -836,7 +908,9 @@ def name_search_terms(*names: Any) -> List[str]:
     return terms
 
 
-def open_thread_by_search_terms(session: LinkedInSession, search_terms: List[str], expected_names: List[str]) -> Dict[str, Any]:
+def open_thread_by_search_terms(
+    session: LinkedInSession, search_terms: list[str], expected_names: list[str]
+) -> dict[str, Any]:
     terms = [clean(term) for term in search_terms if clean(term)]
     expected = [clean(name) for name in expected_names if clean(name)]
     if not terms:
@@ -939,7 +1013,7 @@ def open_thread_by_search_terms(session: LinkedInSession, search_terms: List[str
     return result if isinstance(result, dict) else {"ok": False, "raw": result}
 
 
-def open_thread_for_target(session: LinkedInSession, target: Dict[str, Any]) -> Dict[str, Any]:
+def open_thread_for_target(session: LinkedInSession, target: dict[str, Any]) -> dict[str, Any]:
     original_name = clean(target.get("contact_name"))
     first = open_thread_by_name(session, original_name, max_steps=8)
     if first.get("ok"):
@@ -955,7 +1029,7 @@ def open_thread_for_target(session: LinkedInSession, target: Dict[str, Any]) -> 
     return second
 
 
-def inspect_thread(session: LinkedInSession, contact_name: str) -> Dict[str, Any]:
+def inspect_thread(session: LinkedInSession, contact_name: str) -> dict[str, Any]:
     script = f"""
     (() => {{
       const CONTACT = {json.dumps(contact_name)};
@@ -1028,7 +1102,7 @@ def inspect_thread(session: LinkedInSession, contact_name: str) -> Dict[str, Any
     return result if isinstance(result, dict) else {"ok": False, "raw": result}
 
 
-def human_type_message(session: LinkedInSession, message: str) -> Dict[str, Any]:
+def human_type_message(session: LinkedInSession, message: str) -> dict[str, Any]:
     script = f"""
     (async () => {{
       const MESSAGE = {json.dumps(message)};
@@ -1075,7 +1149,7 @@ def human_type_message(session: LinkedInSession, message: str) -> Dict[str, Any]
     return result if isinstance(result, dict) else {"ok": False, "raw": result}
 
 
-def click_send_and_confirm(session: LinkedInSession, message: str) -> Dict[str, Any]:
+def click_send_and_confirm(session: LinkedInSession, message: str) -> dict[str, Any]:
     script = f"""
     (async () => {{
       const MESSAGE = {json.dumps(message)};
@@ -1105,7 +1179,7 @@ def click_send_and_confirm(session: LinkedInSession, message: str) -> Dict[str, 
     return result if isinstance(result, dict) else {"ok": False, "raw": result}
 
 
-def clear_composer(session: LinkedInSession) -> Dict[str, Any]:
+def clear_composer(session: LinkedInSession) -> dict[str, Any]:
     script = """
     (() => {
       const visible = el => {
@@ -1128,7 +1202,7 @@ def clear_composer(session: LinkedInSession) -> Dict[str, Any]:
     return result if isinstance(result, dict) else {"ok": False, "raw": result}
 
 
-def remove_pending_attachment(session: LinkedInSession, filename: str = "") -> Dict[str, Any]:
+def remove_pending_attachment(session: LinkedInSession, filename: str = "") -> dict[str, Any]:
     script = f"""
     (() => {{
       const FILENAME = {json.dumps(filename)};
@@ -1155,7 +1229,7 @@ def remove_pending_attachment(session: LinkedInSession, filename: str = "") -> D
     return result if isinstance(result, dict) else {"ok": False, "raw": result}
 
 
-def attach_audit_pdf(session: LinkedInSession, pdf_path: str) -> Dict[str, Any]:
+def attach_audit_pdf(session: LinkedInSession, pdf_path: str) -> dict[str, Any]:
     path = Path(pdf_path)
     if not path.exists():
         return {"ok": False, "reason": "audit_pdf_missing", "pdf_path": str(path)}
@@ -1166,15 +1240,25 @@ def attach_audit_pdf(session: LinkedInSession, pdf_path: str) -> Dict[str, Any]:
             return {"ok": False, "reason": "dom_root_missing", "pdf_path": str(path)}
         query = session.cdp.send(
             "DOM.querySelector",
-            {"nodeId": root_id, "selector": 'input[type="file"][accept*=".pdf"], input[type="file"]:not([accept="image/*"])'},
+            {
+                "nodeId": root_id,
+                "selector": 'input[type="file"][accept*=".pdf"], input[type="file"]:not([accept="image/*"])',
+            },
             timeout=10,
         )
         node_id = query.get("nodeId")
         if not node_id:
             return {"ok": False, "reason": "pdf_file_input_not_found", "pdf_path": str(path)}
-        session.cdp.send("DOM.setFileInputFiles", {"nodeId": node_id, "files": [str(path)]}, timeout=15)
+        session.cdp.send(
+            "DOM.setFileInputFiles", {"nodeId": node_id, "files": [str(path)]}, timeout=15
+        )
     except Exception as exc:
-        return {"ok": False, "reason": "cdp_file_upload_failed", "error": str(exc), "pdf_path": str(path)}
+        return {
+            "ok": False,
+            "reason": "cdp_file_upload_failed",
+            "error": str(exc),
+            "pdf_path": str(path),
+        }
 
     filename = path.name
     script = f"""
@@ -1228,23 +1312,50 @@ def attach_audit_pdf(session: LinkedInSession, pdf_path: str) -> Dict[str, Any]:
     return {"ok": False, "raw": result, "pdf_path": str(path)}
 
 
-def process_target(session: LinkedInSession, target: Dict[str, Any], mode: str, state: Dict[str, Any], dry_run: bool, bypass_safety: bool = False) -> Dict[str, Any]:
+def process_target(
+    session: LinkedInSession,
+    target: dict[str, Any],
+    mode: str,
+    state: dict[str, Any],
+    dry_run: bool,
+    bypass_safety: bool = False,
+) -> dict[str, Any]:
     record = state.setdefault("runtime_state", {}).setdefault(target["prospect_id"], {})
     timing = target.get("runtime_plan") or {}
     open_result = open_thread_for_target(session, target)
     if not open_result.get("ok"):
-        return {"ok": False, "action": "blocked", "reason": "thread_open_failed", "open_result": open_result}
-    resolved_contact_name = clean(open_result.get("resolved_contact_name")) or target["contact_name"]
+        return {
+            "ok": False,
+            "action": "blocked",
+            "reason": "thread_open_failed",
+            "open_result": open_result,
+        }
+    resolved_contact_name = (
+        clean(open_result.get("resolved_contact_name")) or target["contact_name"]
+    )
     record["resolved_contact_name"] = resolved_contact_name
     record["resolved_contact_name_source"] = open_result.get("name_source", "sheet")
     inspect = inspect_thread(session, resolved_contact_name)
     if not inspect.get("ok") or not inspect.get("identity_ok"):
-        return {"ok": False, "action": "blocked", "reason": "identity_or_thread_inspection_failed", "inspect": inspect}
+        return {
+            "ok": False,
+            "action": "blocked",
+            "reason": "identity_or_thread_inspection_failed",
+            "inspect": inspect,
+        }
     if inspect.get("latest_sender") == "recipient":
         return {"ok": True, "action": "mark_replied", "inspect": inspect}
     # TEMPORARY FILTER: skip prospects whose last message contains the "floating" follow-up
-    if "floating this to the top in case it got buried" in (inspect.get("latest_event_full") or "").lower():
-        return {"ok": True, "action": "mark_unsure", "reason": "temp_filter_floating_followup", "inspect": inspect}
+    if (
+        "floating this to the top in case it got buried"
+        in (inspect.get("latest_event_full") or "").lower()
+    ):
+        return {
+            "ok": True,
+            "action": "mark_unsure",
+            "reason": "temp_filter_floating_followup",
+            "inspect": inspect,
+        }
     if inspect.get("latest_sender") != "self":
         return {"ok": True, "action": "mark_unsure", "inspect": inspect}
     outgoing_text = inspect.get("latest_own_event") or inspect.get("latest_event_full") or ""
@@ -1268,7 +1379,9 @@ def process_target(session: LinkedInSession, target: Dict[str, Any], mode: str, 
             "expected_previous_source": target.get("expected_previous_source", ""),
             "inspect": inspect,
         }
-    if not bypass_safety and not message_appears_in_event(expected_previous_message, inspect.get("latest_event_full", "")):
+    if not bypass_safety and not message_appears_in_event(
+        expected_previous_message, inspect.get("latest_event_full", "")
+    ):
         return {
             "ok": True,
             "action": "mark_unsure",
@@ -1278,13 +1391,15 @@ def process_target(session: LinkedInSession, target: Dict[str, Any], mode: str, 
             "inspect": inspect,
         }
 
-    record.update({
-        "last_checked_at": datetime.now().isoformat(timespec="seconds"),
-        "presence_status": inspect.get("presence_status"),
-        "last_seen_text": inspect.get("last_seen_text"),
-        "read_status": inspect.get("read_status"),
-        "latest_receipt": inspect.get("latest_receipt"),
-    })
+    record.update(
+        {
+            "last_checked_at": datetime.now().isoformat(timespec="seconds"),
+            "presence_status": inspect.get("presence_status"),
+            "last_seen_text": inspect.get("last_seen_text"),
+            "read_status": inspect.get("read_status"),
+            "latest_receipt": inspect.get("latest_receipt"),
+        }
+    )
     if dry_run:
         return {"ok": True, "action": "would_send", "inspect": inspect}
 
@@ -1313,15 +1428,33 @@ def process_target(session: LinkedInSession, target: Dict[str, Any], mode: str, 
 
     typed = human_type_message(session, target["message"])
     if not typed.get("ok") or not typed.get("send_ready"):
-        return {"ok": False, "action": "blocked", "reason": "typing_or_send_not_ready", "typed": typed, "inspect": inspect}
+        return {
+            "ok": False,
+            "action": "blocked",
+            "reason": "typing_or_send_not_ready",
+            "typed": typed,
+            "inspect": inspect,
+        }
     pre_send = inspect_thread(session, resolved_contact_name)
     if pre_send.get("latest_sender") == "recipient":
         clear_composer(session)
-        return {"ok": True, "action": "mark_replied", "reason": "recipient_replied_before_send", "inspect": pre_send}
+        return {
+            "ok": True,
+            "action": "mark_replied",
+            "reason": "recipient_replied_before_send",
+            "inspect": pre_send,
+        }
     if pre_send.get("latest_sender") != "self":
         clear_composer(session)
-        return {"ok": True, "action": "mark_unsure", "reason": "latest_sender_uncertain_before_send", "inspect": pre_send}
-    if not bypass_safety and not message_appears_in_event(expected_previous_message, pre_send.get("latest_event_full", "")):
+        return {
+            "ok": True,
+            "action": "mark_unsure",
+            "reason": "latest_sender_uncertain_before_send",
+            "inspect": pre_send,
+        }
+    if not bypass_safety and not message_appears_in_event(
+        expected_previous_message, pre_send.get("latest_event_full", "")
+    ):
         clear_composer(session)
         return {
             "ok": True,
@@ -1337,24 +1470,51 @@ def process_target(session: LinkedInSession, target: Dict[str, Any], mode: str, 
         if not attachment.get("ok"):
             clear_composer(session)
             remove_pending_attachment(session, Path(target.get("audit_path", "")).name)
-            return {"ok": False, "action": "blocked", "reason": "pdf_attachment_failed", "attachment": attachment, "inspect": pre_send}
+            return {
+                "ok": False,
+                "action": "blocked",
+                "reason": "pdf_attachment_failed",
+                "attachment": attachment,
+                "inspect": pre_send,
+            }
         final_check = inspect_thread(session, resolved_contact_name)
         if final_check.get("latest_sender") == "recipient":
             clear_composer(session)
             remove_pending_attachment(session, Path(target.get("audit_path", "")).name)
-            return {"ok": True, "action": "mark_replied", "reason": "recipient_replied_after_attachment", "inspect": final_check}
-        if not bypass_safety and (final_check.get("latest_sender") != "self" or not message_appears_in_event(expected_previous_message, final_check.get("latest_event_full", ""))):
+            return {
+                "ok": True,
+                "action": "mark_replied",
+                "reason": "recipient_replied_after_attachment",
+                "inspect": final_check,
+            }
+        if not bypass_safety and (
+            final_check.get("latest_sender") != "self"
+            or not message_appears_in_event(
+                expected_previous_message, final_check.get("latest_event_full", "")
+            )
+        ):
             clear_composer(session)
             remove_pending_attachment(session, Path(target.get("audit_path", "")).name)
-            return {"ok": True, "action": "mark_unsure", "reason": "latest_sender_or_previous_message_uncertain_after_attachment", "inspect": final_check}
+            return {
+                "ok": True,
+                "action": "mark_unsure",
+                "reason": "latest_sender_or_previous_message_uncertain_after_attachment",
+                "inspect": final_check,
+            }
     sleep_seconds(timing.get("pre_send_pause_sec"), dry_run=dry_run)
     sent = click_send_and_confirm(session, target["message"])
     if not sent.get("confirmed"):
         return {"ok": False, "action": "failed_send_confirm", "sent": sent, "inspect": inspect}
-    return {"ok": True, "action": "sent", "inspect": inspect, "sent": sent, "attachment": attachment}
+    return {
+        "ok": True,
+        "action": "sent",
+        "inspect": inspect,
+        "sent": sent,
+        "attachment": attachment,
+    }
 
 
-def prepare(args: argparse.Namespace) -> Dict[str, Any]:
+def prepare(args: argparse.Namespace) -> dict[str, Any]:
     now = datetime.now(ZoneInfo(args.timezone))
     if now.weekday() == 6:
         return {"ok": False, "blockers": ["Follow-ups are disabled on Sundays"]}
@@ -1364,7 +1524,9 @@ def prepare(args: argparse.Namespace) -> Dict[str, Any]:
     client = get_client(args.credentials)
     spreadsheet = open_sheet(client, args.sheet_url)
     pipeline_ws = get_worksheet(spreadsheet, PIPELINE_TAB)
-    normalized_sunday_due_dates = 0 if args.dry_run else normalize_existing_sunday_due_dates(pipeline_ws)
+    normalized_sunday_due_dates = (
+        0 if args.dry_run else normalize_existing_sunday_due_dates(pipeline_ws)
+    )
     templates_ws = ensure_templates_tab(spreadsheet)
     templates = load_templates(templates_ws)
     history = read_history()
@@ -1399,11 +1561,19 @@ def prepare(args: argparse.Namespace) -> Dict[str, Any]:
         "runtime_state": existing_state.get("runtime_state", {}),
     }
     write_json(path, payload)
-    append_jsonl(journal_path(day), {"event": "followup_prepared", "target_count": len(targets), "skipped_count": len(skipped), "prepared_at": now.isoformat()})
+    append_jsonl(
+        journal_path(day),
+        {
+            "event": "followup_prepared",
+            "target_count": len(targets),
+            "skipped_count": len(skipped),
+            "prepared_at": now.isoformat(),
+        },
+    )
     return payload
 
 
-def run(args: argparse.Namespace) -> Dict[str, Any]:
+def run(args: argparse.Namespace) -> dict[str, Any]:
     now = datetime.now(ZoneInfo(args.timezone))
     if now.weekday() == 6:
         return {"ok": False, "blockers": ["Follow-ups are disabled on Sundays"]}
@@ -1416,7 +1586,12 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     if args.limit:
         targets = targets[: args.limit]
     if not targets:
-        return {"ok": False, "blockers": ["No due follow-up targets with enabled templates"], "session": str(path), "skipped": payload.get("skipped", [])}
+        return {
+            "ok": False,
+            "blockers": ["No due follow-up targets with enabled templates"],
+            "session": str(path),
+            "skipped": payload.get("skipped", []),
+        }
 
     state = read_json(path)
     state.setdefault("runtime_state", {})
@@ -1465,35 +1640,59 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                 continue
             timing = target.get("runtime_plan") or {}
             sleep_seconds(timing.get("delay_sec"), dry_run=args.dry_run)
-            result = process_target(linkedin, target, args.mode, state, args.dry_run, bypass_safety=args.bypass_safety)
+            result = process_target(
+                linkedin, target, args.mode, state, args.dry_run, bypass_safety=args.bypass_safety
+            )
             summary["processed"] += 1
-            event = {"event": "followup_target_result", "recorded_at": datetime.now().isoformat(timespec="seconds"), "prospect_id": target.get("prospect_id"), "step": target.get("next_action"), **result}
+            event = {
+                "event": "followup_target_result",
+                "recorded_at": datetime.now().isoformat(timespec="seconds"),
+                "prospect_id": target.get("prospect_id"),
+                "step": target.get("next_action"),
+                **result,
+            }
             append_jsonl(journal_path(day), event)
             if result.get("action") == "mark_replied":
-                state.setdefault("runtime_state", {}).setdefault(target["prospect_id"], {})["status"] = "replied"
+                state.setdefault("runtime_state", {}).setdefault(target["prospect_id"], {})[
+                    "status"
+                ] = "replied"
                 if not args.dry_run:
-                    update_row_fields(pipeline_ws, int(target["row_number"]), {"Outcome": "Replied"})
+                    update_row_fields(
+                        pipeline_ws, int(target["row_number"]), {"Outcome": "Replied"}
+                    )
                 summary["replied"] += 1
             elif result.get("action") == "mark_unsure":
-                state.setdefault("runtime_state", {}).setdefault(target["prospect_id"], {})["status"] = "unsure"
+                state.setdefault("runtime_state", {}).setdefault(target["prospect_id"], {})[
+                    "status"
+                ] = "unsure"
                 if not args.dry_run:
                     update_row_fields(pipeline_ws, int(target["row_number"]), {"Outcome": "Unsure"})
                 summary["unsure"] += 1
             elif result.get("action") in {"sent", "would_send"}:
                 if result.get("action") == "sent":
-                    state.setdefault("runtime_state", {}).setdefault(target["prospect_id"], {})["status"] = "sent"
+                    state.setdefault("runtime_state", {}).setdefault(target["prospect_id"], {})[
+                        "status"
+                    ] = "sent"
                     sent_date = datetime.now(ZoneInfo(args.timezone)).date()
                     next_action, next_due = next_pipeline_step(target["next_action"], sent_date)
-                    update_row_fields(pipeline_ws, int(target["row_number"]), {
-                        "Current Progress": target["next_action"],
-                        "Last Action Date": sent_date.isoformat(),
-                        "Next Action": next_action,
-                        "Next Action Due": next_due,
-                    })
-                    prospect_history = history.setdefault("sent_messages", {}).setdefault(target["prospect_id"], {})
+                    update_row_fields(
+                        pipeline_ws,
+                        int(target["row_number"]),
+                        {
+                            "Current Progress": target["next_action"],
+                            "Last Action Date": sent_date.isoformat(),
+                            "Next Action": next_action,
+                            "Next Action Due": next_due,
+                        },
+                    )
+                    prospect_history = history.setdefault("sent_messages", {}).setdefault(
+                        target["prospect_id"], {}
+                    )
                     prospect_history[target["next_action"]] = {
                         "message": target["message"],
-                        "sent_at": datetime.now(ZoneInfo(args.timezone)).isoformat(timespec="seconds"),
+                        "sent_at": datetime.now(ZoneInfo(args.timezone)).isoformat(
+                            timespec="seconds"
+                        ),
                         "next_action": next_action,
                         "next_action_due": next_due,
                     }
@@ -1502,7 +1701,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                 else:
                     summary["sent"] += 0
             else:
-                state.setdefault("runtime_state", {}).setdefault(target["prospect_id"], {})["status"] = "failed"
+                state.setdefault("runtime_state", {}).setdefault(target["prospect_id"], {})[
+                    "status"
+                ] = "failed"
                 if not args.dry_run:
                     update_row_fields(pipeline_ws, int(target["row_number"]), {"Outcome": "Unsure"})
                 summary["failed"] += 1
@@ -1535,7 +1736,14 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
             remaining += 1
     summary["remaining_due"] = remaining
     summary["next_run_recommended"] = remaining > 0 and summary["sent"] >= send_cap
-    append_jsonl(journal_path(day), {"event": "followup_run_summary", "recorded_at": datetime.now().isoformat(timespec="seconds"), **summary})
+    append_jsonl(
+        journal_path(day),
+        {
+            "event": "followup_run_summary",
+            "recorded_at": datetime.now().isoformat(timespec="seconds"),
+            **summary,
+        },
+    )
     write_json(path, state)
     return summary
 
@@ -1550,8 +1758,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--mode", choices=["run"], default="run")
-    parser.add_argument("--only-prospect-id", action="append", default=[], help="Restrict prepare/run to one Prospect ID. Repeatable.")
-    parser.add_argument("--send-cap", type=int, default=DEFAULT_RUN_SEND_CAP, help="Confirmed sends allowed in one run.")
+    parser.add_argument(
+        "--only-prospect-id",
+        action="append",
+        default=[],
+        help="Restrict prepare/run to one Prospect ID. Repeatable.",
+    )
+    parser.add_argument(
+        "--send-cap",
+        type=int,
+        default=DEFAULT_RUN_SEND_CAP,
+        help="Confirmed sends allowed in one run.",
+    )
     parser.add_argument("--continue-on-failure", action="store_true")
     parser.add_argument("--bypass-safety", action="store_true")
     return parser.parse_args()

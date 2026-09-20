@@ -3,7 +3,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-
 ROOT = Path(__file__).resolve().parents[1]
 HELPERS = ROOT / "helpers"
 if str(HELPERS) not in sys.path:

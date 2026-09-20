@@ -6,9 +6,10 @@ import os
 import re
 import sys
 import unicodedata
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any
 
 import gspread
 
@@ -17,8 +18,8 @@ HELPERS = ROOT / "helpers"
 if str(HELPERS) not in sys.path:
     sys.path.insert(0, str(HELPERS))
 
-from sheets_helper import get_client, get_worksheet, normalize_rows, open_sheet  # noqa: E402
 from runtime_environment import load_repo_env  # noqa: E402
+from sheets_helper import get_client, get_worksheet, normalize_rows, open_sheet  # noqa: E402
 
 load_repo_env()
 
@@ -85,12 +86,11 @@ def first_existing_column(headers: Sequence[str], candidates: Sequence[str]) -> 
         if found:
             return found
     raise ValueError(
-        "Could not find a name column in the comparison sheet. "
-        f"Tried: {', '.join(candidates)}"
+        f"Could not find a name column in the comparison sheet. Tried: {', '.join(candidates)}"
     )
 
 
-def read_name_set(client, sheet_url: str, name_column: str = "") -> Tuple[set, str, str, int]:
+def read_name_set(client, sheet_url: str, name_column: str = "") -> tuple[set, str, str, int]:
     spreadsheet = open_sheet(client, sheet_url)
     worksheet = get_worksheet_by_gid_or_first(spreadsheet, sheet_url)
     values = worksheet.get_all_values()
@@ -99,23 +99,22 @@ def read_name_set(client, sheet_url: str, name_column: str = "") -> Tuple[set, s
     headers = values[0]
     column = name_column or first_existing_column(headers, NAME_COLUMN_CANDIDATES)
     rows = normalize_rows(values)
-    names = {
-        normalize_name(row.get(column))
-        for row in rows
-        if normalize_name(row.get(column))
-    }
+    names = {normalize_name(row.get(column)) for row in rows if normalize_name(row.get(column))}
     return names, worksheet.title, column, len(names)
 
 
-def meaningful_prefinal_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def meaningful_prefinal_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         row
         for row in rows
-        if any(clean_text(row.get(column)) for column in ("ID", "Company", "P1 Name", "P1 LinkedIn", "P2 Name", "P2 LinkedIn"))
+        if any(
+            clean_text(row.get(column))
+            for column in ("ID", "Company", "P1 Name", "P1 LinkedIn", "P2 Name", "P2 LinkedIn")
+        )
     ]
 
 
-def swap_p1_p2(row: Dict[str, Any]) -> Dict[str, Any]:
+def swap_p1_p2(row: dict[str, Any]) -> dict[str, Any]:
     updated = dict(row)
     p1_values = {column: updated.get(column, "") for column in P1_COLUMNS}
     p2_values = {column: updated.get(column, "") for column in P2_COLUMNS}
@@ -125,11 +124,11 @@ def swap_p1_p2(row: Dict[str, Any]) -> Dict[str, Any]:
     return updated
 
 
-def row_has_p2(row: Dict[str, Any]) -> bool:
+def row_has_p2(row: dict[str, Any]) -> bool:
     return any(clean_text(row.get(column)) for column in P2_COLUMNS)
 
 
-def next_append_row(rows: List[Dict[str, Any]]) -> int:
+def next_append_row(rows: list[dict[str, Any]]) -> int:
     last = 1
     for row in rows:
         if any(clean_text(row.get(column)) for column in row.keys() if not column.startswith("_")):
@@ -137,7 +136,7 @@ def next_append_row(rows: List[Dict[str, Any]]) -> int:
     return last + 1
 
 
-def rows_to_payload(headers: Sequence[str], rows: Sequence[Dict[str, Any]]) -> List[List[Any]]:
+def rows_to_payload(headers: Sequence[str], rows: Sequence[dict[str, Any]]) -> list[list[Any]]:
     return [[row.get(header, "") for header in headers] for row in rows]
 
 
@@ -148,7 +147,9 @@ def clear_body_values(worksheet, headers: Sequence[str], start_row: int = 2) -> 
     worksheet.batch_clear([f"A{start_row}:{end_cell}"])
 
 
-def update_prefinal_values(worksheet, headers: Sequence[str], rows: List[Dict[str, Any]], dry_run: bool) -> None:
+def update_prefinal_values(
+    worksheet, headers: Sequence[str], rows: list[dict[str, Any]], dry_run: bool
+) -> None:
     if dry_run:
         return
     clear_body_values(worksheet, headers, start_row=2)
@@ -159,7 +160,9 @@ def update_prefinal_values(worksheet, headers: Sequence[str], rows: List[Dict[st
     worksheet.update(range_name=f"A2:{end_cell}", values=payload, value_input_option="USER_ENTERED")
 
 
-def append_copy_rows(worksheet, headers: Sequence[str], rows: List[Dict[str, Any]], dry_run: bool) -> int:
+def append_copy_rows(
+    worksheet, headers: Sequence[str], rows: list[dict[str, Any]], dry_run: bool
+) -> int:
     if not rows:
         return 0
     existing_values = worksheet.get_all_values()
@@ -172,11 +175,13 @@ def append_copy_rows(worksheet, headers: Sequence[str], rows: List[Dict[str, Any
         return start_row
     payload = rows_to_payload(copy_headers, rows)
     end_cell = gspread.utils.rowcol_to_a1(start_row + len(payload) - 1, len(copy_headers))
-    worksheet.update(range_name=f"A{start_row}:{end_cell}", values=payload, value_input_option="USER_ENTERED")
+    worksheet.update(
+        range_name=f"A{start_row}:{end_cell}", values=payload, value_input_option="USER_ENTERED"
+    )
     return start_row
 
 
-def run(args: argparse.Namespace) -> Dict[str, Any]:
+def run(args: argparse.Namespace) -> dict[str, Any]:
     client = get_client(str(Path(args.credentials)))
     blocked_names, blocked_tab, blocked_column, blocked_count = read_name_set(
         client,
@@ -195,10 +200,10 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     require_columns(headers, ["ID", "Company", *P1_COLUMNS, *P2_COLUMNS], args.prefinal_tab)
     prefinal_rows = meaningful_prefinal_rows(normalize_rows(prefinal_values))
 
-    kept_rows: List[Dict[str, Any]] = []
-    moved_rows: List[Dict[str, Any]] = []
-    swapped_rows: List[Dict[str, Any]] = []
-    untouched_rows: List[Dict[str, Any]] = []
+    kept_rows: list[dict[str, Any]] = []
+    moved_rows: list[dict[str, Any]] = []
+    swapped_rows: list[dict[str, Any]] = []
+    untouched_rows: list[dict[str, Any]] = []
 
     for row in prefinal_rows:
         p1_key = normalize_name(row.get("P1 Name"))
@@ -251,12 +256,16 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Swap Pre-final P1/P2 when P1 appears in an external name sheet.")
+    parser = argparse.ArgumentParser(
+        description="Swap Pre-final P1/P2 when P1 appears in an external name sheet."
+    )
     parser.add_argument("--leads-sheet-url", default=DEFAULT_LEADS_SHEET_URL)
     parser.add_argument("--name-sheet-url", default=DEFAULT_NAME_SHEET_URL)
     parser.add_argument("--prefinal-tab", default=DEFAULT_PREFINAL_TAB)
     parser.add_argument("--copy-tab", default=DEFAULT_COPY_TAB)
-    parser.add_argument("--name-column", default="", help="Override the comparison sheet name column.")
+    parser.add_argument(
+        "--name-column", default="", help="Override the comparison sheet name column."
+    )
     parser.add_argument("--credentials", default=str(DEFAULT_CREDS))
     parser.add_argument("--dry-run", action="store_true")
     return parser
