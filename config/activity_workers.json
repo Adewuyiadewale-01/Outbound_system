@@ -1,0 +1,25 @@
+{
+  "enabled": true,
+  "normal_handoff_gap_minutes": 10,
+  "failure_handoff_gap_minutes": 5,
+  "post_run_404_retry_cooldown_minutes": 5,
+  "single_worker_below_total_targets": 30,
+  "workers": [
+    {
+      "id": "account_1",
+      "cdp_host": "127.0.0.1",
+      "cdp_port": 18800,
+      "profile_dir": "/Users/tonyisbuiding/.openclaw/chrome-profile",
+      "launch_script": "scripts/launch-chrome.sh",
+      "enabled": true
+    },
+    {
+      "id": "account_2",
+      "cdp_host": "127.0.0.1",
+      "cdp_port": 18801,
+      "profile_dir": "/Users/tonyisbuiding/.openclaw/chrome-profile-2",
+      "launch_script": "scripts/launch-chrome-2.sh",
+      "enabled": true
+    }
+  ]
+}

@@ -17,14 +17,20 @@ ROOT = Path(__file__).resolve().parents[1]
 HELPERS = ROOT / "helpers"
 sys.path.insert(0, str(HELPERS))
 
-from linkedin_helper import LinkedInSession, _navigate_with_readiness, check_circuit_breakers, human_delay  # noqa: E402
-
+from linkedin_helper import (  # noqa: E402
+    LinkedInSession,
+    _navigate_with_readiness,
+    check_circuit_breakers,
+    human_delay,
+)
 
 DEFAULT_PROFILE = "https://www.linkedin.com/in/huub-van-delft-msc-msre-rt-79768a7b/"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Probe LinkedIn profile fallback withdrawal popup without confirming.")
+    parser = argparse.ArgumentParser(
+        description="Probe LinkedIn profile fallback withdrawal popup without confirming."
+    )
     parser.add_argument("--profile-url", default=DEFAULT_PROFILE)
     return parser.parse_args()
 
@@ -34,7 +40,11 @@ def main() -> int:
     session = LinkedInSession()
     connected = session.connect(skip_rate_check=True)
     if not connected.get("ok"):
-        print(json.dumps({"ok": False, "reason": "linkedin_connect_failed", "detail": connected}, indent=2))
+        print(
+            json.dumps(
+                {"ok": False, "reason": "linkedin_connect_failed", "detail": connected}, indent=2
+            )
+        )
         return 1
 
     try:
@@ -48,7 +58,17 @@ def main() -> int:
         human_delay(1, 2)
         danger = check_circuit_breakers(session.cdp)
         if danger:
-            print(json.dumps({"ok": False, "reason": "circuit_breaker", "detail": danger, "nav_result": nav_result}, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "reason": "circuit_breaker",
+                        "detail": danger,
+                        "nav_result": nav_result,
+                    },
+                    indent=2,
+                )
+            )
             return 1
 
         result = session.cdp.evaluate(
@@ -162,7 +182,14 @@ def main() -> int:
             await_promise=True,
             timeout=20,
         )
-        print(json.dumps({"ok": True, "nav_result": nav_result, "probe": result}, indent=2, ensure_ascii=False, sort_keys=True))
+        print(
+            json.dumps(
+                {"ok": True, "nav_result": nav_result, "probe": result},
+                indent=2,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
         return 0
     finally:
         session.disconnect()

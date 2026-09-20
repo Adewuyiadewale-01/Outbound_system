@@ -25,14 +25,19 @@ import os
 import random
 import sys
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from sheets_helper import (
-    append_row, get_client, open_sheet, get_worksheet, read_tab, normalize_rows, update_row,
-)
 from runtime_environment import load_repo_env
+from sheets_helper import (
+    append_row,
+    get_client,
+    get_worksheet,
+    open_sheet,
+    read_tab,
+    update_row,
+)
 
 load_repo_env()
 
@@ -40,7 +45,9 @@ load_repo_env()
 # Constants
 # ---------------------------------------------------------------------------
 
-_DEFAULT_CREDS_PATH = os.path.join(os.path.dirname(__file__), "..", "credentials", "google-sheets.json")
+_DEFAULT_CREDS_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "credentials", "google-sheets.json"
+)
 _OPENCLAW_CREDS_PATH = os.path.expanduser("~/.openclaw/credentials/google-sheets.json")
 CREDS_PATH = os.environ.get(
     "GOOGLE_SHEETS_CREDENTIALS",
@@ -136,15 +143,16 @@ def _normalize_log_action(action: str) -> str:
 # Prospect queue
 # ---------------------------------------------------------------------------
 
+
 def load_prospect_queue(
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
     limit: int = 30,
     shuffle: bool = True,
-    status_filter: Optional[str] = None,
-    start_row: Optional[int] = None,
+    status_filter: str | None = None,
+    start_row: int | None = None,
     prospects_tab: str = PROSPECTS_TAB,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Load prospects that need connection requests from OBF Prospects tab.
 
     Filters for rows where Outreach Status is empty or matches status_filter.
@@ -213,11 +221,13 @@ def load_prospect_queue(
 
     if start_row_value:
         priority_rows = [
-            prospect for prospect in queue
+            prospect
+            for prospect in queue
             if int(prospect.get("_row_number", 0) or 0) >= start_row_value
         ]
         overflow_rows = [
-            prospect for prospect in queue
+            prospect
+            for prospect in queue
             if int(prospect.get("_row_number", 0) or 0) < start_row_value
         ]
         if shuffle:
@@ -241,11 +251,14 @@ def load_prospects_by_status(
     status: str,
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Load all prospects with a specific outreach status."""
     result = load_prospect_queue(
-        credentials_path, sheet_url,
-        limit=0, shuffle=False, status_filter=status,
+        credentials_path,
+        sheet_url,
+        limit=0,
+        shuffle=False,
+        status_filter=status,
     )
     return result["queue"]
 
@@ -254,15 +267,16 @@ def load_prospects_by_status(
 # Status updates
 # ---------------------------------------------------------------------------
 
+
 def update_prospect_status(
     prospect_row: int,
     status: str,
-    outcome: Optional[str] = None,
-    notes: Optional[str] = None,
-    date_queued: Optional[str] = None,
+    outcome: str | None = None,
+    notes: str | None = None,
+    date_queued: str | None = None,
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Update a prospect's Outreach Status (and optionally Outcome, Notes, Date Queued)."""
     client = get_client(credentials_path)
     spreadsheet = open_sheet(client, sheet_url)
@@ -290,15 +304,15 @@ def update_prospect_status(
     }
 
 
-def _activity_column_name(prospect: Dict[str, Any]) -> str:
+def _activity_column_name(prospect: dict[str, Any]) -> str:
     engaged_person = str(prospect.get("engaged_person", "Person 1")).strip() or "Person 1"
     return "P2 Activity" if engaged_person == "Person 2" else "P1 Activity"
 
 
 def build_prospect_activity_fields(
-    prospect: Dict[str, Any],
+    prospect: dict[str, Any],
     activity_value: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build the exact Prospects activity field payload for a lead."""
     return {
         _activity_column_name(prospect): _normalize_activity_value(activity_value),
@@ -307,30 +321,30 @@ def build_prospect_activity_fields(
 
 def apply_prospect_fields(
     prospect_row: int,
-    fields: Dict[str, Any],
+    fields: dict[str, Any],
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Apply an exact field payload to a Prospects row."""
     return update_row(credentials_path, sheet_url, PROSPECTS_TAB, prospect_row, fields)
 
 
 def apply_outreach_log_fields(
     log_row: int,
-    fields: Dict[str, Any],
+    fields: dict[str, Any],
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Apply an exact field payload to an Outreach Log row."""
     return update_row(credentials_path, sheet_url, OUTREACH_LOG_TAB, log_row, fields)
 
 
 def write_prospect_activity(
-    prospect: Dict[str, Any],
+    prospect: dict[str, Any],
     activity_value: str,
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Write normalized dropdown-compatible activity value to the engaged column."""
     row_number = int(prospect["_row_number"])
     fields = build_prospect_activity_fields(prospect, activity_value)
@@ -350,11 +364,11 @@ def write_prospect_activity(
 
 
 def build_connection_sent_fields(
-    prospect: Dict[str, Any],
-    notes: Optional[str] = None,
+    prospect: dict[str, Any],
+    notes: str | None = None,
     touch_method: str = "LinkedIn",
-    today_value: Optional[str] = None,
-) -> Dict[str, Any]:
+    today_value: str | None = None,
+) -> dict[str, Any]:
     """Build the exact Prospects post-send payload from the local prospect snapshot."""
     engaged_person = str(prospect.get("engaged_person", "Person 1")).strip() or "Person 1"
     today = today_value or date.today().strftime("%Y-%m-%d")
@@ -375,12 +389,12 @@ def build_connection_sent_fields(
 
 
 def record_connection_sent(
-    prospect: Dict[str, Any],
-    notes: Optional[str] = None,
+    prospect: dict[str, Any],
+    notes: str | None = None,
     touch_method: str = "LinkedIn",
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Write the post-send reporting fields for a successful connection request.
 
     This preserves upstream prospect identity fields and fills the operational
@@ -410,7 +424,7 @@ def mark_connection_sent(
     prospect_row: int,
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Mark a prospect as having received a connection request."""
     today = date.today().strftime("%Y-%m-%d")
     return update_prospect_status(
@@ -427,7 +441,7 @@ def mark_connected(
     prospect_row: int,
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Mark a prospect as connected without changing the response outcome."""
     return update_prospect_status(
         prospect_row,
@@ -441,6 +455,7 @@ def mark_connected(
 # Outreach event logging
 # ---------------------------------------------------------------------------
 
+
 def log_outreach_event(
     prospect_id: str,
     company: str,
@@ -452,7 +467,7 @@ def log_outreach_event(
     notes: str = "",
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Insert a row near the top of the Outreach Log tab."""
     row_data = build_outreach_log_row(
         prospect_id=prospect_id,
@@ -487,8 +502,8 @@ def build_outreach_log_row(
     touch_method: str = "",
     outcome: str = "Pending",
     notes: str = "",
-    action_date: Optional[str] = None,
-) -> Dict[str, Any]:
+    action_date: str | None = None,
+) -> dict[str, Any]:
     """Build the exact Outreach Log row payload."""
     today = action_date or date.today().strftime("%Y-%m-%d")
     return {
@@ -505,10 +520,10 @@ def build_outreach_log_row(
 
 
 def insert_outreach_log_row(
-    row_data: Dict[str, Any],
+    row_data: dict[str, Any],
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Insert an exact Outreach Log row payload below the header."""
     client = get_client(credentials_path)
     spreadsheet = open_sheet(client, sheet_url)
@@ -520,14 +535,14 @@ def insert_outreach_log_row(
 
 
 def log_outreach_event_from_prospect(
-    prospect: Dict[str, Any],
+    prospect: dict[str, Any],
     action: str,
     touch_method: str = "LinkedIn",
     outcome: str = "Pending",
     notes: str = "",
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Append an Outreach Log row by copying overlapping fields from a prospect payload."""
     return log_outreach_event(
         prospect_id=str(prospect.get("id", "")).strip(),
@@ -544,12 +559,12 @@ def log_outreach_event_from_prospect(
 
 
 def log_activity_review(
-    prospect: Dict[str, Any],
+    prospect: dict[str, Any],
     activity_summary: str,
     timing: str,
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Prepare activity-review metadata without writing an invalid Outreach Log row."""
     notes = f"activity_timing={timing}; {activity_summary}"
     return {
@@ -570,7 +585,7 @@ def _normalize_profile_url(url: Any) -> str:
 def _raw_prospects_by_id(
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> Dict[str, Dict[str, Any]]:
+) -> dict[str, dict[str, Any]]:
     data = read_tab(credentials_path, sheet_url, PROSPECTS_TAB)
     return {
         str(row.get("ID", "")).strip(): row
@@ -580,14 +595,18 @@ def _raw_prospects_by_id(
 
 
 def _prospect_from_log_row(
-    log_row: Dict[str, Any],
-    raw_prospect: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    log_row: dict[str, Any],
+    raw_prospect: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Build the acceptance-monitoring prospect payload from Outreach Log + optional Prospects identity."""
     raw_prospect = raw_prospect or {}
     prospect_id = str(log_row.get("Prospect ID", "") or raw_prospect.get("ID", "")).strip()
     engaged_person = (
-        str(log_row.get("Person Engaged", "") or raw_prospect.get("Engaged Person", "") or "Person 1").strip()
+        str(
+            log_row.get("Person Engaged", "")
+            or raw_prospect.get("Engaged Person", "")
+            or "Person 1"
+        ).strip()
         or "Person 1"
     )
     prefix = "P2" if engaged_person == "Person 2" else "P1"
@@ -603,15 +622,21 @@ def _prospect_from_log_row(
         "emp_count": str(raw_prospect.get("Emp Count", "")).strip(),
         "source_tab": str(raw_prospect.get("Source Tab", "")).strip(),
         "engaged_person": engaged_person,
-        "contact_name": str(log_row.get("Contact Name", "") or raw_prospect.get(f"{prefix} Name", "")).strip(),
+        "contact_name": str(
+            log_row.get("Contact Name", "") or raw_prospect.get(f"{prefix} Name", "")
+        ).strip(),
         "contact_title": str(raw_prospect.get(f"{prefix} Title", "")).strip(),
         "contact_linkedin": contact_linkedin,
         "contact_email": str(raw_prospect.get(f"{prefix} Email", "")).strip(),
         "contact_activity": str(raw_prospect.get(f"{prefix} Activity", "")).strip(),
-        "touch_method": str(log_row.get("Touch Method", "") or raw_prospect.get("Touch Method", "")).strip(),
+        "touch_method": str(
+            log_row.get("Touch Method", "") or raw_prospect.get("Touch Method", "")
+        ).strip(),
         "outreach_status": str(log_row.get("Current Progress", "")).strip(),
         "outcome": str(log_row.get("Outcome", "")).strip(),
-        "date_queued": str(log_row.get("Last Action Date", "") or raw_prospect.get("Date Queued", "")).strip(),
+        "date_queued": str(
+            log_row.get("Last Action Date", "") or raw_prospect.get("Date Queued", "")
+        ).strip(),
         "notes": str(log_row.get("Notes", "")).strip(),
         "_outreach_log_row_number": log_row.get("_row_number"),
         "_row_number": log_row.get("_row_number"),
@@ -623,11 +648,11 @@ def _prospect_from_log_row(
 def load_pending_outreach_log_connections(
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Load pending connection-request records from Outreach Log for acceptance checks."""
     log_data = read_tab(credentials_path, sheet_url, OUTREACH_LOG_TAB)
     prospects_by_id = _raw_prospects_by_id(credentials_path, sheet_url)
-    pending: List[Dict[str, Any]] = []
+    pending: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     connected_ids = {
         str(row.get("Prospect ID", "")).strip()
@@ -658,10 +683,10 @@ def mark_outreach_log_connected(
     notes: str = "",
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Mark the existing Outreach Log connection-request row as connected."""
     today = date.today().strftime("%Y-%m-%d")
-    fields: Dict[str, Any] = {
+    fields: dict[str, Any] = {
         "Current Progress": STATUS_CONNECTED,
         "Last Action Date": today,
     }
@@ -670,7 +695,7 @@ def mark_outreach_log_connected(
     return apply_outreach_log_fields(log_row, fields, credentials_path, sheet_url)
 
 
-def _pipeline_row_from_acceptance(prospect: Dict[str, Any], notes: str = "") -> Dict[str, Any]:
+def _pipeline_row_from_acceptance(prospect: dict[str, Any], notes: str = "") -> dict[str, Any]:
     raw_prospect = prospect.get("_raw_prospect") or {}
     raw_log = prospect.get("_raw_outreach_log") or {}
     today = date.today().strftime("%Y-%m-%d")
@@ -681,15 +706,19 @@ def _pipeline_row_from_acceptance(prospect: Dict[str, Any], notes: str = "") -> 
         "Prospect ID": prospect.get("id", ""),
         "Company": prospect.get("company", ""),
         "Website": prospect.get("website", "") or raw_prospect.get("Website", ""),
-        "Company LinkedIn": prospect.get("company_linkedin", "") or raw_prospect.get("Company LinkedIn", ""),
+        "Company LinkedIn": prospect.get("company_linkedin", "")
+        or raw_prospect.get("Company LinkedIn", ""),
         "Emp Count": prospect.get("emp_count", "") or raw_prospect.get("Emp Count", ""),
         "Source Tab": prospect.get("source_tab", "") or raw_prospect.get("Source Tab", ""),
         "Person Engaged": engaged_person,
         "Engaged Person": engaged_person,
         "Contact Name": prospect.get("contact_name", ""),
-        "Contact Title": prospect.get("contact_title", "") or raw_prospect.get(f"{prefix} Title", ""),
-        "Contact LinkedIn": prospect.get("contact_linkedin", "") or raw_prospect.get(f"{prefix} LinkedIn", ""),
-        "Contact Email": prospect.get("contact_email", "") or raw_prospect.get(f"{prefix} Email", ""),
+        "Contact Title": prospect.get("contact_title", "")
+        or raw_prospect.get(f"{prefix} Title", ""),
+        "Contact LinkedIn": prospect.get("contact_linkedin", "")
+        or raw_prospect.get(f"{prefix} LinkedIn", ""),
+        "Contact Email": prospect.get("contact_email", "")
+        or raw_prospect.get(f"{prefix} Email", ""),
         "Current Progress": STATUS_CONNECTED,
         "Outreach Status": STATUS_CONNECTED,
         "Touch Method": prospect.get("touch_method", "") or "LinkedIn",
@@ -702,11 +731,11 @@ def _pipeline_row_from_acceptance(prospect: Dict[str, Any], notes: str = "") -> 
 
 
 def append_pipeline_row_for_acceptance(
-    prospect: Dict[str, Any],
+    prospect: dict[str, Any],
     notes: str = "",
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Append an accepted/connected lead to Pipeline, skipping duplicate Prospect IDs."""
     row_data = _pipeline_row_from_acceptance(prospect, notes=notes)
     existing = read_tab(credentials_path, sheet_url, PIPELINE_TAB)
@@ -714,7 +743,12 @@ def append_pipeline_row_for_acceptance(
     if prospect_id:
         for row in existing["rows"]:
             if str(row.get("Prospect ID") or row.get("ID") or "").strip() == prospect_id:
-                return {"ok": True, "skipped": True, "reason": "already_in_pipeline", "prospect_id": prospect_id}
+                return {
+                    "ok": True,
+                    "skipped": True,
+                    "reason": "already_in_pipeline",
+                    "prospect_id": prospect_id,
+                }
     appended = append_row(credentials_path, sheet_url, PIPELINE_TAB, row_data)
     return {"ok": True, "skipped": False, "prospect_id": prospect_id, "appended": appended}
 
@@ -722,7 +756,7 @@ def append_pipeline_row_for_acceptance(
 def count_pipeline_connected_leads(
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Count unique accepted/connected leads from the Pipeline tab.
 
     Pipeline is the source of truth for accepted LinkedIn connections. Any
@@ -756,7 +790,7 @@ def count_pipeline_connected_leads(
 def count_outreach_log_connection_requests(
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Count unique LinkedIn connection requests from Outreach Log.
 
     Outreach Log is the source of truth for sent connection requests. Accepted
@@ -806,10 +840,10 @@ _CATEGORY_ALIASES = {
 
 
 def load_templates(
-    category: Optional[str] = None,
+    category: str | None = None,
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> List[Dict[str, str]]:
+) -> list[dict[str, str]]:
     """Load message templates from the Templates tab.
 
     category can be a full name ("Connection Request", "First Message", "Follow-Up")
@@ -834,7 +868,7 @@ def load_templates(
             continue
         if resolved_category:
             category_match = t["category"].lower() == resolved_category.lower()
-            prefix_match = (category and t["template_id"].upper().startswith(category.upper() + "-"))
+            prefix_match = category and t["template_id"].upper().startswith(category.upper() + "-")
             if not category_match and not prefix_match:
                 continue
         templates.append(t)
@@ -842,10 +876,10 @@ def load_templates(
 
 
 def pick_connection_template(
-    prospect: Dict[str, Any],
-    templates: Optional[List[Dict]] = None,
+    prospect: dict[str, Any],
+    templates: list[dict] | None = None,
     credentials_path: str = CREDS_PATH,
-) -> Optional[Dict[str, str]]:
+) -> dict[str, str] | None:
     """Pick the best connection request template for a prospect.
 
     Returns the template dict or None if no note should be sent.
@@ -861,7 +895,6 @@ def pick_connection_template(
     cr_templates = {t["template_id"]: t for t in templates}
 
     activity = prospect.get("contact_activity", "").lower()
-    emp_count = prospect.get("emp_count", "")
 
     # Selection logic per Usage Rules
     if "active" in activity or "very active" in activity:
@@ -876,8 +909,8 @@ def pick_connection_template(
 
 
 def render_template(
-    template: Dict[str, str],
-    variables: Dict[str, str],
+    template: dict[str, str],
+    variables: dict[str, str],
 ) -> str:
     """Render a template body by substituting {placeholder} values."""
     body = template["body"]
@@ -886,7 +919,7 @@ def render_template(
     return body
 
 
-def build_template_variables(prospect: Dict[str, Any]) -> Dict[str, str]:
+def build_template_variables(prospect: dict[str, Any]) -> dict[str, str]:
     """Build the standard template variable dict from a prospect."""
     first_name = prospect.get("contact_name", "").split()[0] if prospect.get("contact_name") else ""
     return {
@@ -901,10 +934,11 @@ def build_template_variables(prospect: Dict[str, Any]) -> Dict[str, str]:
 # Acceptance tracking
 # ---------------------------------------------------------------------------
 
+
 def get_pending_connections(
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Get all prospects with 'Connection Sent' status (awaiting acceptance)."""
     return load_prospects_by_status(STATUS_CONN_SENT, credentials_path, sheet_url)
 
@@ -912,7 +946,7 @@ def get_pending_connections(
 def get_connected_needing_first_message(
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Get prospects who accepted but haven't been sent a first message."""
     return load_prospects_by_status(STATUS_CONNECTED, credentials_path, sheet_url)
 
@@ -922,7 +956,7 @@ def get_stale_pending_connections(
     max_days: int = 11,
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Get prospects with 'Connection Sent' status where Date Queued is 9-11 days ago.
 
     These are candidates for withdrawal — the connection was not accepted
@@ -970,7 +1004,7 @@ def mark_withdrawn(
     prospect_row: int,
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Mark a prospect as withdrawn (connection request pulled back)."""
     today = date.today().strftime("%Y-%m-%d")
     return update_prospect_status(
@@ -987,6 +1021,7 @@ def mark_withdrawn(
 # Daily metrics
 # ---------------------------------------------------------------------------
 
+
 def log_daily_metrics(
     conn_req_sent: int = 0,
     conn_acc: int = 0,
@@ -996,7 +1031,7 @@ def log_daily_metrics(
     engagement_opps: int = 0,
     credentials_path: str = CREDS_PATH,
     sheet_url: str = OBF_SHEET_URL,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Append today's metrics to the Daily Metrics tab."""
     client = get_client(credentials_path)
     spreadsheet = open_sheet(client, sheet_url)
@@ -1027,6 +1062,7 @@ def log_daily_metrics(
 # ---------------------------------------------------------------------------
 # CLI interface
 # ---------------------------------------------------------------------------
+
 
 def main():
     parser = argparse.ArgumentParser(description="Outreach helper — OBF sheet integration")
@@ -1108,7 +1144,8 @@ def main():
 
     elif args.command == "update-status":
         result = update_prospect_status(
-            args.row, args.status,
+            args.row,
+            args.status,
             outcome=args.outcome,
             notes=args.notes,
         )
@@ -1124,10 +1161,14 @@ def main():
 
     elif args.command == "log-event":
         result = log_outreach_event(
-            args.prospect_id, args.company,
-            args.person, args.contact,
-            args.action, args.method,
-            args.outcome, args.notes,
+            args.prospect_id,
+            args.company,
+            args.person,
+            args.contact,
+            args.action,
+            args.method,
+            args.outcome,
+            args.notes,
         )
         print(json.dumps(result, indent=2))
 
@@ -1155,15 +1196,29 @@ def main():
             sys.exit(1)
         variables = json.loads(args.vars)
         rendered = render_template(tmpl, variables)
-        print(json.dumps({"template_id": args.template_id, "rendered": rendered}, indent=2, ensure_ascii=False))
+        print(
+            json.dumps(
+                {"template_id": args.template_id, "rendered": rendered},
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
 
     elif args.command == "pending-connections":
         prospects = get_pending_connections()
-        print(json.dumps({"count": len(prospects), "prospects": prospects}, indent=2, ensure_ascii=False))
+        print(
+            json.dumps(
+                {"count": len(prospects), "prospects": prospects}, indent=2, ensure_ascii=False
+            )
+        )
 
     elif args.command == "needs-first-message":
         prospects = get_connected_needing_first_message()
-        print(json.dumps({"count": len(prospects), "prospects": prospects}, indent=2, ensure_ascii=False))
+        print(
+            json.dumps(
+                {"count": len(prospects), "prospects": prospects}, indent=2, ensure_ascii=False
+            )
+        )
 
     elif args.command == "stale-pending":
         stale = get_stale_pending_connections(

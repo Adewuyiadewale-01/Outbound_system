@@ -3,7 +3,6 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
@@ -32,10 +31,55 @@ class LeadReviewDashboardCacheTests(unittest.TestCase):
                 "Archive Entry ID",
             ],
             ["7/29/2026", "", "", "", "", "", "", "", "TRUE"],
-            ["", "Automation", "lead-1", "Alpha", "https://alpha.test", "5", "TRUE", "Case study worthy", "", "", "", "Base", "Fresh", ""],
-            ["", "Design", "lead-2", "Beta", "https://beta.test", "8", "FALSE", "Potential leads", "", "", "", "Base", "Archive Match", "archive-1"],
+            [
+                "",
+                "Automation",
+                "lead-1",
+                "Alpha",
+                "https://alpha.test",
+                "5",
+                "TRUE",
+                "Case study worthy",
+                "",
+                "",
+                "",
+                "Base",
+                "Fresh",
+                "",
+            ],
+            [
+                "",
+                "Design",
+                "lead-2",
+                "Beta",
+                "https://beta.test",
+                "8",
+                "FALSE",
+                "Potential leads",
+                "",
+                "",
+                "",
+                "Base",
+                "Archive Match",
+                "archive-1",
+            ],
             ["7/28/2026", "", "", "", "", "", "", "", "FALSE"],
-            ["", "Design", "lead-3", "Gamma", "https://gamma.test", "2", "FALSE", "Case study worthy", "", "", "", "Base", "Possible Match", ""],
+            [
+                "",
+                "Design",
+                "lead-3",
+                "Gamma",
+                "https://gamma.test",
+                "2",
+                "FALSE",
+                "Case study worthy",
+                "",
+                "",
+                "",
+                "Base",
+                "Possible Match",
+                "",
+            ],
         ]
 
         payload = build_dashboard_cache(values, now=datetime(2026, 7, 29, 16, 0))

@@ -1,8 +1,10 @@
 import sys
 from pathlib import Path
+
 sys.path.append(str(Path.cwd()))
 
 from scripts.linkedin_followup_runner import LinkedInSession
+
 
 def main():
     if len(sys.argv) < 2:
@@ -36,6 +38,7 @@ def main():
     result = session.cdp.evaluate(script, await_promise=True, timeout=15)
     print("Result:", result)
     session.disconnect()
+
 
 if __name__ == "__main__":
     main()

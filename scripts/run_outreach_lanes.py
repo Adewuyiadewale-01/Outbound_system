@@ -10,15 +10,14 @@ import argparse
 import json
 import os
 import signal
-import socket
 import subprocess
 import sys
 import time
 import urllib.request
+from collections.abc import Sequence
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
-
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE_DIR = ROOT / "state"
@@ -26,7 +25,7 @@ WORKERS_PATH = STATE_DIR / "outreach_workers.json"
 OUTREACH_RUNNER = ROOT / "helpers" / "linkedin_outreach_session.py"
 
 
-def read_json(path: Path) -> Dict[str, Any]:
+def read_json(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
         return value if isinstance(value, dict) else {}
@@ -38,7 +37,7 @@ def prepared_path(day: str) -> Path:
     return STATE_DIR / "outreach_sequences" / f"{day}-prepared.json"
 
 
-def active_workers(config: Dict[str, Any]) -> List[Dict[str, Any]]:
+def active_workers(config: dict[str, Any]) -> list[dict[str, Any]]:
     if not config.get("enabled"):
         raise ValueError("Sequential outreach lanes are disabled in state/outreach_workers.json.")
     workers = [dict(item) for item in config.get("workers", []) if item.get("enabled", True)]
@@ -66,13 +65,15 @@ def active_workers(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     return workers
 
 
-def lane_counts(prepared: Dict[str, Any], workers: Sequence[Dict[str, Any]]) -> Dict[str, int]:
+def lane_counts(prepared: dict[str, Any], workers: Sequence[dict[str, Any]]) -> dict[str, int]:
     queue = prepared.get("queue") or []
     if not prepared.get("ready") or not queue:
         raise ValueError("No ready shared prepared queue exists for this date.")
     plan = prepared.get("worker_plan") or {}
     if not plan.get("enabled"):
-        raise ValueError("Prepared queue has no account assignment. Run preparation again before execution.")
+        raise ValueError(
+            "Prepared queue has no account assignment. Run preparation again before execution."
+        )
     allowed = {worker["id"] for worker in workers}
     counts = {worker["id"]: 0 for worker in workers}
     for prospect in queue:
@@ -94,13 +95,15 @@ def cdp_healthy(host: str, port: int) -> bool:
         return False
 
 
-def managed_chrome_pids(worker: Dict[str, Any]) -> List[int]:
+def managed_chrome_pids(worker: dict[str, Any]) -> list[int]:
     needle = f"--user-data-dir={worker['profile_dir']}"
     try:
-        rows = subprocess.check_output(["ps", "-axo", "pid=,command="], text=True, timeout=5).splitlines()
+        rows = subprocess.check_output(
+            ["ps", "-axo", "pid=,command="], text=True, timeout=5
+        ).splitlines()
     except Exception:
         return []
-    pids: List[int] = []
+    pids: list[int] = []
     for row in rows:
         pid_text, _, command = row.strip().partition(" ")
         if "Google Chrome.app/Contents/MacOS/Google Chrome" not in command or needle not in command:
@@ -112,7 +115,7 @@ def managed_chrome_pids(worker: Dict[str, Any]) -> List[int]:
     return pids
 
 
-def ensure_worker_cdp(worker: Dict[str, Any]) -> Dict[str, Any]:
+def ensure_worker_cdp(worker: dict[str, Any]) -> dict[str, Any]:
     if cdp_healthy(worker["cdp_host"], worker["cdp_port"]):
         return {"ok": True, "action": "cdp_already_running"}
     launch = ROOT / str(worker.get("launch_script") or "")
@@ -131,8 +134,11 @@ def ensure_worker_cdp(worker: Dict[str, Any]) -> Dict[str, Any]:
     if managed_chrome_pids(worker):
         raise RuntimeError(f"Managed Chrome for {worker['id']} did not stop cleanly.")
     subprocess.Popen(
-        ["bash", str(launch)], cwd=str(ROOT), stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL, start_new_session=True,
+        ["bash", str(launch)],
+        cwd=str(ROOT),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
     )
     for _ in range(20):
         time.sleep(2)
@@ -141,7 +147,7 @@ def ensure_worker_cdp(worker: Dict[str, Any]) -> Dict[str, Any]:
     raise RuntimeError(f"CDP for {worker['id']} did not become healthy.")
 
 
-def parse_result(text: str) -> Dict[str, Any]:
+def parse_result(text: str) -> dict[str, Any]:
     decoder = json.JSONDecoder()
     for index, char in enumerate(text):
         if char != "{":
@@ -155,43 +161,91 @@ def parse_result(text: str) -> Dict[str, Any]:
     return {}
 
 
-def run_lane(day: str, prepared: Path, worker: Dict[str, Any], args: argparse.Namespace) -> Dict[str, Any]:
+def run_lane(
+    day: str, prepared: Path, worker: dict[str, Any], args: argparse.Namespace
+) -> dict[str, Any]:
     command = [
-        sys.executable, str(OUTREACH_RUNNER), "run", "--date", day,
-        "--require-prepared-session", "--prepared-path", str(prepared),
-        "--worker-id", worker["id"], "--no-notes", "--max-sends", str(args.max_sends),
+        sys.executable,
+        str(OUTREACH_RUNNER),
+        "run",
+        "--date",
+        day,
+        "--require-prepared-session",
+        "--prepared-path",
+        str(prepared),
+        "--worker-id",
+        worker["id"],
+        "--no-notes",
+        "--max-sends",
+        str(args.max_sends),
     ]
     if args.dry_run:
         command.append("--dry-run")
     if args.verify_connection_modal:
         command.append("--verify-connection-modal")
-    env = {**os.environ, "LINKEDIN_CDP_HOST": worker["cdp_host"], "LINKEDIN_CDP_PORT": str(worker["cdp_port"])}
+    env = {
+        **os.environ,
+        "LINKEDIN_CDP_HOST": worker["cdp_host"],
+        "LINKEDIN_CDP_PORT": str(worker["cdp_port"]),
+    }
     started_at = datetime.now().isoformat(timespec="seconds")
-    process = subprocess.Popen(command, cwd=str(ROOT), text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    process = subprocess.Popen(
+        command, cwd=str(ROOT), text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env
+    )
     try:
         stdout, stderr = process.communicate()
     except KeyboardInterrupt:
         process.send_signal(signal.SIGINT)
         stdout, stderr = process.communicate(timeout=30)
-        return {"worker_id": worker["id"], "interrupted": True, "returncode": process.returncode, "stdout_tail": stdout[-4000:], "stderr_tail": stderr[-4000:]}
+        return {
+            "worker_id": worker["id"],
+            "interrupted": True,
+            "returncode": process.returncode,
+            "stdout_tail": stdout[-4000:],
+            "stderr_tail": stderr[-4000:],
+        }
     summary = parse_result(stdout) or parse_result(stderr)
     return {
-        "worker_id": worker["id"], "primary_lane": worker["primary_lane"], "cdp_port": worker["cdp_port"],
-        "started_at": started_at, "completed_at": datetime.now().isoformat(timespec="seconds"),
-        "command": command, "ok": process.returncode == 0 and summary.get("ok") is True, "returncode": process.returncode,
-        **({"termination_signal": signal.Signals(-process.returncode).name,
-            "interrupted": True, "termination_source": "unknown_external_signal",
-            "worker_pid": process.pid} if process.returncode < 0 else {}),
-        "summary": summary, "stdout_tail": stdout[-4000:], "stderr_tail": stderr[-4000:],
+        "worker_id": worker["id"],
+        "primary_lane": worker["primary_lane"],
+        "cdp_port": worker["cdp_port"],
+        "started_at": started_at,
+        "completed_at": datetime.now().isoformat(timespec="seconds"),
+        "command": command,
+        "ok": process.returncode == 0 and summary.get("ok") is True,
+        "returncode": process.returncode,
+        **(
+            {
+                "termination_signal": signal.Signals(-process.returncode).name,
+                "interrupted": True,
+                "termination_source": "unknown_external_signal",
+                "worker_pid": process.pid,
+            }
+            if process.returncode < 0
+            else {}
+        ),
+        "summary": summary,
+        "stdout_tail": stdout[-4000:],
+        "stderr_tail": stderr[-4000:],
     }
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Run frozen outreach lanes sequentially through their mapped CDP accounts.")
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Run frozen outreach lanes sequentially through their mapped CDP accounts."
+    )
     parser.add_argument("--date", default=date.today().isoformat())
     parser.add_argument("--plan-only", action="store_true")
-    parser.add_argument("--dry-run", action="store_true", help="Validate split and runner selection without touching Chrome or sending.")
-    parser.add_argument("--verify-connection-modal", action="store_true", help="Open and dismiss invite modals without sending or reporting writes.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate split and runner selection without touching Chrome or sending.",
+    )
+    parser.add_argument(
+        "--verify-connection-modal",
+        action="store_true",
+        help="Open and dismiss invite modals without sending or reporting writes.",
+    )
     parser.add_argument("--max-sends", type=int, default=30)
     parser.add_argument("--normal-gap-minutes", type=int, default=None)
     args = parser.parse_args(argv)
@@ -203,13 +257,27 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     prepared = read_json(state_path)
     counts = lane_counts(prepared, workers)
     scheduled = [worker for worker in workers if counts[worker["id"]] > 0]
-    gap = int(read_json(WORKERS_PATH).get("normal_handoff_gap_minutes", 10) if args.normal_gap_minutes is None else args.normal_gap_minutes)
+    gap = int(
+        read_json(WORKERS_PATH).get("normal_handoff_gap_minutes", 10)
+        if args.normal_gap_minutes is None
+        else args.normal_gap_minutes
+    )
     if not 0 <= gap <= 30:
         raise SystemExit("--normal-gap-minutes must be between 0 and 30.")
     plan = {
-        "date": day, "prepared_path": str(state_path), "mode": "sequential_by_primary_lane",
+        "date": day,
+        "prepared_path": str(state_path),
+        "mode": "sequential_by_primary_lane",
         "normal_handoff_gap_minutes": gap,
-        "workers": [{"id": worker["id"], "primary_lane": worker["primary_lane"], "cdp_port": worker["cdp_port"], "prospects": counts[worker["id"]]} for worker in scheduled],
+        "workers": [
+            {
+                "id": worker["id"],
+                "primary_lane": worker["primary_lane"],
+                "cdp_port": worker["cdp_port"],
+                "prospects": counts[worker["id"]],
+            }
+            for worker in scheduled
+        ],
     }
     if args.plan_only:
         print(json.dumps({"ok": True, "plan_only": True, **plan}, indent=2))
@@ -219,19 +287,44 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if index:
             time.sleep(gap * 60)
         try:
-            recovery = {"ok": True, "action": "dry_run_no_cdp"} if args.dry_run else ensure_worker_cdp(worker)
+            recovery = (
+                {"ok": True, "action": "dry_run_no_cdp"}
+                if args.dry_run
+                else ensure_worker_cdp(worker)
+            )
         except Exception as exc:
-            print(json.dumps({"ok": False, "status": "paused_for_browser_recovery", **plan, "results": results, "worker_id": worker["id"], "error": str(exc)}, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "status": "paused_for_browser_recovery",
+                        **plan,
+                        "results": results,
+                        "worker_id": worker["id"],
+                        "error": str(exc),
+                    },
+                    indent=2,
+                )
+            )
             return 1
         lane_result = run_lane(day, state_path, worker, args)
         lane_result["cdp_recovery"] = recovery
         results.append(lane_result)
         summary = lane_result.get("summary") or {}
         if lane_result.get("interrupted"):
-            print(json.dumps({"ok": False, "status": "interrupted", **plan, "results": results}, indent=2))
+            print(
+                json.dumps(
+                    {"ok": False, "status": "interrupted", **plan, "results": results}, indent=2
+                )
+            )
             return 130
         if not lane_result.get("ok") or not summary.get("ok", True):
-            print(json.dumps({"ok": False, "status": "paused_for_lane_failure", **plan, "results": results}, indent=2))
+            print(
+                json.dumps(
+                    {"ok": False, "status": "paused_for_lane_failure", **plan, "results": results},
+                    indent=2,
+                )
+            )
             return 1
     print(json.dumps({"ok": True, "status": "completed", **plan, "results": results}, indent=2))
     return 0

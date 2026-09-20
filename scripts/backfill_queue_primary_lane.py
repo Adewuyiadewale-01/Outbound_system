@@ -4,8 +4,9 @@
 import argparse
 import os
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 import gspread
 
@@ -17,8 +18,8 @@ for path in (HELPERS, SCRIPTS):
         sys.path.insert(0, str(path))
 
 from prefinal_queue import load_batch, save_batch  # noqa: E402
-from sheets_helper import get_client, normalize_rows, open_sheet  # noqa: E402
 from runtime_environment import load_repo_env  # noqa: E402
+from sheets_helper import get_client, normalize_rows, open_sheet  # noqa: E402
 
 load_repo_env()
 
@@ -28,7 +29,7 @@ OPENCLAW_CREDS = Path.home() / ".openclaw" / "credentials" / "google-sheets.json
 DEFAULT_CREDS = REPO_CREDS if REPO_CREDS.exists() else OPENCLAW_CREDS
 
 
-def matching_rows(credentials: Path, sheet_url: str, tab: str, ids: set) -> Dict[str, Any]:
+def matching_rows(credentials: Path, sheet_url: str, tab: str, ids: set) -> dict[str, Any]:
     worksheet = open_sheet(get_client(str(credentials)), sheet_url).worksheet(tab)
     values = worksheet.get_all_values()
     headers = values[0] if values else []
@@ -41,22 +42,34 @@ def matching_rows(credentials: Path, sheet_url: str, tab: str, ids: set) -> Dict
         for row in rows
         if str(row.get(id_header) or "").strip() in ids
     }
-    return {"worksheet": worksheet, "lane_column": headers.index("Primary Lane") + 1, "matches": matches}
+    return {
+        "worksheet": worksheet,
+        "lane_column": headers.index("Primary Lane") + 1,
+        "matches": matches,
+    }
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--queue-fingerprint", required=True)
     lane_group = parser.add_mutually_exclusive_group(required=True)
     lane_group.add_argument("--lane", choices=("Automation", "Design"))
-    lane_group.add_argument("--alternate-lanes", action="store_true", help="Alternate Automation/Design by queue order, starting with Automation.")
+    lane_group.add_argument(
+        "--alternate-lanes",
+        action="store_true",
+        help="Alternate Automation/Design by queue order, starting with Automation.",
+    )
     parser.add_argument("--credentials", default=str(DEFAULT_CREDS))
     parser.add_argument("--sheet-url", default=LEADS_SHEET_URL)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
     batch = load_batch(args.queue_fingerprint)
-    ids = {str(row.get("ID") or "").strip() for row in batch.get("rows", []) if str(row.get("ID") or "").strip()}
+    ids = {
+        str(row.get("ID") or "").strip()
+        for row in batch.get("rows", [])
+        if str(row.get("ID") or "").strip()
+    }
     if not ids:
         raise SystemExit("Queue batch has no lead IDs.")
     credentials = Path(args.credentials)
@@ -81,20 +94,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             row["Primary Lane"] = lane_by_id[str(row.get("ID") or "").strip()]
         save_batch(batch)
         for target in (prefinal, review):
-            updates: List[Dict[str, Any]] = []
+            updates: list[dict[str, Any]] = []
             for lead_id, row_number in target["matches"].items():
                 cell = gspread.utils.rowcol_to_a1(row_number, target["lane_column"])
                 updates.append({"range": cell, "values": [[lane_by_id[lead_id]]]})
             target["worksheet"].batch_update(updates, value_input_option="USER_ENTERED")
-    print({
-        "ok": True,
-        "dry_run": args.dry_run,
-        "queue_fingerprint": args.queue_fingerprint,
-        "lanes": {lane: sum(1 for value in lane_by_id.values() if value == lane) for lane in ("Automation", "Design")},
-        "queue_rows": len(ids),
-        "prefinal_rows": len(prefinal["matches"]),
-        "review_rows": len(review["matches"]),
-    })
+    print(
+        {
+            "ok": True,
+            "dry_run": args.dry_run,
+            "queue_fingerprint": args.queue_fingerprint,
+            "lanes": {
+                lane: sum(1 for value in lane_by_id.values() if value == lane)
+                for lane in ("Automation", "Design")
+            },
+            "queue_rows": len(ids),
+            "prefinal_rows": len(prefinal["matches"]),
+            "review_rows": len(review["matches"]),
+        }
+    )
     return 0
 
 

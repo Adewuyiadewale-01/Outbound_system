@@ -4,7 +4,7 @@
   "description": "Local-first lead research, outreach, and workflow orchestration toolkit.",
   "private": true,
   "scripts": {
-    "test": "python3 -m unittest discover -s tests -v",
+    "test": "python -m pytest tests/ -v",
     "lint:python": "ruff check ."
   },
   "keywords": [],

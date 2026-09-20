@@ -5,7 +5,7 @@ import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -50,10 +50,10 @@ INBOX_TO_DAILY_FIELDS = [
 
 # Inbox fields that need renaming when copied into Daily Actions
 # Note: Inbox "Due Date" is a calendar date, not a time-of-day — no clean Daily Actions target exists.
-INBOX_TO_DAILY_REMAP: Dict[str, str] = {}
+INBOX_TO_DAILY_REMAP: dict[str, str] = {}
 
 
-def _maybe_float(value: Any) -> Optional[float]:
+def _maybe_float(value: Any) -> float | None:
     try:
         return float(str(value).strip())
     except (ValueError, TypeError):
@@ -142,7 +142,7 @@ def sheet_values_equal(actual: Any, expected: Any) -> bool:
     return str(actual).strip() == str(expected).strip()
 
 
-def require_columns(headers: List[str], required: List[str], context: str) -> None:
+def require_columns(headers: list[str], required: list[str], context: str) -> None:
     missing = [col for col in required if col not in headers]
     if missing:
         raise ValueError(f"{context} is missing required columns: {', '.join(missing)}")
@@ -152,18 +152,26 @@ def normalize_message_text(message: str) -> str:
     return re.sub(r"\s+", " ", str(message).strip().lower())
 
 
-def detect_approval_intent(message: str) -> Dict[str, Any]:
+def detect_approval_intent(message: str) -> dict[str, Any]:
     normalized = normalize_message_text(message)
     if not normalized:
         return {"intent": "unknown", "matched_pattern": None, "normalized_message": normalized}
 
     for pattern in APPROVAL_BLOCK_PATTERNS:
         if re.search(pattern, normalized):
-            return {"intent": "blocked", "matched_pattern": pattern, "normalized_message": normalized}
+            return {
+                "intent": "blocked",
+                "matched_pattern": pattern,
+                "normalized_message": normalized,
+            }
 
     for pattern in APPROVAL_SIGNAL_PATTERNS:
         if re.search(pattern, normalized):
-            return {"intent": "approved", "matched_pattern": pattern, "normalized_message": normalized}
+            return {
+                "intent": "approved",
+                "matched_pattern": pattern,
+                "normalized_message": normalized,
+            }
 
     return {"intent": "unknown", "matched_pattern": None, "normalized_message": normalized}
 
@@ -182,7 +190,9 @@ def get_client(credentials_path: str) -> gspread.Client:
 
 def open_sheet(client: gspread.Client, sheet_url: str):
     if not str(sheet_url or "").strip():
-        raise ValueError("Google Sheet URL is required. Set the relevant *_SHEET_URL variable or pass the CLI flag.")
+        raise ValueError(
+            "Google Sheet URL is required. Set the relevant *_SHEET_URL variable or pass the CLI flag."
+        )
     return client.open_by_url(sheet_url)
 
 
@@ -190,12 +200,12 @@ def get_worksheet(spreadsheet, worksheet_name: str):
     return spreadsheet.worksheet(worksheet_name)
 
 
-def normalize_rows(values: List[List[Any]]) -> List[Dict[str, Any]]:
+def normalize_rows(values: list[list[Any]]) -> list[dict[str, Any]]:
     if not values:
         return []
     headers = values[0]
     rows = values[1:]
-    result: List[Dict[str, Any]] = []
+    result: list[dict[str, Any]] = []
     for idx, row in enumerate(rows, start=2):
         padded = row + [""] * (len(headers) - len(row))
         item = {headers[i]: padded[i] for i in range(len(headers))}
@@ -205,10 +215,10 @@ def normalize_rows(values: List[List[Any]]) -> List[Dict[str, Any]]:
 
 
 def fill_grouped_rows(
-    rows: List[Dict[str, Any]],
-    group_columns: List[str],
+    rows: list[dict[str, Any]],
+    group_columns: list[str],
     content_column: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     current_values = {column: "" for column in group_columns}
     result = []
     for row in rows:
@@ -233,7 +243,7 @@ def fill_grouped_rows(
 # ------------------------------------------------------------------
 
 
-def list_tabs(credentials_path: str, sheet_url: str) -> Dict[str, Any]:
+def list_tabs(credentials_path: str, sheet_url: str) -> dict[str, Any]:
     client = get_client(credentials_path)
     spreadsheet = open_sheet(client, sheet_url)
     return {
@@ -246,9 +256,9 @@ def read_tab(
     credentials_path: str,
     sheet_url: str,
     worksheet_name: str,
-    nonempty_column: Optional[str] = None,
-    equals_filters: Optional[Dict[str, str]] = None,
-) -> Dict[str, Any]:
+    nonempty_column: str | None = None,
+    equals_filters: dict[str, str] | None = None,
+) -> dict[str, Any]:
     client = get_client(credentials_path)
     spreadsheet = open_sheet(client, sheet_url)
     worksheet = get_worksheet(spreadsheet, worksheet_name)
@@ -275,8 +285,8 @@ def append_row(
     credentials_path: str,
     sheet_url: str,
     worksheet_name: str,
-    data: Dict[str, Any],
-) -> Dict[str, Any]:
+    data: dict[str, Any],
+) -> dict[str, Any]:
     client = get_client(credentials_path)
     spreadsheet = open_sheet(client, sheet_url)
     worksheet = get_worksheet(spreadsheet, worksheet_name)
@@ -293,8 +303,8 @@ def update_row(
     sheet_url: str,
     worksheet_name: str,
     row_number: int,
-    data: Dict[str, Any],
-) -> Dict[str, Any]:
+    data: dict[str, Any],
+) -> dict[str, Any]:
     client = get_client(credentials_path)
     spreadsheet = open_sheet(client, sheet_url)
     worksheet = get_worksheet(spreadsheet, worksheet_name)
@@ -311,7 +321,12 @@ def update_row(
         updated[header_index[key]] = value
     cell_range = f"A{row_number}:{gspread.utils.rowcol_to_a1(row_number, len(headers))}"
     worksheet.update(cell_range, [updated], value_input_option="USER_ENTERED")
-    return {"ok": True, "worksheet": worksheet_name, "row_number": row_number, "updated_fields": data}
+    return {
+        "ok": True,
+        "worksheet": worksheet_name,
+        "row_number": row_number,
+        "updated_fields": data,
+    }
 
 
 # ------------------------------------------------------------------
@@ -343,7 +358,7 @@ def get_last_meaningful_row(worksheet) -> int:
     return last_used
 
 
-def insert_rows_by_headers(worksheet, rows: List[Dict[str, Any]], start_row: int) -> None:
+def insert_rows_by_headers(worksheet, rows: list[dict[str, Any]], start_row: int) -> None:
     headers = worksheet.row_values(1)
     if not headers:
         raise ValueError("Worksheet has no header row.")
@@ -353,7 +368,7 @@ def insert_rows_by_headers(worksheet, rows: List[Dict[str, Any]], start_row: int
     worksheet.insert_rows(out, row=start_row, value_input_option="USER_ENTERED")
 
 
-def find_group_last_content_row(values: List[List[Any]], date_idx: int, start_row: int) -> int:
+def find_group_last_content_row(values: list[list[Any]], date_idx: int, start_row: int) -> int:
     last_content = start_row
     for sheet_row in range(start_row + 1, len(values) + 1):
         row = values[sheet_row - 1]
@@ -366,7 +381,9 @@ def find_group_last_content_row(values: List[List[Any]], date_idx: int, start_ro
     return last_content
 
 
-def find_date_group_bounds(values: List[List[Any]], date_value: str) -> Tuple[Optional[int], Optional[int]]:
+def find_date_group_bounds(
+    values: list[list[Any]], date_value: str
+) -> tuple[int | None, int | None]:
     """Find the start and last-content row of a date group in Daily Actions.
     Returns (start_row, last_content_row) as 1-based sheet row numbers, or (None, None)."""
     if not values or len(values) < 2:
@@ -379,7 +396,11 @@ def find_date_group_bounds(values: List[List[Any]], date_value: str) -> Tuple[Op
 
     start = None
     for sheet_row in range(2, len(values) + 1):
-        cell = str(values[sheet_row - 1][date_idx]).strip() if date_idx < len(values[sheet_row - 1]) else ""
+        cell = (
+            str(values[sheet_row - 1][date_idx]).strip()
+            if date_idx < len(values[sheet_row - 1])
+            else ""
+        )
         if sheet_values_equal(cell, target):
             start = sheet_row
             break
@@ -395,7 +416,7 @@ def get_daily_group_data(
     credentials_path: str,
     sheet_url: str,
     date_value: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     client = get_client(credentials_path)
     spreadsheet = open_sheet(client, sheet_url)
     worksheet = get_worksheet(spreadsheet, DAILY_ACTIONS_TAB)
@@ -445,7 +466,7 @@ def get_daily_group_data(
     group_header = {headers[i]: group_row[i] for i in range(len(headers))}
     group_header["_row_number"] = start
 
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for sheet_row in range(start + 1, last_content + 1):
         row = values[sheet_row - 1] + [""] * (len(headers) - len(values[sheet_row - 1]))
         item = {headers[i]: row[i] for i in range(len(headers))}
@@ -469,7 +490,7 @@ def daily_approval_state(
     credentials_path: str,
     sheet_url: str,
     date_value: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     group = get_daily_group_data(credentials_path, sheet_url, date_value)
     header = group["group_header"]
     approved = is_checked_value(header.get(DAILY_APPROVAL_COLUMN, ""))
@@ -488,12 +509,12 @@ def build_daily_approval_packet(
     credentials_path: str,
     sheet_url: str,
     date_value: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     group = get_daily_group_data(credentials_path, sheet_url, date_value)
     header = group["group_header"]
     tasks = group["task_rows"]
 
-    def sort_key(row: Dict[str, Any]):
+    def sort_key(row: dict[str, Any]):
         parsed = parse_sheet_time(row.get("Start Time", ""))
         if parsed is None:
             return (1, 0, row["_row_number"])
@@ -545,7 +566,7 @@ def set_daily_group_approval(
     sheet_url: str,
     date_value: str,
     approved: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     state = daily_approval_state(credentials_path, sheet_url, date_value)
     result = update_row(
         credentials_path,
@@ -565,10 +586,10 @@ def process_daily_approval_reply(
     sheet_url: str,
     date_value: str,
     message_text: str,
-    sender: Optional[str] = None,
-    allowed_senders: Optional[List[str]] = None,
+    sender: str | None = None,
+    allowed_senders: list[str] | None = None,
     dry_run: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     state = daily_approval_state(credentials_path, sheet_url, date_value)
     detection = detect_approval_intent(message_text)
 
@@ -578,7 +599,7 @@ def process_daily_approval_reply(
         allowed = {str(item).strip() for item in allowed_senders if str(item).strip()}
         sender_allowed = normalized_sender in allowed if normalized_sender else False
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "ok": True,
         "action": "process_daily_approval_reply",
         "date": date_value,
@@ -619,7 +640,9 @@ def process_daily_approval_reply(
     return result
 
 
-def find_week_group_bounds(values: List[List[Any]], week_start: str) -> Tuple[Optional[int], Optional[int]]:
+def find_week_group_bounds(
+    values: list[list[Any]], week_start: str
+) -> tuple[int | None, int | None]:
     """Find the start and last-content row of a week group in Weekly Targets.
     Returns (start_row, last_content_row) as 1-based sheet row numbers, or (None, None)."""
     if not values or len(values) < 2:
@@ -632,7 +655,11 @@ def find_week_group_bounds(values: List[List[Any]], week_start: str) -> Tuple[Op
 
     start = None
     for sheet_row in range(2, len(values) + 1):
-        cell = str(values[sheet_row - 1][ws_idx]).strip() if ws_idx < len(values[sheet_row - 1]) else ""
+        cell = (
+            str(values[sheet_row - 1][ws_idx]).strip()
+            if ws_idx < len(values[sheet_row - 1])
+            else ""
+        )
         if sheet_values_equal(cell, target):
             start = sheet_row
             break
@@ -662,7 +689,7 @@ def create_daily_group(
     credentials_path: str,
     sheet_url: str,
     date_value: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     client = get_client(credentials_path)
     spreadsheet = open_sheet(client, sheet_url)
     worksheet = get_worksheet(spreadsheet, DAILY_ACTIONS_TAB)
@@ -798,13 +825,18 @@ def create_weekly_group(
     sheet_url: str,
     week_start: str,
     week_number: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     client = get_client(credentials_path)
     spreadsheet = open_sheet(client, sheet_url)
     worksheet = get_worksheet(spreadsheet, WEEKLY_TARGETS_TAB)
 
     if row_exists(worksheet, "Week Starting", week_start):
-        return {"ok": True, "exists": True, "worksheet": WEEKLY_TARGETS_TAB, "week_start": week_start}
+        return {
+            "ok": True,
+            "exists": True,
+            "worksheet": WEEKLY_TARGETS_TAB,
+            "week_start": week_start,
+        }
 
     rows = [
         {"Week Starting": week_start, "Week #": str(week_number)},
@@ -887,11 +919,11 @@ def _update_daily_status(
     sheet_url: str,
     row_number: int,
     status: str,
-    progress: Optional[str] = None,
-    notes: Optional[str] = None,
-) -> Dict[str, Any]:
+    progress: str | None = None,
+    notes: str | None = None,
+) -> dict[str, Any]:
     """Internal: update a Daily Actions row's Status, Current Progress, and optionally Notes."""
-    data: Dict[str, Any] = {"Status": status}
+    data: dict[str, Any] = {"Status": status}
     if progress is not None:
         data["Current Progress"] = progress
     if notes is not None:
@@ -904,8 +936,8 @@ def complete_daily_row(
     sheet_url: str,
     row_number: int,
     progress: str,
-    notes: Optional[str] = None,
-) -> Dict[str, Any]:
+    notes: str | None = None,
+) -> dict[str, Any]:
     """Mark a Daily Actions row as Done with the completed progress amount."""
     result = _update_daily_status(credentials_path, sheet_url, row_number, "Done", progress, notes)
     result["action"] = "complete"
@@ -916,8 +948,8 @@ def skip_daily_row(
     credentials_path: str,
     sheet_url: str,
     row_number: int,
-    notes: Optional[str] = None,
-) -> Dict[str, Any]:
+    notes: str | None = None,
+) -> dict[str, Any]:
     """Mark a Daily Actions row as Skipped."""
     result = _update_daily_status(credentials_path, sheet_url, row_number, "Skipped", "0", notes)
     result["action"] = "skip"
@@ -929,10 +961,12 @@ def partial_daily_row(
     sheet_url: str,
     row_number: int,
     progress: str,
-    notes: Optional[str] = None,
-) -> Dict[str, Any]:
+    notes: str | None = None,
+) -> dict[str, Any]:
     """Mark a Daily Actions row as Partial with the amount completed so far."""
-    result = _update_daily_status(credentials_path, sheet_url, row_number, "Partial", progress, notes)
+    result = _update_daily_status(
+        credentials_path, sheet_url, row_number, "Partial", progress, notes
+    )
     result["action"] = "partial"
     return result
 
@@ -943,8 +977,8 @@ def roll_daily_row(
     row_number: int,
     next_date: str,
     remaining: str,
-    notes: Optional[str] = None,
-) -> Dict[str, Any]:
+    notes: str | None = None,
+) -> dict[str, Any]:
     """Mark a Daily Actions row as Rolled Over and create a continuation row in the next day's group."""
     client = get_client(credentials_path)
     spreadsheet = open_sheet(client, sheet_url)
@@ -965,13 +999,17 @@ def roll_daily_row(
     orig_date_str = str(original_data.get("Date", "")).strip()
     if not orig_date_str and date_col_idx is not None:
         for r in range(row_number - 1, 0, -1):  # scan upward (r is 1-based)
-            cell = str(all_values[r - 1][date_col_idx]).strip() if date_col_idx < len(all_values[r - 1]) else ""
+            cell = (
+                str(all_values[r - 1][date_col_idx]).strip()
+                if date_col_idx < len(all_values[r - 1])
+                else ""
+            )
             if cell:
                 orig_date_str = cell
                 break
 
     # Update original row: Status = Rolled Over
-    update_fields: Dict[str, Any] = {"Status": "Rolled Over"}
+    update_fields: dict[str, Any] = {"Status": "Rolled Over"}
     if notes:
         update_fields["Notes"] = notes
     updated = original[:]
@@ -1036,7 +1074,7 @@ def promote_inbox_row(
     sheet_url: str,
     inbox_row_number: int,
     target_date: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Promote an Inbox row into the target date's Daily Actions group."""
     client = get_client(credentials_path)
     spreadsheet = open_sheet(client, sheet_url)
@@ -1064,7 +1102,7 @@ def promote_inbox_row(
         )
 
     # Build Daily Actions row from Inbox data
-    daily_data: Dict[str, Any] = {
+    daily_data: dict[str, Any] = {
         "Task Description": task_description,
         "Origin Date": target_date,
         "Status": "Pending",
@@ -1116,7 +1154,7 @@ def recompute_weekly_progress(
     credentials_path: str,
     sheet_url: str,
     week_start: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Recompute Weekly Targets Current Progress from Daily Actions for a given week."""
     client = get_client(credentials_path)
     spreadsheet = open_sheet(client, sheet_url)
@@ -1134,7 +1172,7 @@ def recompute_weekly_progress(
     daily_rows = fill_grouped_rows(daily_rows, ["Date"], "Task Description")
 
     # Sum Current Progress by Progress Key for rows within the week
-    progress_sums: Dict[str, float] = {}
+    progress_sums: dict[str, float] = {}
     for row in daily_rows:
         row_date = parse_sheet_date(str(row.get("Date", "")))
         if row_date is None:
@@ -1254,8 +1292,12 @@ def main():
     p_process_approval = subparsers.add_parser("process-daily-approval-reply")
     p_process_approval.add_argument("--sheet-url", required=True)
     p_process_approval.add_argument("--date", required=True)
-    p_process_approval.add_argument("--message", required=True, help="Inbound WhatsApp message text")
-    p_process_approval.add_argument("--sender", help="Phone number or sender id for the inbound message")
+    p_process_approval.add_argument(
+        "--message", required=True, help="Inbound WhatsApp message text"
+    )
+    p_process_approval.add_argument(
+        "--sender", help="Phone number or sender id for the inbound message"
+    )
     p_process_approval.add_argument(
         "--allowed-sender",
         action="append",
@@ -1370,13 +1412,17 @@ def main():
             result = create_weekly_group(creds, args.sheet_url, args.week_start, args.week_number)
 
         elif args.command == "complete-daily-row":
-            result = complete_daily_row(creds, args.sheet_url, args.row_number, args.progress, args.notes)
+            result = complete_daily_row(
+                creds, args.sheet_url, args.row_number, args.progress, args.notes
+            )
 
         elif args.command == "skip-daily-row":
             result = skip_daily_row(creds, args.sheet_url, args.row_number, args.notes)
 
         elif args.command == "partial-daily-row":
-            result = partial_daily_row(creds, args.sheet_url, args.row_number, args.progress, args.notes)
+            result = partial_daily_row(
+                creds, args.sheet_url, args.row_number, args.progress, args.notes
+            )
 
         elif args.command == "roll-daily-row":
             result = roll_daily_row(
@@ -1384,7 +1430,9 @@ def main():
             )
 
         elif args.command == "promote-inbox-row":
-            result = promote_inbox_row(creds, args.sheet_url, args.inbox_row_number, args.target_date)
+            result = promote_inbox_row(
+                creds, args.sheet_url, args.inbox_row_number, args.target_date
+            )
 
         elif args.command == "recompute-weekly-progress":
             result = recompute_weekly_progress(creds, args.sheet_url, args.week_start)

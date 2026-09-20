@@ -36,7 +36,9 @@ def test_geography_tiers_are_data_driven():
 
 def test_like_assignment_is_stable_and_bounded():
     first = choose_like_target("2026-09-06", "https://www.linkedin.com/in/example/", DEFAULT_CONFIG)
-    second = choose_like_target("2026-09-06", "https://www.linkedin.com/in/example/", DEFAULT_CONFIG)
+    second = choose_like_target(
+        "2026-09-06", "https://www.linkedin.com/in/example/", DEFAULT_CONFIG
+    )
     assert first == second
     assert 1 <= first <= 3
 
@@ -61,7 +63,9 @@ def test_obf_diversion_plan_is_stable_per_candidate():
     ensure_obf_diversions(campaign, DEFAULT_CONFIG)
     initial = [(c["obf_diversion"], c["obf_diversion_seconds"]) for c in campaign["candidates"]]
     ensure_obf_diversions(campaign, DEFAULT_CONFIG)
-    assert [(c["obf_diversion"], c["obf_diversion_seconds"]) for c in campaign["candidates"]] == initial
+    assert [
+        (c["obf_diversion"], c["obf_diversion_seconds"]) for c in campaign["candidates"]
+    ] == initial
 
 
 def test_any_activity_signal_qualifies():
@@ -73,19 +77,54 @@ def test_any_activity_signal_qualifies():
 
 def test_profile_gate_rejects_global_ui_and_contact_labels():
     with pytest.raises(RuntimeError, match="invalid_name"):
-        validate_profile_gate({"name": "0 notifications", "location": "New York, United States", "follower_text": "100 followers", "follower_source": "header"})
+        validate_profile_gate(
+            {
+                "name": "0 notifications",
+                "location": "New York, United States",
+                "follower_text": "100 followers",
+                "follower_source": "header",
+            }
+        )
     with pytest.raises(RuntimeError, match="invalid_location"):
-        validate_profile_gate({"name": "Ada Lovelace", "location": "Contact info", "follower_text": "100 followers", "follower_source": "header"})
+        validate_profile_gate(
+            {
+                "name": "Ada Lovelace",
+                "location": "Contact info",
+                "follower_text": "100 followers",
+                "follower_source": "header",
+            }
+        )
 
 
 def test_profile_gate_accepts_valid_profile_metadata():
-    validate_profile_gate({"name": "Ada Lovelace", "location": "New York, United States", "follower_text": "35,345 followers", "follower_source": "header"})
-    validate_profile_gate({"name": "Ada Lovelace", "location": "New York, United States", "follower_text": "35,345 followers", "follower_source": "activity"})
+    validate_profile_gate(
+        {
+            "name": "Ada Lovelace",
+            "location": "New York, United States",
+            "follower_text": "35,345 followers",
+            "follower_source": "header",
+        }
+    )
+    validate_profile_gate(
+        {
+            "name": "Ada Lovelace",
+            "location": "New York, United States",
+            "follower_text": "35,345 followers",
+            "follower_source": "activity",
+        }
+    )
 
 
 def test_profile_gate_rejects_unbounded_follower_source():
     with pytest.raises(RuntimeError, match="unbounded_follower_source"):
-        validate_profile_gate({"name": "Ada Lovelace", "location": "New York, United States", "follower_text": "35,345 followers", "follower_source": "missing"})
+        validate_profile_gate(
+            {
+                "name": "Ada Lovelace",
+                "location": "New York, United States",
+                "follower_text": "35,345 followers",
+                "follower_source": "missing",
+            }
+        )
 
 
 class FakeActivitySession:
@@ -140,17 +179,19 @@ def test_final_action_queue_randomly_interleaves_without_three_action_streaks():
     candidates = []
     for action in ("connect", "follow"):
         for index in range(6):
-            candidates.append({
-                "profile_url": f"https://www.linkedin.com/in/{action}-{index}/",
-                "geography_tier": 1,
-                "activity_counts": {"reactions": 5, "comments": 0, "posts": 0},
-                "profile_parser_version": PROFILE_PARSER_VERSION,
-                "activity_assessment_status": "complete",
-                "recommendation": {
-                    "action": action,
-                    "assessment_version": ACTIVITY_ASSESSMENT_VERSION,
-                },
-            })
+            candidates.append(
+                {
+                    "profile_url": f"https://www.linkedin.com/in/{action}-{index}/",
+                    "geography_tier": 1,
+                    "activity_counts": {"reactions": 5, "comments": 0, "posts": 0},
+                    "profile_parser_version": PROFILE_PARSER_VERSION,
+                    "activity_assessment_status": "complete",
+                    "recommendation": {
+                        "action": action,
+                        "assessment_version": ACTIVITY_ASSESSMENT_VERSION,
+                    },
+                }
+            )
     queue = final_action_queue(candidates, {"day": "2026-09-06"})
     actions = [candidate["recommendation"]["action"] for candidate in queue]
     assert not any(actions[i] == actions[i + 1] == actions[i + 2] for i in range(len(actions) - 2))

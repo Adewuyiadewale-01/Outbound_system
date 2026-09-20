@@ -2,7 +2,6 @@ import sys
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
@@ -30,12 +29,8 @@ class ReviewRoutingTests(unittest.TestCase):
         rows = [review_row(index, "Design") for index in range(30)]
         rows += [review_row(100 + index, "Automation") for index in range(30)]
 
-        first_batch = classify_review_rows(
-            rows[::2], checkpoint="first", approval_required=False
-        )
-        second_batch = classify_review_rows(
-            rows[1::2], checkpoint="first", approval_required=False
-        )
+        first_batch = classify_review_rows(rows[::2], checkpoint="first", approval_required=False)
+        second_batch = classify_review_rows(rows[1::2], checkpoint="first", approval_required=False)
 
         self.assertEqual(first_batch["action"], "process_all_lanes")
         self.assertEqual(len(first_batch["prefinal"]), 30)
@@ -100,7 +95,9 @@ class ReviewRoutingTests(unittest.TestCase):
     def test_fallback_automation_scope_processes_remaining_automation_rows(self):
         rows = [review_row(100 + i, "Automation") for i in range(25)]
 
-        plan = classify_review_rows(rows, checkpoint="fallback", threshold=20, lane_scope="automation")
+        plan = classify_review_rows(
+            rows, checkpoint="fallback", threshold=20, lane_scope="automation"
+        )
 
         self.assertEqual(plan["action"], "process_remaining_automation")
         self.assertEqual(len(plan["prefinal"]), 25)
@@ -133,8 +130,17 @@ class ComputationRoutingTests(unittest.TestCase):
     def test_lane_override_is_applied_to_unapproved_reviewed_design(self):
         leads = []
         for index in range(20):
-            leads.append({"lead_id": f"d-{index}", "primary_lane": "Design", "review_approved": True})
-        leads.append({"lead_id": "d-reviewed", "primary_lane": "Design", "review_approved": False, "use": "Exclude"})
+            leads.append(
+                {"lead_id": f"d-{index}", "primary_lane": "Design", "review_approved": True}
+            )
+        leads.append(
+            {
+                "lead_id": "d-reviewed",
+                "primary_lane": "Design",
+                "review_approved": False,
+                "use": "Exclude",
+            }
+        )
 
         plan = classify_computation_leads(leads, checkpoint="first")
 
@@ -162,11 +168,21 @@ class ComputationRoutingTests(unittest.TestCase):
 class ArchivePromotionTests(unittest.TestCase):
     def test_promotion_selects_twenty_design_and_twenty_automation(self):
         rows = [
-            {"Archive Entry ID": f"d-{i}", "Status": "Available", "Original Lane": "Design", "Approved": True}
+            {
+                "Archive Entry ID": f"d-{i}",
+                "Status": "Available",
+                "Original Lane": "Design",
+                "Approved": True,
+            }
             for i in range(25)
         ]
         rows += [
-            {"Archive Entry ID": f"a-{i}", "Status": "Available", "Original Lane": "Automation", "Approved": False}
+            {
+                "Archive Entry ID": f"a-{i}",
+                "Status": "Available",
+                "Original Lane": "Automation",
+                "Approved": False,
+            }
             for i in range(30)
         ]
 
@@ -178,7 +194,12 @@ class ArchivePromotionTests(unittest.TestCase):
 
     def test_promotion_waits_until_twenty_automation_are_available(self):
         rows = [
-            {"Archive Entry ID": f"d-{i}", "Status": "Available", "Original Lane": "Design", "Approved": True}
+            {
+                "Archive Entry ID": f"d-{i}",
+                "Status": "Available",
+                "Original Lane": "Design",
+                "Approved": True,
+            }
             for i in range(20)
         ]
         rows += [

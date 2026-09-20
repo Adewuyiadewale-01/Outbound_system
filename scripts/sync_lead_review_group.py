@@ -50,9 +50,7 @@ def normalize_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "run_id": run_id,
                 "approved": parse_approved(str(item.get("approved", False))),
                 "use": parse_use(str(item.get("use") or "")),
-                "expected_approved": parse_approved(
-                    str(item.get("expected_approved", False))
-                ),
+                "expected_approved": parse_approved(str(item.get("expected_approved", False))),
                 "expected_use": parse_use(str(item.get("expected_use") or "")),
             }
         )
@@ -128,10 +126,7 @@ def main() -> int:
             raise SystemExit(
                 f"row {item['row']} identity changed; refresh the dashboard before syncing"
             )
-        if (
-            live_approved != item["expected_approved"]
-            or live_use != item["expected_use"]
-        ):
+        if live_approved != item["expected_approved"] or live_use != item["expected_use"]:
             raise SystemExit(
                 f"row {item['row']} changed in the Sheet; refresh before overwriting it"
             )
@@ -146,9 +141,7 @@ def main() -> int:
             or parse_use(str(live[indexes["Use"]] or "")) != item["use"]
         ):
             raise SystemExit(f"sync verification failed at Lead Review row {item['row']}")
-    if not normalized_live_bool(
-        verified_values[group_row - 1][indexes["Design Review Complete"]]
-    ):
+    if not normalized_live_bool(verified_values[group_row - 1][indexes["Design Review Complete"]]):
         raise SystemExit("Design Review Complete verification failed")
 
     cache = build_dashboard_cache(

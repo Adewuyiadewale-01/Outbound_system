@@ -8,7 +8,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from lead_exec_research import (
     DEFAULT_CREDS,
@@ -17,7 +17,6 @@ from lead_exec_research import (
     parse_review_group_date,
 )
 from sheets_helper import get_client, get_worksheet, open_sheet
-
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CACHE_FILE = ROOT / "state" / "lead_exec_research" / "dashboard_cache.json"
@@ -35,7 +34,7 @@ def normalized_use(value: Any) -> str:
     return " ".join(clean(value).lower().split())
 
 
-def row_value(row: List[Any], indexes: Dict[str, int], column: str) -> str:
+def row_value(row: list[Any], indexes: dict[str, int], column: str) -> str:
     index = indexes.get(column)
     if index is None or index >= len(row):
         return ""
@@ -43,12 +42,12 @@ def row_value(row: List[Any], indexes: Dict[str, int], column: str) -> str:
 
 
 def build_dashboard_cache(
-    values: List[List[Any]],
+    values: list[list[Any]],
     *,
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
     sheet_url: str = DEFAULT_SHEET_URL,
     review_tab: str = DEFAULT_REVIEW_TAB,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     now = now or datetime.now()
     headers = [clean(value) for value in (values[0] if values else [])]
     indexes = {header: index for index, header in enumerate(headers) if header}
@@ -57,8 +56,8 @@ def build_dashboard_cache(
     if missing:
         raise ValueError(f"{review_tab} is missing required columns: {', '.join(missing)}")
 
-    groups: List[Dict[str, Any]] = []
-    current: Optional[Dict[str, Any]] = None
+    groups: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
 
     def finish_group() -> None:
         nonlocal current
@@ -128,8 +127,7 @@ def build_dashboard_cache(
     today_key = now.date().isoformat()
     today_group = next((group for group in reversed(groups) if group["date"] == today_key), None)
     history = [
-        {key: value for key, value in group.items() if key != "leads"}
-        for group in reversed(groups)
+        {key: value for key, value in group.items() if key != "leads"} for group in reversed(groups)
     ]
     return {
         "schema_version": 1,
@@ -150,7 +148,8 @@ def build_dashboard_cache(
             "date_groups": len(groups),
             "reviewed_date_groups": sum(1 for group in groups if group["review_complete"]),
         },
-        "today": today_group or {
+        "today": today_group
+        or {
             "date": today_key,
             "display_date": "",
             "group_row": None,
@@ -169,7 +168,7 @@ def build_dashboard_cache(
     }
 
 
-def write_cache(path: Path, payload: Dict[str, Any]) -> None:
+def write_cache(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(
@@ -222,11 +221,7 @@ def main() -> int:
                 "cache_file": str(cache_file),
                 "cached_at": payload["cached_at"],
                 "summary": payload["summary"],
-                "today": {
-                    key: value
-                    for key, value in payload["today"].items()
-                    if key != "leads"
-                },
+                "today": {key: value for key, value in payload["today"].items() if key != "leads"},
             },
             indent=2,
         )

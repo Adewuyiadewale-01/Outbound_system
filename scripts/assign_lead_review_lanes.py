@@ -9,13 +9,11 @@ import os
 from pathlib import Path
 
 import gspread
-
 from cache_lead_review_dashboard import DEFAULT_CACHE_FILE, build_dashboard_cache, write_cache
 from lead_exec_research import (
     DEFAULT_CREDS,
     DEFAULT_REVIEW_TAB,
     DEFAULT_SHEET_URL,
-    PRIMARY_LANES,
     assign_primary_lanes,
     parse_review_group_date,
 )
@@ -24,9 +22,7 @@ from sheets_helper import get_client, get_worksheet, open_sheet
 
 def write_json_atomic(path: Path, payload: dict) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    temporary.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     temporary.replace(path)
 
 
@@ -65,9 +61,7 @@ def main() -> int:
     lane_index = headers.index("Primary Lane")
     run_id_index = headers.index("Run ID")
     group = values[args.group_row - 1]
-    live_date = parse_review_group_date(
-        group[date_index] if date_index < len(group) else ""
-    )
+    live_date = parse_review_group_date(group[date_index] if date_index < len(group) else "")
     if live_date != expected_date:
         raise SystemExit("date-group identity changed; refresh before assigning lanes")
 
@@ -109,9 +103,7 @@ def main() -> int:
     run.setdefault("source", {})["lane_counts"] = lane_counts
     write_json_atomic(run_file, run)
 
-    cache = build_dashboard_cache(
-        verified, sheet_url=args.sheet_url, review_tab=args.review_tab
-    )
+    cache = build_dashboard_cache(verified, sheet_url=args.sheet_url, review_tab=args.review_tab)
     write_cache(Path(args.cache_file), cache)
     print(
         json.dumps(

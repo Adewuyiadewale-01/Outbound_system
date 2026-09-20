@@ -11,7 +11,13 @@ extend-exclude = [
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
-ignore = ["E501"]
+ignore = [
+    "E501",   # long lines; the formatter wraps what it can
+    "E402",   # sys.path bootstrap before imports; removed by Phase 1 package layout
+    "E701",   # legacy one-line statements; normalized during Phase 2 extraction
+    "E702",   # same, semicolon statements
+    "UP031",  # %-format deliberately used to embed JSON into JS expressions
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["helpers", "scripts"]

@@ -12,7 +12,6 @@ from cache_lead_review_dashboard import DEFAULT_CACHE_FILE, build_dashboard_cach
 from lead_exec_research import DEFAULT_CREDS, DEFAULT_REVIEW_TAB, DEFAULT_SHEET_URL
 from sheets_helper import get_client, get_worksheet, open_sheet
 
-
 ALLOWED_USE_VALUES = {
     "": "",
     "potential leads": "Potential leads",

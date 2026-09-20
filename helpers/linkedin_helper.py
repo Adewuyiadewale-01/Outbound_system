@@ -28,16 +28,19 @@ import os
 import random
 import re
 import sys
-import time
 import threading
-from datetime import datetime, date, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+import time
+from datetime import date, datetime, timedelta
+from typing import Any
 from urllib.parse import quote, unquote, urlparse
 
 import websocket  # websocket-client
 
 try:
-    from outreach_helper import count_outreach_log_connection_requests, count_pipeline_connected_leads
+    from outreach_helper import (
+        count_outreach_log_connection_requests,
+        count_pipeline_connected_leads,
+    )
 except Exception:  # pragma: no cover - keep LinkedIn-only helpers usable
     count_outreach_log_connection_requests = None
     count_pipeline_connected_leads = None
@@ -94,6 +97,7 @@ ACTIVITY_DISALLOWED_PATH_RE = re.compile(
 # Delay utilities — all timing is randomized, never repeating patterns
 # ---------------------------------------------------------------------------
 
+
 def human_delay(min_s: float, max_s: float, distribution: str = "uniform") -> float:
     """Sleep for a randomized duration. Returns the actual delay used."""
     if distribution == "gaussian":
@@ -111,7 +115,7 @@ def human_delay(min_s: float, max_s: float, distribution: str = "uniform") -> fl
     return delay
 
 
-def relative_days_from_time_text(time_text: str) -> Optional[int]:
+def relative_days_from_time_text(time_text: str) -> int | None:
     """Convert LinkedIn relative time text into an approximate day count."""
     text = str(time_text or "").strip().lower()
     if not text:
@@ -147,7 +151,7 @@ def relative_days_from_time_text(time_text: str) -> Optional[int]:
     return None
 
 
-def classify_activity_windows(activities: List[Dict[str, Any]]) -> Dict[str, int]:
+def classify_activity_windows(activities: list[dict[str, Any]]) -> dict[str, int]:
     """Summarize activity windows from parsed activity entries."""
     within_7d = 0
     within_30d = 0
@@ -184,6 +188,7 @@ def typing_delay():
 # State persistence — tracks quotas, session history, scroll sequences
 # ---------------------------------------------------------------------------
 
+
 def _ensure_state_dir():
     os.makedirs(STATE_DIR, exist_ok=True)
 
@@ -197,16 +202,16 @@ def _safe_slug(value: str) -> str:
     return cleaned.strip("-") or "unknown"
 
 
-def load_state() -> Dict[str, Any]:
+def load_state() -> dict[str, Any]:
     """Load persistent state from disk."""
     _ensure_state_dir()
     if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r") as f:
+        with open(STATE_FILE) as f:
             return json.load(f)
     return {}
 
 
-def save_state(state: Dict[str, Any]):
+def save_state(state: dict[str, Any]):
     """Save persistent state to disk."""
     _ensure_state_dir()
     with open(STATE_FILE, "w") as f:
@@ -223,7 +228,7 @@ def get_week_key() -> str:
     return f"{d.isocalendar()[0]}-W{d.isocalendar()[1]:02d}"
 
 
-def increment_counter(state: Dict, category: str, amount: int = 1) -> int:
+def increment_counter(state: dict, category: str, amount: int = 1) -> int:
     """Increment a daily counter. Returns new value."""
     today = get_today_key()
     if "counters" not in state:
@@ -236,13 +241,13 @@ def increment_counter(state: Dict, category: str, amount: int = 1) -> int:
     return current + amount
 
 
-def get_counter(state: Dict, category: str) -> int:
+def get_counter(state: dict, category: str) -> int:
     """Get today's count for a category."""
     today = get_today_key()
     return state.get("counters", {}).get(today, {}).get(category, 0)
 
 
-def get_weekly_counter(state: Dict, category: str) -> int:
+def get_weekly_counter(state: dict, category: str) -> int:
     """Sum this week's count for a category (Mon-Sun)."""
     today = date.today()
     monday = today - timedelta(days=today.weekday())
@@ -257,28 +262,32 @@ def get_weekly_counter(state: Dict, category: str) -> int:
 # CDP Connection Manager
 # ---------------------------------------------------------------------------
 
+
 class CDPConnection:
     """Manages a WebSocket connection to Chrome DevTools Protocol."""
 
-    def __init__(self, host: Optional[str] = None, port: Optional[int] = None):
+    def __init__(self, host: str | None = None, port: int | None = None):
         # Resolve this at construction time rather than import time.  The
         # sequential activity-lane runner uses a separate process for each
         # authorized browser profile and supplies its endpoint through env.
         self.host = host or os.environ.get("LINKEDIN_CDP_HOST", CDP_HOST)
-        configured_port = port if port is not None else os.environ.get("LINKEDIN_CDP_PORT", CDP_PORT)
+        configured_port = (
+            port if port is not None else os.environ.get("LINKEDIN_CDP_PORT", CDP_PORT)
+        )
         try:
             self.port = int(configured_port)
         except (TypeError, ValueError):
             raise ValueError(f"Invalid LINKEDIN_CDP_PORT: {configured_port!r}")
-        self.ws: Optional[websocket.WebSocket] = None
-        self.target_id: Optional[str] = None
-        self.ws_url: Optional[str] = None
+        self.ws: websocket.WebSocket | None = None
+        self.target_id: str | None = None
+        self.ws_url: str | None = None
         self._msg_id = 0
         self._lock = threading.Lock()
 
     def _http_get(self, path: str) -> Any:
         """Make an HTTP GET to the CDP HTTP endpoint."""
         import urllib.request
+
         url = f"http://{self.host}:{self.port}{path}"
         try:
             with urllib.request.urlopen(url, timeout=5) as resp:
@@ -289,6 +298,7 @@ class CDPConnection:
     def _http_request(self, path: str, method: str = "GET") -> Any:
         """Make a bounded request to a Chrome debugging HTTP endpoint."""
         import urllib.request
+
         url = f"http://{self.host}:{self.port}{path}"
         try:
             request = urllib.request.Request(url, method=method)
@@ -298,7 +308,7 @@ class CDPConnection:
         except Exception as e:
             raise ConnectionError(f"CDP HTTP request failed ({method} {url}): {e}")
 
-    def replace_page_target(self, url: str = "about:blank") -> Dict[str, Any]:
+    def replace_page_target(self, url: str = "about:blank") -> dict[str, Any]:
         """Create a clean tab and discard the currently attached frozen tab."""
         old_target_id = self.target_id
         encoded_url = quote(str(url or "about:blank"), safe="")
@@ -322,7 +332,7 @@ class CDPConnection:
             "new_target_url": new_target.get("url", url),
         }
 
-    def create_page_target(self, url: str = "about:blank") -> Dict[str, Any]:
+    def create_page_target(self, url: str = "about:blank") -> dict[str, Any]:
         """Create and attach to a new tab without closing any existing tab.
 
         Workflows that share a CDP browser must not reuse or replace another
@@ -346,7 +356,7 @@ class CDPConnection:
             "url": target.get("url", url),
         }
 
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, Any]:
         """Check if Chrome is running and CDP is responsive."""
         try:
             version = self._http_get("/json/version")
@@ -359,7 +369,7 @@ class CDPConnection:
         except ConnectionError as e:
             return {"status": "error", "error": str(e)}
 
-    def connect(self, target_url: Optional[str] = None) -> bool:
+    def connect(self, target_url: str | None = None) -> bool:
         """Connect to a Chrome tab via CDP WebSocket.
 
         If target_url is given, find the tab with that URL.
@@ -408,7 +418,7 @@ class CDPConnection:
                 pass
             self.ws = None
 
-    def send(self, method: str, params: Optional[Dict] = None, timeout: float = 30) -> Dict:
+    def send(self, method: str, params: dict | None = None, timeout: float = 30) -> dict:
         """Send a CDP command and wait for its response."""
         if not self.ws:
             raise ConnectionError("Not connected to CDP. Call connect() first.")
@@ -460,13 +470,11 @@ class CDPConnection:
             location = ""
             if isinstance(line, int) and isinstance(column, int):
                 location = f" (line {line + 1}, col {column + 1})"
-            raise RuntimeError(
-                f"JS evaluation error: {description or text or details}{location}"
-            )
+            raise RuntimeError(f"JS evaluation error: {description or text or details}{location}")
         remote_obj = result.get("result", {})
         return remote_obj.get("value")
 
-    def navigate(self, url: str, wait_load: bool = True, timeout: float = 30) -> Dict:
+    def navigate(self, url: str, wait_load: bool = True, timeout: float = 30) -> dict:
         """Navigate to a URL and optionally wait for load."""
         result = self.send("Page.navigate", {"url": url}, timeout=timeout)
         if wait_load:
@@ -594,6 +602,7 @@ def inject_stealth(cdp: CDPConnection):
 # Human simulation primitives
 # ---------------------------------------------------------------------------
 
+
 class HumanSimulator:
     """Simulates human-like browser interactions via CDP."""
 
@@ -631,16 +640,26 @@ class HumanSimulator:
                 jy = random.uniform(-3, 3)
                 ix = cx + (x - cx) * frac + jx
                 iy = cy + (y - cy) * frac + jy
-                self.cdp.send("Input.dispatchMouseEvent", {
-                    "type": "mouseMoved",
-                    "x": int(ix), "y": int(iy),
-                }, timeout=8)
+                self.cdp.send(
+                    "Input.dispatchMouseEvent",
+                    {
+                        "type": "mouseMoved",
+                        "x": int(ix),
+                        "y": int(iy),
+                    },
+                    timeout=8,
+                )
                 time.sleep(random.uniform(0.01, 0.03))
 
-        self.cdp.send("Input.dispatchMouseEvent", {
-            "type": "mouseMoved",
-            "x": int(x), "y": int(y),
-        }, timeout=8)
+        self.cdp.send(
+            "Input.dispatchMouseEvent",
+            {
+                "type": "mouseMoved",
+                "x": int(x),
+                "y": int(y),
+            },
+            timeout=8,
+        )
 
     def click(self, x: float, y: float, hover_first: bool = True):
         """Click at coordinates with optional hover-before-click."""
@@ -649,21 +668,31 @@ class HumanSimulator:
             human_delay(0.3, 1.5)
 
         # Mouse down
-        self.cdp.send("Input.dispatchMouseEvent", {
-            "type": "mousePressed",
-            "x": int(x), "y": int(y),
-            "button": "left",
-            "clickCount": 1,
-        }, timeout=8)
+        self.cdp.send(
+            "Input.dispatchMouseEvent",
+            {
+                "type": "mousePressed",
+                "x": int(x),
+                "y": int(y),
+                "button": "left",
+                "clickCount": 1,
+            },
+            timeout=8,
+        )
         # Small hold time
         time.sleep(random.uniform(0.05, 0.15))
         # Mouse up
-        self.cdp.send("Input.dispatchMouseEvent", {
-            "type": "mouseReleased",
-            "x": int(x), "y": int(y),
-            "button": "left",
-            "clickCount": 1,
-        }, timeout=8)
+        self.cdp.send(
+            "Input.dispatchMouseEvent",
+            {
+                "type": "mouseReleased",
+                "x": int(x),
+                "y": int(y),
+                "button": "left",
+                "clickCount": 1,
+            },
+            timeout=8,
+        )
 
     def click_element(self, selector: str, hover_first: bool = True) -> bool:
         """Click an element by CSS selector. Returns True if successful."""
@@ -692,14 +721,17 @@ class HumanSimulator:
             self.click(coords["x"], coords["y"], hover_first=hover_first)
             return True
         except TimeoutError:
-            clicked = self.cdp.evaluate(f"""
+            clicked = self.cdp.evaluate(
+                f"""
                 (() => {{
                     const el = document.querySelector({json.dumps(selector)});
                     if (!el) return false;
                     el.click();
                     return true;
                 }})()
-            """, timeout=8)
+            """,
+                timeout=8,
+            )
             return bool(clicked)
 
     # --- Keyboard ---
@@ -707,17 +739,23 @@ class HumanSimulator:
     def type_text(self, text: str):
         """Type text character by character with human-like timing."""
         for char in text:
-            self.cdp.send("Input.dispatchKeyEvent", {
-                "type": "keyDown",
-                "text": char,
-                "key": char,
-                "code": f"Key{char.upper()}" if char.isalpha() else "",
-            })
-            self.cdp.send("Input.dispatchKeyEvent", {
-                "type": "keyUp",
-                "key": char,
-                "code": f"Key{char.upper()}" if char.isalpha() else "",
-            })
+            self.cdp.send(
+                "Input.dispatchKeyEvent",
+                {
+                    "type": "keyDown",
+                    "text": char,
+                    "key": char,
+                    "code": f"Key{char.upper()}" if char.isalpha() else "",
+                },
+            )
+            self.cdp.send(
+                "Input.dispatchKeyEvent",
+                {
+                    "type": "keyUp",
+                    "key": char,
+                    "code": f"Key{char.upper()}" if char.isalpha() else "",
+                },
+            )
             typing_delay()
 
     def press_key(self, key: str, code: str = ""):
@@ -731,20 +769,33 @@ class HumanSimulator:
             "ArrowUp": ("ArrowUp", "ArrowUp", 38),
         }
         k, c, kc = key_code_map.get(key, (key, code or key, 0))
-        self.cdp.send("Input.dispatchKeyEvent", {
-            "type": "keyDown", "key": k, "code": c,
-            "windowsVirtualKeyCode": kc, "nativeVirtualKeyCode": kc,
-        })
+        self.cdp.send(
+            "Input.dispatchKeyEvent",
+            {
+                "type": "keyDown",
+                "key": k,
+                "code": c,
+                "windowsVirtualKeyCode": kc,
+                "nativeVirtualKeyCode": kc,
+            },
+        )
         time.sleep(random.uniform(0.05, 0.12))
-        self.cdp.send("Input.dispatchKeyEvent", {
-            "type": "keyUp", "key": k, "code": c,
-            "windowsVirtualKeyCode": kc, "nativeVirtualKeyCode": kc,
-        })
+        self.cdp.send(
+            "Input.dispatchKeyEvent",
+            {
+                "type": "keyUp",
+                "key": k,
+                "code": c,
+                "windowsVirtualKeyCode": kc,
+                "nativeVirtualKeyCode": kc,
+            },
+        )
 
     # --- Scrolling ---
 
     def scroll(self, delta_y: int = 300, smooth: bool = True):
         """Scroll the page by delta_y pixels. Positive = down."""
+
         def js_scroll(amount: int):
             self.cdp.evaluate(f"window.scrollBy(0, {int(amount)})", timeout=8)
 
@@ -755,26 +806,34 @@ class HumanSimulator:
             while remaining > 0:
                 chunk = min(remaining, random.randint(80, 180))
                 try:
-                    self.cdp.send("Input.dispatchMouseEvent", {
-                        "type": "mouseWheel",
-                        "x": self._viewport_width // 2 + random.randint(-50, 50),
-                        "y": self._viewport_height // 2 + random.randint(-50, 50),
-                        "deltaX": 0,
-                        "deltaY": chunk * direction,
-                    }, timeout=8)
+                    self.cdp.send(
+                        "Input.dispatchMouseEvent",
+                        {
+                            "type": "mouseWheel",
+                            "x": self._viewport_width // 2 + random.randint(-50, 50),
+                            "y": self._viewport_height // 2 + random.randint(-50, 50),
+                            "deltaX": 0,
+                            "deltaY": chunk * direction,
+                        },
+                        timeout=8,
+                    )
                 except TimeoutError:
                     js_scroll(chunk * direction)
                 remaining -= chunk
                 time.sleep(random.uniform(0.03, 0.08))
         else:
             try:
-                self.cdp.send("Input.dispatchMouseEvent", {
-                    "type": "mouseWheel",
-                    "x": self._viewport_width // 2,
-                    "y": self._viewport_height // 2,
-                    "deltaX": 0,
-                    "deltaY": delta_y,
-                }, timeout=8)
+                self.cdp.send(
+                    "Input.dispatchMouseEvent",
+                    {
+                        "type": "mouseWheel",
+                        "x": self._viewport_width // 2,
+                        "y": self._viewport_height // 2,
+                        "deltaX": 0,
+                        "deltaY": delta_y,
+                    },
+                    timeout=8,
+                )
             except TimeoutError:
                 js_scroll(delta_y)
 
@@ -819,7 +878,7 @@ class HumanSimulator:
             scrolled += chunk
             human_delay(p["pause_min"], p["pause_max"])
 
-    def get_scroll_position(self) -> Dict[str, int]:
+    def get_scroll_position(self) -> dict[str, int]:
         """Get current scroll position and page dimensions."""
         result = self.cdp.evaluate("""
             JSON.stringify({
@@ -828,12 +887,17 @@ class HumanSimulator:
                 viewportHeight: window.innerHeight
             })
         """)
-        return json.loads(result) if result else {"scrollY": 0, "scrollHeight": 0, "viewportHeight": 900}
+        return (
+            json.loads(result)
+            if result
+            else {"scrollY": 0, "scrollHeight": 0, "viewportHeight": 900}
+        )
 
 
 # ---------------------------------------------------------------------------
 # Element visibility checker (honeypot guard)
 # ---------------------------------------------------------------------------
+
 
 def is_element_visible(cdp: CDPConnection, selector: str) -> bool:
     """Check if an element is genuinely visible (not a honeypot)."""
@@ -857,7 +921,7 @@ def is_element_visible(cdp: CDPConnection, selector: str) -> bool:
     return bool(result)
 
 
-def get_visible_elements(cdp: CDPConnection, selector: str) -> List[Dict]:
+def get_visible_elements(cdp: CDPConnection, selector: str) -> list[dict]:
     """Get all visible elements matching selector with their positions."""
     result = cdp.evaluate(f"""
         (() => {{
@@ -895,6 +959,7 @@ def get_visible_elements(cdp: CDPConnection, selector: str) -> List[Dict]:
 # Page detection — identify what LinkedIn page we're on
 # ---------------------------------------------------------------------------
 
+
 class PageType:
     FEED = "feed"
     PROFILE = "profile"
@@ -909,9 +974,10 @@ class PageType:
     UNKNOWN = "unknown"
 
 
-def detect_page(cdp: CDPConnection, timeout: float = 30) -> Dict[str, Any]:
+def detect_page(cdp: CDPConnection, timeout: float = 30) -> dict[str, Any]:
     """Detect the current LinkedIn page type and extract key info."""
-    result = cdp.evaluate("""
+    result = cdp.evaluate(
+        """
         (() => {
             const url = window.location.href;
             const title = document.title || '';
@@ -1003,11 +1069,13 @@ def detect_page(cdp: CDPConnection, timeout: float = 30) -> Dict[str, Any]:
                              hasLoginPrompt ? 'login' : null,
             });
         })()
-    """, timeout=timeout)
+    """,
+        timeout=timeout,
+    )
     return json.loads(result) if result else {"page_type": "unknown", "is_danger": False}
 
 
-def check_circuit_breakers(cdp: CDPConnection) -> Optional[str]:
+def check_circuit_breakers(cdp: CDPConnection) -> str | None:
     """Check for danger signals. Returns danger type string or None if safe."""
     page = detect_page(cdp)
     if page.get("is_danger"):
@@ -1020,11 +1088,11 @@ PROFILE_TOPCARD_SELECTOR = (
     '[componentkey*="profile.card"][componentkey*="topcard"], '
     '[componentkey*="Topcard"], '
     '[componentkey*="topcard"], '
-    '.pv-top-card'
+    ".pv-top-card"
 )
 PROFILE_READY_SELECTOR = f"main h1, h1, {PROFILE_TOPCARD_SELECTOR}"
 PROFILE_ACTION_READY_SELECTOR = (
-    f"{PROFILE_READY_SELECTOR}, button, [role=\"button\"], "
+    f'{PROFILE_READY_SELECTOR}, button, [role="button"], '
     'a[role="menuitem"][componentkey^="ConnectButtonstate:invitation:"]'
 )
 PROFILE_MORE_CONNECT_SELECTOR = (
@@ -1037,15 +1105,16 @@ PROFILE_MORE_CONNECT_SELECTOR = (
 # Page-readiness gate — used by acceptance-check path for resilient navigation
 # ---------------------------------------------------------------------------
 
+
 def _wait_for_page_ready(
     cdp: CDPConnection,
-    expected_selector: Optional[str] = None,
+    expected_selector: str | None = None,
     timeout: float = 20,
     poll_interval: float = 1.0,
     stable_for: float = 0.0,
-    ignored_overlays: Optional[set] = None,
-    ignored_loaders: Optional[set] = None,
-) -> Dict[str, Any]:
+    ignored_overlays: set | None = None,
+    ignored_loaders: set | None = None,
+) -> dict[str, Any]:
     """Wait until the page is interactive and optionally until an expected selector appears.
 
     Checks:
@@ -1058,13 +1127,14 @@ def _wait_for_page_ready(
     Returns dict with 'ready' bool, 'readyState', 'overlay_detected', 'selector_found'.
     """
     start = time.time()
-    last_state: Dict[str, Any] = {}
-    stable_since: Optional[float] = None
-    last_text_len: Optional[int] = None
+    last_state: dict[str, Any] = {}
+    stable_since: float | None = None
+    last_text_len: int | None = None
 
     while time.time() - start < timeout:
         try:
-            check = cdp.evaluate("""
+            check = cdp.evaluate(
+                """
                 (() => {
                     const rs = document.readyState;
 
@@ -1109,7 +1179,9 @@ def _wait_for_page_ready(
                         url: window.location.href,
                     });
                 })()
-            """, timeout=8)
+            """,
+                timeout=8,
+            )
         except Exception as exc:
             last_state = {
                 "ready": False,
@@ -1181,7 +1253,8 @@ def _wait_for_page_ready(
         # If overlay detected, try to dismiss it
         if blocking_overlay and page_ready:
             try:
-                cdp.evaluate("""
+                cdp.evaluate(
+                    """
                     (() => {
                         // Try dismissing cookie consent / generic modals
                         const dismissBtns = document.querySelectorAll(
@@ -1192,7 +1265,9 @@ def _wait_for_page_ready(
                         );
                         if (dismissBtns.length > 0) dismissBtns[0].click();
                     })()
-                """, timeout=8)
+                """,
+                    timeout=8,
+                )
             except Exception:
                 pass
 
@@ -1206,12 +1281,12 @@ def _wait_for_page_ready(
 
 def _wait_for_linkedin_ready(
     cdp: CDPConnection,
-    expected_selector: Optional[str] = None,
+    expected_selector: str | None = None,
     timeout: float = 45,
     stable_for: float = 1.5,
-    ignored_overlays: Optional[set] = None,
-    ignored_loaders: Optional[set] = None,
-) -> Dict[str, Any]:
+    ignored_overlays: set | None = None,
+    ignored_loaders: set | None = None,
+) -> dict[str, Any]:
     """Wait for LinkedIn's SPA shell and expected content to finish rendering."""
     return _wait_for_page_ready(
         cdp,
@@ -1227,16 +1302,16 @@ def _wait_for_linkedin_ready(
 def _navigate_with_readiness(
     cdp: CDPConnection,
     url: str,
-    expected_selector: Optional[str] = None,
+    expected_selector: str | None = None,
     nav_timeout: float = 30,
     ready_timeout: float = 20,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Navigate to a URL using JS (no mouse events) and wait for readiness.
 
     Designed for the acceptance-check path where reliability > human-likeness.
     Falls back to window.location if cdp.navigate has issues.
     """
-    result: Dict[str, Any] = {"url": url, "method": "cdp_navigate"}
+    result: dict[str, Any] = {"url": url, "method": "cdp_navigate"}
 
     try:
         cdp.navigate(url, wait_load=True, timeout=nav_timeout)
@@ -1263,13 +1338,13 @@ def _safe_scroll_or_js(
     cdp: CDPConnection,
     sim: "HumanSimulator",
     pixels: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Attempt a human-sim scroll; fall back to JS scrollBy on timeout.
 
     Scoped to acceptance-check path where we prefer reliability over
     pixel-perfect human simulation.
     """
-    result: Dict[str, Any] = {"method": "human_sim"}
+    result: dict[str, Any] = {"method": "human_sim"}
     try:
         sim.scroll(pixels)
     except TimeoutError as exc:
@@ -1283,6 +1358,7 @@ def _safe_scroll_or_js(
 # ---------------------------------------------------------------------------
 # Feed reader — content-aware scrolling
 # ---------------------------------------------------------------------------
+
 
 def detect_post_type(cdp: CDPConnection) -> str:
     """Detect the type of post currently visible in the viewport center."""
@@ -1343,7 +1419,7 @@ def detect_post_type(cdp: CDPConnection) -> str:
     return result or "unknown"
 
 
-def generate_scroll_stop_sequence(num_stops: int = 5) -> List[Dict]:
+def generate_scroll_stop_sequence(num_stops: int = 5) -> list[dict]:
     """Generate a unique scroll-stop sequence for this session.
 
     Returns a list of dicts like:
@@ -1351,14 +1427,16 @@ def generate_scroll_stop_sequence(num_stops: int = 5) -> List[Dict]:
     """
     sequence = []
     for _ in range(num_stops):
-        sequence.append({
-            "scrolls_before_pause": random.randint(1, 6),
-            "pause_type": random.choice(["read", "skim", "linger"]),
-        })
+        sequence.append(
+            {
+                "scrolls_before_pause": random.randint(1, 6),
+                "pause_type": random.choice(["read", "skim", "linger"]),
+            }
+        )
     return sequence
 
 
-def execute_feed_scroll(sim: HumanSimulator, scroll_stop_sequence: List[Dict]) -> List[Dict]:
+def execute_feed_scroll(sim: HumanSimulator, scroll_stop_sequence: list[dict]) -> list[dict]:
     """Execute a feed scroll session following the generated sequence.
 
     Returns list of observed posts with their types.
@@ -1415,6 +1493,7 @@ def execute_feed_scroll(sim: HumanSimulator, scroll_stop_sequence: List[Dict]) -
 # Profile viewer
 # ---------------------------------------------------------------------------
 
+
 def _safe_debug_slug(value: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(value or "").strip())
     return slug.strip("_")[:80] or "profile"
@@ -1423,14 +1502,15 @@ def _safe_debug_slug(value: str) -> str:
 def _write_profile_mapper_dump(
     cdp: CDPConnection,
     profile_url: str,
-    result: Dict[str, Any],
+    result: dict[str, Any],
     navigation_started_at: float,
     readiness_fired_at: str,
 ) -> None:
     """Write diagnostic-only top-card dumps without changing mapper behavior."""
     try:
         dump_taken_at = datetime.now().isoformat(timespec="milliseconds")
-        raw = cdp.evaluate("""
+        raw = cdp.evaluate(
+            """
             (() => {
                 const norm = (value) => (value || '').replace(/\\s+/g, ' ').trim();
                 const h1 = document.querySelector('h1');
@@ -1452,11 +1532,15 @@ def _write_profile_mapper_dump(
                     bodyTextSample: ((document.body && document.body.innerText) || '').slice(0, 2000),
                 });
             })()
-        """, timeout=10)
+        """,
+            timeout=10,
+        )
         dump = json.loads(raw) if raw else {}
         debug_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "debug"))
         os.makedirs(debug_dir, exist_ok=True)
-        lead_slug = _safe_debug_slug(dump.get("profileName") or profile_url.rstrip("/").split("/")[-1])
+        lead_slug = _safe_debug_slug(
+            dump.get("profileName") or profile_url.rstrip("/").split("/")[-1]
+        )
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
         base = os.path.join(debug_dir, f"{lead_slug}_{timestamp}")
         html_path = f"{base}.html"
@@ -1474,9 +1558,15 @@ def _write_profile_mapper_dump(
             "classification": result.get("state"),
             "direct_buttons_seen": result.get("direct_buttons_seen", []),
             "more_button_seen": result.get("more_button_seen"),
-            "more_clicked_at": result.get("more_menu", {}).get("more_clicked_at") if isinstance(result.get("more_menu"), dict) else None,
-            "more_menu_items_at_read": result.get("more_menu", {}).get("menu_items_count") if isinstance(result.get("more_menu"), dict) else None,
-            "more_scope_found": result.get("more_menu", {}).get("scope_found") if isinstance(result.get("more_menu"), dict) else None,
+            "more_clicked_at": result.get("more_menu", {}).get("more_clicked_at")
+            if isinstance(result.get("more_menu"), dict)
+            else None,
+            "more_menu_items_at_read": result.get("more_menu", {}).get("menu_items_count")
+            if isinstance(result.get("more_menu"), dict)
+            else None,
+            "more_scope_found": result.get("more_menu", {}).get("scope_found")
+            if isinstance(result.get("more_menu"), dict)
+            else None,
             "result": result,
             "html_path": html_path,
             "body_text_sample": dump.get("bodyTextSample", ""),
@@ -1488,9 +1578,9 @@ def _write_profile_mapper_dump(
         result["debug_dump_error"] = str(exc)
 
 
-def inspect_profile_action_state(cdp: CDPConnection, profile_url: str) -> Dict[str, Any]:
+def inspect_profile_action_state(cdp: CDPConnection, profile_url: str) -> dict[str, Any]:
     """Inspect the profile top-card action controls without heavy browsing."""
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "action": "inspect_profile_action_state",
         "profile_url": profile_url,
         "state": "unknown",
@@ -1505,24 +1595,29 @@ def inspect_profile_action_state(cdp: CDPConnection, profile_url: str) -> Dict[s
             stable_for=1.0,
             # LinkedIn keeps this SPA wrapper visible on normal profile pages;
             # it is not the same as an auth wall once profile content is present.
-            ignored_overlays={'.authentication-outlet'},
+            ignored_overlays={".authentication-outlet"},
         )
         readiness_fired_at = datetime.now().isoformat(timespec="milliseconds")
         result["load_state"] = ready_state
         if not ready_state.get("ready"):
             result["state"] = "unknown"
             result["error"] = "profile_load_timeout"
-            _write_profile_mapper_dump(cdp, profile_url, result, navigation_started_at, readiness_fired_at)
+            _write_profile_mapper_dump(
+                cdp, profile_url, result, navigation_started_at, readiness_fired_at
+            )
             return result
 
         danger = check_circuit_breakers(cdp)
         if danger:
             result["state"] = "profile_unavailable"
             result["error"] = danger
-            _write_profile_mapper_dump(cdp, profile_url, result, navigation_started_at, readiness_fired_at)
+            _write_profile_mapper_dump(
+                cdp, profile_url, result, navigation_started_at, readiness_fired_at
+            )
             return result
 
-        raw = cdp.evaluate("""
+        raw = cdp.evaluate(
+            """
             (() => {
                 const visible = (el) => {
                     if (!el) return false;
@@ -1575,12 +1670,16 @@ def inspect_profile_action_state(cdp: CDPConnection, profile_url: str) -> Dict[s
                     controls,
                 });
             })()
-        """, timeout=10)
+        """,
+            timeout=10,
+        )
         data = json.loads(raw) if raw else {}
         result.update(data)
 
         controls = data.get("controls", []) if isinstance(data, dict) else []
-        result["top_card_ready_at"] = datetime.now().isoformat(timespec="milliseconds") if controls else None
+        result["top_card_ready_at"] = (
+            datetime.now().isoformat(timespec="milliseconds") if controls else None
+        )
         result["direct_buttons_seen"] = [
             str(item.get("text", "")).strip()
             for item in controls
@@ -1589,20 +1688,23 @@ def inspect_profile_action_state(cdp: CDPConnection, profile_url: str) -> Dict[s
         top_text = str(data.get("topCardText", "")).strip()
         body_sample = str(data.get("bodySample", "")).strip().lower()
 
-        def exact_text(value: str) -> List[Dict[str, Any]]:
+        def exact_text(value: str) -> list[dict[str, Any]]:
             return [
-                item for item in controls
+                item
+                for item in controls
                 if str(item.get("text", "")).strip().lower() == value.lower()
             ]
 
         pending_controls = [
-            item for item in controls
+            item
+            for item in controls
             if str(item.get("text", "")).strip().lower() == "pending"
             or str(item.get("ariaLabel", "")).strip().lower().startswith("pending")
             or "withdraw invitation" in str(item.get("ariaLabel", "")).lower()
         ]
         direct_connect = [
-            item for item in controls
+            item
+            for item in controls
             if str(item.get("text", "")).strip().lower() == "connect"
             and (
                 re.match(r"^invite .+ to connect$", str(item.get("ariaLabel", "")).strip(), re.I)
@@ -1630,7 +1732,8 @@ def inspect_profile_action_state(cdp: CDPConnection, profile_url: str) -> Dict[s
             result["matched_control"] = direct_connect[0]
         else:
             more_controls = [
-                item for item in controls
+                item
+                for item in controls
                 if str(item.get("text", "")).strip().lower() == "more"
                 or str(item.get("ariaLabel", "")).strip().lower() == "more actions"
             ]
@@ -1653,7 +1756,9 @@ def inspect_profile_action_state(cdp: CDPConnection, profile_url: str) -> Dict[s
                     result["state"] = "already_connected"
                 elif controls and result.get("error") != "more_menu_unreadable":
                     result["state"] = "no_connect_button"
-        _write_profile_mapper_dump(cdp, profile_url, result, navigation_started_at, readiness_fired_at)
+        _write_profile_mapper_dump(
+            cdp, profile_url, result, navigation_started_at, readiness_fired_at
+        )
         return result
     except Exception as exc:
         result["state"] = "unknown"
@@ -1661,10 +1766,11 @@ def inspect_profile_action_state(cdp: CDPConnection, profile_url: str) -> Dict[s
         return result
 
 
-def _open_more_and_find_connect(cdp: CDPConnection) -> Dict[str, Any]:
+def _open_more_and_find_connect(cdp: CDPConnection) -> dict[str, Any]:
     """Open the profile More menu once and look for an exact Connect item."""
-    more_clicked_at: Optional[str] = None
-    clicked = cdp.evaluate("""
+    more_clicked_at: str | None = None
+    clicked = cdp.evaluate(
+        """
         (() => {
             const visible = (el) => {
                 const rect = el.getBoundingClientRect();
@@ -1695,13 +1801,15 @@ def _open_more_and_find_connect(cdp: CDPConnection) -> Dict[str, Any]:
             more.click();
             return true;
         })()
-    """, timeout=8)
+    """,
+        timeout=8,
+    )
     if not clicked:
         return {"found": False, "clicked_more": False}
 
     more_clicked_at = datetime.now().isoformat(timespec="milliseconds")
     deadline = time.time() + 5.0
-    last_data: Dict[str, Any] = {
+    last_data: dict[str, Any] = {
         "found": False,
         "clicked_more": True,
         "more_clicked_at": more_clicked_at,
@@ -1709,7 +1817,8 @@ def _open_more_and_find_connect(cdp: CDPConnection) -> Dict[str, Any]:
         "menu_populated": False,
     }
     while time.time() < deadline:
-        raw = cdp.evaluate("""
+        raw = cdp.evaluate(
+            """
         (() => {
             const visible = (el) => {
                 const rect = el.getBoundingClientRect();
@@ -1757,7 +1866,9 @@ def _open_more_and_find_connect(cdp: CDPConnection) -> Dict[str, Any]:
                 scopeFound: !!scope,
             });
         })()
-        """, timeout=8)
+        """,
+            timeout=8,
+        )
         data = json.loads(raw) if raw else {"found": False, "menuItemsCount": 0}
         menu_items_count = int(data.get("menuItemsCount", 0) or 0)
         last_data = {
@@ -1779,7 +1890,7 @@ def _open_more_and_find_connect(cdp: CDPConnection) -> Dict[str, Any]:
     return last_data
 
 
-def _open_more_and_click_connect(cdp: CDPConnection) -> Dict[str, Any]:
+def _open_more_and_click_connect(cdp: CDPConnection) -> dict[str, Any]:
     """Open More and click the Connect item inside it.
 
     Mirrors _open_more_and_find_connect (JS click on More, polling for the open
@@ -1787,8 +1898,10 @@ def _open_more_and_click_connect(cdp: CDPConnection) -> Dict[str, Any]:
     Used by the send path so connect_in_more click has the same reliability as
     the mapper's classification.
     """
-    def click_open_menu_connect() -> Dict[str, Any]:
-        raw = cdp.evaluate("""
+
+    def click_open_menu_connect() -> dict[str, Any]:
+        raw = cdp.evaluate(
+            """
         (() => {
             const norm = (value) => (value || '').replace(/\\s+/g, ' ').trim();
             const visible = (el) => {
@@ -1833,7 +1946,9 @@ def _open_more_and_click_connect(cdp: CDPConnection) -> Dict[str, Any]:
                 scopeFound: !!scope,
             });
         })()
-        """, timeout=8)
+        """,
+            timeout=8,
+        )
         data = json.loads(raw) if raw else {"connectClicked": False, "menuItemsCount": 0}
         return {
             "connect_clicked": bool(data.get("connectClicked")),
@@ -1853,8 +1968,9 @@ def _open_more_and_click_connect(cdp: CDPConnection) -> Dict[str, Any]:
         existing["used_existing_menu"] = True
         return existing
 
-    more_clicked_at: Optional[str] = None
-    clicked = cdp.evaluate("""
+    more_clicked_at: str | None = None
+    clicked = cdp.evaluate(
+        """
         (() => {
             const visible = (el) => {
                 const rect = el.getBoundingClientRect();
@@ -1886,13 +2002,15 @@ def _open_more_and_click_connect(cdp: CDPConnection) -> Dict[str, Any]:
             more.click();
             return true;
         })()
-    """, timeout=8)
+    """,
+        timeout=8,
+    )
     if not clicked:
         return {"clicked_more": False, "connect_clicked": False}
 
     more_clicked_at = datetime.now().isoformat(timespec="milliseconds")
     deadline = time.time() + 5.0
-    last_data: Dict[str, Any] = {
+    last_data: dict[str, Any] = {
         "clicked_more": True,
         "connect_clicked": False,
         "more_clicked_at": more_clicked_at,
@@ -1921,7 +2039,9 @@ def _open_more_and_click_connect(cdp: CDPConnection) -> Dict[str, Any]:
     return last_data
 
 
-def browse_profile_briefly(cdp: CDPConnection, sim: HumanSimulator, seconds: float = 4.0) -> Dict[str, Any]:
+def browse_profile_briefly(
+    cdp: CDPConnection, sim: HumanSimulator, seconds: float = 4.0
+) -> dict[str, Any]:
     """Bounded profile browsing used after a profile's action state is known."""
     started = time.time()
     try:
@@ -1937,7 +2057,7 @@ def browse_profile_briefly(cdp: CDPConnection, sim: HumanSimulator, seconds: flo
         return {"ok": False, "elapsed": round(time.time() - started, 1), "error": str(exc)}
 
 
-def view_profile(cdp: CDPConnection, sim: HumanSimulator, profile_url: str) -> Dict[str, Any]:
+def view_profile(cdp: CDPConnection, sim: HumanSimulator, profile_url: str) -> dict[str, Any]:
     """Navigate to a profile, scroll naturally, and extract key data.
 
     Returns extracted profile info.
@@ -1953,7 +2073,9 @@ def view_profile(cdp: CDPConnection, sim: HumanSimulator, profile_url: str) -> D
         "headline": "",
         "location": "",
         "about": "",
-        "connection_degree": "1st" if re.search(r"\b1st\b|1st degree connection", top_text, re.I) else "",
+        "connection_degree": "1st"
+        if re.search(r"\b1st\b|1st degree connection", top_text, re.I)
+        else "",
         "has_connect_button": inspected.get("state") in {"connect_direct", "connect_in_more"},
         "is_pending": inspected.get("state") == "already_pending",
         "is_connected": inspected.get("state") == "already_connected",
@@ -1967,14 +2089,26 @@ def view_profile(cdp: CDPConnection, sim: HumanSimulator, profile_url: str) -> D
 # Activity tab reader
 # ---------------------------------------------------------------------------
 
-def _open_activity_tab(cdp: CDPConnection, tab_label: str) -> Dict[str, Any]:
+
+def _open_activity_tab(cdp: CDPConnection, tab_label: str) -> dict[str, Any]:
     """Open a specific activity sub-tab by visible label."""
     requested = str(tab_label).strip().lower()
     if requested in {"all", "current"}:
-        return {"found": True, "clicked": False, "via": "current_all_activity_url", "selected_before": True}
+        return {
+            "found": True,
+            "clicked": False,
+            "via": "current_all_activity_url",
+            "selected_before": True,
+        }
     if requested not in {"posts", "comments", "reactions"}:
-        return {"found": False, "clicked": False, "via": "blocked_disallowed_activity_tab", "text": requested}
-    raw = cdp.evaluate(f"""
+        return {
+            "found": False,
+            "clicked": False,
+            "via": "blocked_disallowed_activity_tab",
+            "text": requested,
+        }
+    raw = cdp.evaluate(
+        f"""
         (async () => {{
             const label = {json.dumps(tab_label)};
             const normalized = (value) => (value || '').replace(/\\s+/g, ' ').trim().toLowerCase();
@@ -2127,11 +2261,15 @@ def _open_activity_tab(cdp: CDPConnection, tab_label: str) -> Dict[str, Any]:
 
             return JSON.stringify({{found: false, clicked: false, via: '', selected_before: false, text: ''}});
         }})()
-    """, await_promise=True)
+    """,
+        await_promise=True,
+    )
     return json.loads(raw) if raw else {"found": False, "clicked": False}
 
 
-def _open_profile_activity_from_profile(cdp: CDPConnection, timeout: float = 25.0) -> Dict[str, Any]:
+def _open_profile_activity_from_profile(
+    cdp: CDPConnection, timeout: float = 25.0
+) -> dict[str, Any]:
     """Check immediately, then every five seconds before URL fallback."""
     started = time.monotonic()
     deadline = started + max(0.0, timeout)
@@ -2145,7 +2283,7 @@ def _open_profile_activity_from_profile(cdp: CDPConnection, timeout: float = 25.
         time.sleep(min(5.0, max(0.0, deadline - time.monotonic())))
 
 
-def _try_open_profile_activity_from_profile(cdp: CDPConnection) -> Dict[str, Any]:
+def _try_open_profile_activity_from_profile(cdp: CDPConnection) -> dict[str, Any]:
     """Click the profile page's visible Show all posts link into activity."""
     raw = cdp.evaluate("""
         (() => {
@@ -2194,9 +2332,10 @@ def _extract_visible_activity_entries(
     tab_key: str,
     timeout: float = 8.0,
     minimum_direct_comments: int = 2,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Extract visible entries from the current activity tab."""
-    raw = cdp.evaluate(f"""
+    raw = cdp.evaluate(
+        f"""
         (() => {{
             const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
             const lower = (value) => normalize(value).toLowerCase();
@@ -2433,7 +2572,9 @@ def _extract_visible_activity_entries(
                 shadow_roots_scanned: roots.length - 1,
             }});
         }})()
-    """, timeout=timeout)
+    """,
+        timeout=timeout,
+    )
     return json.loads(raw) if raw else {"activities": [], "total_visible": 0, "profile_name": ""}
 
 
@@ -2504,25 +2645,45 @@ def _wait_for_activity_destination(
     tab_key: str,
     timeout: float = 8.0,
     poll_interval: float = 0.35,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Wait until async navigation reaches the requested activity tab or a hard invalid page."""
     started = time.time()
     last_url = ""
     while time.time() - started < max(0.5, timeout):
         invalid = _activity_invalid_result(cdp)
         if invalid:
-            return {"arrived": False, "invalid": invalid, "url": invalid.get("url", ""), "elapsed_sec": round(time.time() - started, 2)}
+            return {
+                "arrived": False,
+                "invalid": invalid,
+                "url": invalid.get("url", ""),
+                "elapsed_sec": round(time.time() - started, 2),
+            }
         try:
             last_url = str(cdp.evaluate("window.location.href", timeout=5) or "")
         except Exception as exc:
-            return {"arrived": False, "reason": "url_probe_failed", "error": str(exc), "url": last_url, "elapsed_sec": round(time.time() - started, 2)}
+            return {
+                "arrived": False,
+                "reason": "url_probe_failed",
+                "error": str(exc),
+                "url": last_url,
+                "elapsed_sec": round(time.time() - started, 2),
+            }
         if _activity_destination_matches(last_url, profile_base, tab_key):
-            return {"arrived": True, "url": last_url, "elapsed_sec": round(time.time() - started, 2)}
+            return {
+                "arrived": True,
+                "url": last_url,
+                "elapsed_sec": round(time.time() - started, 2),
+            }
         time.sleep(min(max(0.05, poll_interval), max(0.05, timeout - (time.time() - started))))
-    return {"arrived": False, "reason": "activity_destination_not_reached", "url": last_url, "elapsed_sec": round(time.time() - started, 2)}
+    return {
+        "arrived": False,
+        "reason": "activity_destination_not_reached",
+        "url": last_url,
+        "elapsed_sec": round(time.time() - started, 2),
+    }
 
 
-def _activity_invalid_result(cdp: CDPConnection) -> Optional[Dict[str, Any]]:
+def _activity_invalid_result(cdp: CDPConnection) -> dict[str, Any] | None:
     """Detect profile-level invalid pages before a blank can be misclassified."""
     page = detect_page(cdp)
     if page.get("danger_type") == "invalid_profile_or_404":
@@ -2541,8 +2702,9 @@ def _activity_invalid_result(cdp: CDPConnection) -> Optional[Dict[str, Any]]:
     }
 
 
-def _activity_scroll_snapshot(cdp: CDPConnection) -> Dict[str, Any]:
-    raw = cdp.evaluate("""
+def _activity_scroll_snapshot(cdp: CDPConnection) -> dict[str, Any]:
+    raw = cdp.evaluate(
+        """
         (() => {
             const visible = (el) => {
                 if (!el) return false;
@@ -2590,41 +2752,66 @@ def _activity_scroll_snapshot(cdp: CDPConnection) -> Dict[str, Any]:
                 url: window.location.href
             });
         })()
-    """, timeout=8)
-    return json.loads(raw) if raw else {
-        "scrollY": 0,
-        "scrollHeight": 0,
-        "viewportHeight": 0,
-        "cardCount": 0,
-        "loading": False,
-        "emptyState": False,
-        "emptySignals": [],
-        "url": "",
-    }
+    """,
+        timeout=8,
+    )
+    return (
+        json.loads(raw)
+        if raw
+        else {
+            "scrollY": 0,
+            "scrollHeight": 0,
+            "viewportHeight": 0,
+            "cardCount": 0,
+            "loading": False,
+            "emptyState": False,
+            "emptySignals": [],
+            "url": "",
+        }
+    )
 
 
 def _wait_for_activity_feed_state(
     cdp: CDPConnection,
     timeout: float = 12.0,
     poll_interval: float = 0.7,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Wait for LinkedIn's client-rendered activity feed, not just the shell."""
     started = time.time()
-    last: Dict[str, Any] = {}
+    last: dict[str, Any] = {}
     while time.time() - started < max(0.5, timeout):
         invalid = _activity_invalid_result(cdp)
         if invalid:
-            return {"ready": False, "invalid": invalid, "elapsed_sec": round(time.time() - started, 2)}
+            return {
+                "ready": False,
+                "invalid": invalid,
+                "elapsed_sec": round(time.time() - started, 2),
+            }
         try:
             last = _activity_scroll_snapshot(cdp)
         except (TimeoutError, RuntimeError) as exc:
             last = {"error": str(exc)}
         if int(last.get("cardCount", 0) or 0) > 0:
-            return {"ready": True, "reason": "activity_cards_visible", "snapshot": last, "elapsed_sec": round(time.time() - started, 2)}
+            return {
+                "ready": True,
+                "reason": "activity_cards_visible",
+                "snapshot": last,
+                "elapsed_sec": round(time.time() - started, 2),
+            }
         if last.get("emptyState") and not last.get("loading"):
-            return {"ready": True, "reason": "explicit_empty_state", "snapshot": last, "elapsed_sec": round(time.time() - started, 2)}
+            return {
+                "ready": True,
+                "reason": "explicit_empty_state",
+                "snapshot": last,
+                "elapsed_sec": round(time.time() - started, 2),
+            }
         time.sleep(min(max(0.1, poll_interval), max(0.1, timeout - (time.time() - started))))
-    return {"ready": False, "reason": "activity_feed_not_hydrated", "snapshot": last, "elapsed_sec": round(time.time() - started, 2)}
+    return {
+        "ready": False,
+        "reason": "activity_feed_not_hydrated",
+        "snapshot": last,
+        "elapsed_sec": round(time.time() - started, 2),
+    }
 
 
 def _scroll_activity_with_lazy_patience(
@@ -2632,7 +2819,7 @@ def _scroll_activity_with_lazy_patience(
     sim: HumanSimulator,
     max_seconds: float,
     max_distance: int = 1800,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Activity-specific scroll: patient for lazy-load, finite at real page end."""
     started = time.time()
     deadline = started + max(0.5, max_seconds)
@@ -2697,7 +2884,7 @@ def read_activity_tab(
     sim: HumanSimulator,
     profile_url: str,
     max_seconds: float = 30.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Navigate to a profile's activity endpoints and read all/comments/reactions."""
     profile_base = canonicalize_linkedin_profile_url(profile_url)
     if not profile_base:
@@ -2710,8 +2897,8 @@ def read_activity_tab(
     started_at = time.time()
     deadline = started_at + max_seconds
 
-    tabs_checked: List[Dict[str, Any]] = []
-    best_result: Optional[Dict[str, Any]] = None
+    tabs_checked: list[dict[str, Any]] = []
+    best_result: dict[str, Any] | None = None
 
     def elapsed() -> float:
         return time.time() - started_at
@@ -2719,7 +2906,7 @@ def read_activity_tab(
     def remaining() -> float:
         return max(0.0, deadline - time.time())
 
-    def timeout_result(tab_key: str, reason: str, **extra: Any) -> Dict[str, Any]:
+    def timeout_result(tab_key: str, reason: str, **extra: Any) -> dict[str, Any]:
         return {
             "error": True,
             "danger": "activity_read_timeout",
@@ -2753,18 +2940,25 @@ def read_activity_tab(
             timeout=min(8, max(2, remaining())),
         )
         if navigation_state.get("invalid"):
-            return {**navigation_state["invalid"], "source_tab": tab_key, "tabs_checked": tabs_checked, "navigation_state": navigation_state}
+            return {
+                **navigation_state["invalid"],
+                "source_tab": tab_key,
+                "tabs_checked": tabs_checked,
+                "navigation_state": navigation_state,
+            }
         if not navigation_state.get("arrived"):
-            return timeout_result(tab_key, "activity_page_not_ready", navigation_state=navigation_state)
+            return timeout_result(
+                tab_key, "activity_page_not_ready", navigation_state=navigation_state
+            )
         ready_state = _wait_for_linkedin_ready(
             cdp,
-            expected_selector='main, .scaffold-layout, .profile-creator-shared-feed-update__container, .feed-shared-update-v2, .artdeco-card',
+            expected_selector="main, .scaffold-layout, .profile-creator-shared-feed-update__container, .feed-shared-update-v2, .artdeco-card",
             timeout=min(12, max(3, remaining())),
             # Activity feeds keep hydrating/lazy-loading even after useful content is visible.
             # Selector readiness plus the bounded pause/scroll below is a better signal here.
             stable_for=0.0,
-            ignored_overlays={'.authentication-outlet'},
-            ignored_loaders={'.artdeco-loader', '[aria-busy="true"]'},
+            ignored_overlays={".authentication-outlet"},
+            ignored_loaders={".artdeco-loader", '[aria-busy="true"]'},
         )
         if not ready_state.get("ready"):
             return timeout_result(tab_key, "activity_page_not_ready", load_state=ready_state)
@@ -2776,11 +2970,21 @@ def read_activity_tab(
             return {**invalid, "source_tab": tab_key, "tabs_checked": tabs_checked}
         feed_state = _wait_for_activity_feed_state(cdp, timeout=min(12, max(3, remaining())))
         if feed_state.get("invalid"):
-            return {**feed_state["invalid"], "source_tab": tab_key, "tabs_checked": tabs_checked, "feed_state": feed_state}
+            return {
+                **feed_state["invalid"],
+                "source_tab": tab_key,
+                "tabs_checked": tabs_checked,
+                "feed_state": feed_state,
+            }
         if not feed_state.get("ready"):
             return timeout_result(tab_key, "activity_feed_not_hydrated", feed_state=feed_state)
 
-        open_result = {"found": True, "clicked": False, "via": "direct_activity_url", "url": activity_url}
+        open_result = {
+            "found": True,
+            "clicked": False,
+            "via": "direct_activity_url",
+            "url": activity_url,
+        }
 
         if not bounded_pause(0.5, 1.5):
             return timeout_result(tab_key, "timeout_before_scroll")
@@ -2803,7 +3007,9 @@ def read_activity_tab(
                 timeout=min(8, max(3, remaining())),
             )
         except (TimeoutError, RuntimeError) as exc:
-            return timeout_result(tab_key, "activity_extract_failed_or_timed_out", error_detail=str(exc))
+            return timeout_result(
+                tab_key, "activity_extract_failed_or_timed_out", error_detail=str(exc)
+            )
         window_counts = classify_activity_windows(tab_result.get("activities", []))
         recent_items = []
         for act in tab_result.get("activities", []):
@@ -2873,10 +3079,10 @@ def read_activity_tabs_detail(
     profile_url: str,
     max_seconds: float = 45.0,
     navigation_type: str = "direct_url",
-    tab_order: Optional[List[Tuple[str, str]]] = None,
+    tab_order: list[tuple[str, str]] | None = None,
     minimum_direct_comments: int = 2,
     disable_early_stop: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Read posts/comments/reactions separately for contact ranking."""
     profile_base = canonicalize_linkedin_profile_url(profile_url)
     if not profile_base:
@@ -2888,10 +3094,17 @@ def read_activity_tabs_detail(
         }
     started_at = time.time()
     deadline = started_at + max_seconds
-    tabs: Dict[str, Any] = {}
-    navigation_type = (navigation_type or "direct_url").strip().lower().replace("-", "_").replace(" ", "_")
-    selector_based = navigation_type in {"selector_based", "selector", "click_through", "clickthrough"}
-    profile_activity_open_result: Dict[str, Any] = {}
+    tabs: dict[str, Any] = {}
+    navigation_type = (
+        (navigation_type or "direct_url").strip().lower().replace("-", "_").replace(" ", "_")
+    )
+    selector_based = navigation_type in {
+        "selector_based",
+        "selector",
+        "click_through",
+        "clickthrough",
+    }
+    profile_activity_open_result: dict[str, Any] = {}
 
     def elapsed() -> float:
         return time.time() - started_at
@@ -2899,7 +3112,7 @@ def read_activity_tabs_detail(
     def remaining() -> float:
         return max(0.0, deadline - time.time())
 
-    def timeout_result(tab_key: str, reason: str, **extra: Any) -> Dict[str, Any]:
+    def timeout_result(tab_key: str, reason: str, **extra: Any) -> dict[str, Any]:
         return {
             "error": True,
             "danger": "activity_read_timeout",
@@ -2937,7 +3150,7 @@ def read_activity_tabs_detail(
             return "Active"
         if count_within("comments", 30) + count_within("reactions", 30) >= 5:
             return "Active"
-        if any((tab.get("activity_classification_uncertain") for tab in tabs.values())):
+        if any(tab.get("activity_classification_uncertain") for tab in tabs.values()):
             return ""
         return ""
 
@@ -2951,15 +3164,20 @@ def read_activity_tabs_detail(
             report_navigation("Direct URL", "Opening profile for assessment")
             cdp.navigate(profile_base + "/", wait_load=False, timeout=min(8, max(2, remaining())))
         except (TimeoutError, RuntimeError) as exc:
-            profile_activity_open_result = {"found": False, "clicked": False, "via": "profile_page", "error": str(exc)}
+            profile_activity_open_result = {
+                "found": False,
+                "clicked": False,
+                "via": "profile_page",
+                "error": str(exc),
+            }
         else:
             ready_state = _wait_for_linkedin_ready(
                 cdp,
                 expected_selector='main, .scaffold-layout, a[href*="/recent-activity/all/"], .artdeco-card',
                 timeout=min(12, max(3, remaining())),
                 stable_for=0.0,
-                ignored_overlays={'.authentication-outlet'},
-                ignored_loaders={'.artdeco-loader', '[aria-busy="true"]'},
+                ignored_overlays={".authentication-outlet"},
+                ignored_loaders={".artdeco-loader", '[aria-busy="true"]'},
             )
             invalid = _activity_invalid_result(cdp)
             if invalid:
@@ -2967,7 +3185,9 @@ def read_activity_tabs_detail(
             if ready_state.get("ready") and bounded_pause(0.5, 1.25):
                 try:
                     report_navigation("DOM", "Opening profile activity")
-                    profile_activity_open_result = _open_profile_activity_from_profile(cdp, timeout=min(25, max(0, remaining() - 4)))
+                    profile_activity_open_result = _open_profile_activity_from_profile(
+                        cdp, timeout=min(25, max(0, remaining() - 4))
+                    )
                     if profile_activity_open_result.get("clicked"):
                         bounded_pause(0.75, 1.5)
                         _wait_for_linkedin_ready(
@@ -2975,34 +3195,61 @@ def read_activity_tabs_detail(
                             expected_selector='main, .scaffold-layout, button, [role="tab"], .profile-creator-shared-feed-update__container, .feed-shared-update-v2, .artdeco-card',
                             timeout=min(10, max(3, remaining())),
                             stable_for=0.0,
-                            ignored_overlays={'.authentication-outlet'},
-                            ignored_loaders={'.artdeco-loader', '[aria-busy="true"]'},
+                            ignored_overlays={".authentication-outlet"},
+                            ignored_loaders={".artdeco-loader", '[aria-busy="true"]'},
                         )
                 except (TimeoutError, RuntimeError) as exc:
-                    profile_activity_open_result = {"found": False, "clicked": False, "via": "show_all_posts", "error": str(exc)}
+                    profile_activity_open_result = {
+                        "found": False,
+                        "clicked": False,
+                        "via": "show_all_posts",
+                        "error": str(exc),
+                    }
             else:
-                profile_activity_open_result = {"found": False, "clicked": False, "via": "profile_page", "load_state": ready_state}
+                profile_activity_open_result = {
+                    "found": False,
+                    "clicked": False,
+                    "via": "profile_page",
+                    "load_state": ready_state,
+                }
 
-    selected_tab_order = tab_order or (ACTIVITY_SELECTOR_RANKING_TAB_ORDER if selector_based else ACTIVITY_RANKING_TAB_ORDER)
+    selected_tab_order = tab_order or (
+        ACTIVITY_SELECTOR_RANKING_TAB_ORDER if selector_based else ACTIVITY_RANKING_TAB_ORDER
+    )
     for tab_key, tab_label in selected_tab_order:
         if remaining() < 4:
             return timeout_result(tab_key, "insufficient_budget_before_tab")
         activity_url = _activity_url_for_tab(profile_base, tab_key)
-        open_result: Dict[str, Any]
+        open_result: dict[str, Any]
         if selector_based and profile_activity_open_result.get("clicked"):
             try:
                 report_navigation("DOM", f"Opening {tab_label}")
                 open_result = _open_activity_tab(cdp, tab_label)
             except (TimeoutError, RuntimeError) as exc:
-                open_result = {"found": False, "clicked": False, "via": "selector_error", "error": str(exc)}
+                open_result = {
+                    "found": False,
+                    "clicked": False,
+                    "via": "selector_error",
+                    "error": str(exc),
+                }
             if open_result.get("found") and _current_activity_url_is_disallowed(cdp):
                 open_result = {**open_result, "disallowed_url_after_selector": True}
             if not open_result.get("found") or open_result.get("disallowed_url_after_selector"):
                 try:
-                    report_navigation("Direct URL · fallback", f"Opening {tab_label}", open_result.get("error") or "Activity tab control missing or reached an unsupported destination")
+                    report_navigation(
+                        "Direct URL · fallback",
+                        f"Opening {tab_label}",
+                        open_result.get("error")
+                        or "Activity tab control missing or reached an unsupported destination",
+                    )
                     cdp.navigate(activity_url, wait_load=False, timeout=min(8, max(2, remaining())))
                 except (TimeoutError, RuntimeError) as exc:
-                    return timeout_result(tab_key, "navigation_failed_or_timed_out", error_detail=str(exc), open_result=open_result)
+                    return timeout_result(
+                        tab_key,
+                        "navigation_failed_or_timed_out",
+                        error_detail=str(exc),
+                        open_result=open_result,
+                    )
                 navigation_state = _wait_for_activity_destination(
                     cdp,
                     profile_base,
@@ -3010,10 +3257,24 @@ def read_activity_tabs_detail(
                     timeout=min(8, max(2, remaining())),
                 )
                 if navigation_state.get("invalid"):
-                    return {**navigation_state["invalid"], "source_tab": tab_key, "tabs": tabs, "navigation_state": navigation_state}
+                    return {
+                        **navigation_state["invalid"],
+                        "source_tab": tab_key,
+                        "tabs": tabs,
+                        "navigation_state": navigation_state,
+                    }
                 if not navigation_state.get("arrived"):
-                    return timeout_result(tab_key, "activity_page_not_ready", navigation_state=navigation_state, open_result=open_result)
-                open_result = {**open_result, "fallback_via": "direct_activity_url", "url": activity_url}
+                    return timeout_result(
+                        tab_key,
+                        "activity_page_not_ready",
+                        navigation_state=navigation_state,
+                        open_result=open_result,
+                    )
+                open_result = {
+                    **open_result,
+                    "fallback_via": "direct_activity_url",
+                    "url": activity_url,
+                }
             else:
                 bounded_pause(0.75, 1.5)
                 navigation_state = _wait_for_activity_destination(
@@ -3023,13 +3284,30 @@ def read_activity_tabs_detail(
                     timeout=min(6, max(2, remaining())),
                 )
                 if navigation_state.get("invalid"):
-                    return {**navigation_state["invalid"], "source_tab": tab_key, "tabs": tabs, "navigation_state": navigation_state}
+                    return {
+                        **navigation_state["invalid"],
+                        "source_tab": tab_key,
+                        "tabs": tabs,
+                        "navigation_state": navigation_state,
+                    }
                 if not navigation_state.get("arrived"):
                     try:
-                        report_navigation("Direct URL · fallback", f"Opening {tab_label}", "DOM navigation did not reach the requested activity tab")
-                        cdp.navigate(activity_url, wait_load=False, timeout=min(8, max(2, remaining())))
+                        report_navigation(
+                            "Direct URL · fallback",
+                            f"Opening {tab_label}",
+                            "DOM navigation did not reach the requested activity tab",
+                        )
+                        cdp.navigate(
+                            activity_url, wait_load=False, timeout=min(8, max(2, remaining()))
+                        )
                     except (TimeoutError, RuntimeError) as exc:
-                        return timeout_result(tab_key, "navigation_failed_or_timed_out", error_detail=str(exc), open_result=open_result, navigation_state=navigation_state)
+                        return timeout_result(
+                            tab_key,
+                            "navigation_failed_or_timed_out",
+                            error_detail=str(exc),
+                            open_result=open_result,
+                            navigation_state=navigation_state,
+                        )
                     navigation_state = _wait_for_activity_destination(
                         cdp,
                         profile_base,
@@ -3037,16 +3315,44 @@ def read_activity_tabs_detail(
                         timeout=min(8, max(2, remaining())),
                     )
                     if navigation_state.get("invalid"):
-                        return {**navigation_state["invalid"], "source_tab": tab_key, "tabs": tabs, "navigation_state": navigation_state}
+                        return {
+                            **navigation_state["invalid"],
+                            "source_tab": tab_key,
+                            "tabs": tabs,
+                            "navigation_state": navigation_state,
+                        }
                     if not navigation_state.get("arrived"):
-                        return timeout_result(tab_key, "activity_page_not_ready", navigation_state=navigation_state, open_result=open_result)
-                    open_result = {**open_result, "fallback_via": "direct_activity_url", "url": activity_url}
+                        return timeout_result(
+                            tab_key,
+                            "activity_page_not_ready",
+                            navigation_state=navigation_state,
+                            open_result=open_result,
+                        )
+                    open_result = {
+                        **open_result,
+                        "fallback_via": "direct_activity_url",
+                        "url": activity_url,
+                    }
         else:
             try:
-                report_navigation("Direct URL · fallback" if selector_based else "Direct URL", f"Opening {tab_label}", (profile_activity_open_result.get("error") or "Profile activity could not be opened through DOM") if selector_based else "")
+                report_navigation(
+                    "Direct URL · fallback" if selector_based else "Direct URL",
+                    f"Opening {tab_label}",
+                    (
+                        profile_activity_open_result.get("error")
+                        or "Profile activity could not be opened through DOM"
+                    )
+                    if selector_based
+                    else "",
+                )
                 cdp.navigate(activity_url, wait_load=False, timeout=min(8, max(2, remaining())))
             except (TimeoutError, RuntimeError) as exc:
-                return timeout_result(tab_key, "navigation_failed_or_timed_out", error_detail=str(exc), profile_activity_open_result=profile_activity_open_result)
+                return timeout_result(
+                    tab_key,
+                    "navigation_failed_or_timed_out",
+                    error_detail=str(exc),
+                    profile_activity_open_result=profile_activity_open_result,
+                )
             navigation_state = _wait_for_activity_destination(
                 cdp,
                 profile_base,
@@ -3054,20 +3360,35 @@ def read_activity_tabs_detail(
                 timeout=min(8, max(2, remaining())),
             )
             if navigation_state.get("invalid"):
-                return {**navigation_state["invalid"], "source_tab": tab_key, "tabs": tabs, "navigation_state": navigation_state}
+                return {
+                    **navigation_state["invalid"],
+                    "source_tab": tab_key,
+                    "tabs": tabs,
+                    "navigation_state": navigation_state,
+                }
             if not navigation_state.get("arrived"):
-                return timeout_result(tab_key, "activity_page_not_ready", navigation_state=navigation_state, profile_activity_open_result=profile_activity_open_result)
-            open_result = {"found": True, "clicked": False, "via": "direct_activity_url", "url": activity_url}
+                return timeout_result(
+                    tab_key,
+                    "activity_page_not_ready",
+                    navigation_state=navigation_state,
+                    profile_activity_open_result=profile_activity_open_result,
+                )
+            open_result = {
+                "found": True,
+                "clicked": False,
+                "via": "direct_activity_url",
+                "url": activity_url,
+            }
 
         ready_state = _wait_for_linkedin_ready(
             cdp,
-            expected_selector='main, .scaffold-layout, .profile-creator-shared-feed-update__container, .feed-shared-update-v2, .artdeco-card',
+            expected_selector="main, .scaffold-layout, .profile-creator-shared-feed-update__container, .feed-shared-update-v2, .artdeco-card",
             timeout=min(12, max(3, remaining())),
             stable_for=0.0,
-            ignored_overlays={'.authentication-outlet'},
-            ignored_loaders={'.artdeco-loader', '[aria-busy="true"]'},
+            ignored_overlays={".authentication-outlet"},
+            ignored_loaders={".artdeco-loader", '[aria-busy="true"]'},
         )
-        early_feed_state: Optional[Dict[str, Any]] = None
+        early_feed_state: dict[str, Any] | None = None
         if not ready_state.get("ready"):
             # On slow connections LinkedIn can keep the document/skeleton state
             # "loading" after the useful activity feed has started hydrating.
@@ -3090,9 +3411,18 @@ def read_activity_tabs_detail(
         invalid = _activity_invalid_result(cdp)
         if invalid:
             return {**invalid, "source_tab": tab_key, "tabs": tabs}
-        feed_state = early_feed_state if early_feed_state and early_feed_state.get("ready") else _wait_for_activity_feed_state(cdp, timeout=min(30, max(8, remaining())))
+        feed_state = (
+            early_feed_state
+            if early_feed_state and early_feed_state.get("ready")
+            else _wait_for_activity_feed_state(cdp, timeout=min(30, max(8, remaining())))
+        )
         if feed_state.get("invalid"):
-            return {**feed_state["invalid"], "source_tab": tab_key, "tabs": tabs, "feed_state": feed_state}
+            return {
+                **feed_state["invalid"],
+                "source_tab": tab_key,
+                "tabs": tabs,
+                "feed_state": feed_state,
+            }
         if not feed_state.get("ready"):
             return timeout_result(tab_key, "activity_feed_not_hydrated", feed_state=feed_state)
 
@@ -3111,7 +3441,12 @@ def read_activity_tabs_detail(
                 "profile_activity_open_result": profile_activity_open_result,
                 "scroll_result": {"stopped": "explicit_empty_state", "elapsed_sec": 0},
                 "feed_state": feed_state,
-                "activity_window_counts": {"within_7d": 0, "within_30d": 0, "parseable": 0, "unparsed": 0},
+                "activity_window_counts": {
+                    "within_7d": 0,
+                    "within_30d": 0,
+                    "parseable": 0,
+                    "unparsed": 0,
+                },
                 "activity_classification_uncertain": False,
             }
             continue
@@ -3138,7 +3473,9 @@ def read_activity_tabs_detail(
                 minimum_direct_comments=minimum_direct_comments,
             )
         except (TimeoutError, RuntimeError) as exc:
-            return timeout_result(tab_key, "activity_extract_failed_or_timed_out", error_detail=str(exc))
+            return timeout_result(
+                tab_key, "activity_extract_failed_or_timed_out", error_detail=str(exc)
+            )
 
         window_counts = classify_activity_windows(tab_result.get("activities", []))
         total_visible = int(tab_result.get("total_visible", 0) or 0)
@@ -3170,8 +3507,10 @@ def read_activity_tabs_detail(
 
     if tabs and not any(int((tab or {}).get("total_visible", 0) or 0) > 0 for tab in tabs.values()):
         explicit_empty_tabs = [
-            key for key, tab in tabs.items()
-            if str(((tab or {}).get("feed_state") or {}).get("reason") or "") == "explicit_empty_state"
+            key
+            for key, tab in tabs.items()
+            if str(((tab or {}).get("feed_state") or {}).get("reason") or "")
+            == "explicit_empty_state"
         ]
         if len(explicit_empty_tabs) < len(tabs):
             return {
@@ -3202,32 +3541,35 @@ def read_activity_tabs_detail(
 # Notification toggle
 # ---------------------------------------------------------------------------
 
-def toggle_profile_notifications(cdp: CDPConnection, sim: HumanSimulator, enable: bool = True) -> bool:
+
+def toggle_profile_notifications(
+    cdp: CDPConnection, sim: HumanSimulator, enable: bool = True
+) -> bool:
     """Toggle notification bell on current profile page. Returns True if successful."""
     # The notification bell is usually accessible via the "More" menu or directly on the profile
-    success = cdp.evaluate(f"""
-        (() => {{
+    success = cdp.evaluate("""
+        (() => {
             // Look for the bell/notification button on profile
             const bellBtn = document.querySelector(
                 'button[aria-label*="notification"], ' +
                 'button[aria-label*="Notify me"], ' +
                 'button[class*="notification"]'
             );
-            if (bellBtn) {{
-                return JSON.stringify({{found: true, selector: 'bell'}});
-            }}
+            if (bellBtn) {
+                return JSON.stringify({found: true, selector: 'bell'});
+            }
 
             // Try the "More" dropdown first
             const moreBtn = document.querySelector(
                 'button[aria-label="More actions"], ' +
                 'button[aria-label*="More"]'
             );
-            if (moreBtn) {{
-                return JSON.stringify({{found: true, selector: 'more_menu'}});
-            }}
+            if (moreBtn) {
+                return JSON.stringify({found: true, selector: 'more_menu'});
+            }
 
-            return JSON.stringify({{found: false}});
-        }})()
+            return JSON.stringify({found: false});
+        })()
     """)
 
     if not success:
@@ -3258,7 +3600,8 @@ def toggle_profile_notifications(cdp: CDPConnection, sim: HumanSimulator, enable
 # Notification checker
 # ---------------------------------------------------------------------------
 
-def check_notifications(cdp: CDPConnection, sim: HumanSimulator) -> Dict[str, Any]:
+
+def check_notifications(cdp: CDPConnection, sim: HumanSimulator) -> dict[str, Any]:
     """Navigate to notifications and extract recent items."""
     cdp.navigate("https://www.linkedin.com/notifications/")
     human_delay(2, 4)
@@ -3299,7 +3642,7 @@ def _write_send_diagnostics(
     profile_url: str,
     stage: str,
     exc: Exception,
-    result: Dict[str, Any],
+    result: dict[str, Any],
 ) -> str:
     """Persist a diagnostic bundle for unexpected send-connection failures."""
     _ensure_diagnostic_dir()
@@ -3307,7 +3650,7 @@ def _write_send_diagnostics(
     slug = _safe_slug(profile_url.rstrip("/").split("/")[-1] or "profile")
     base = os.path.join(DIAGNOSTIC_DIR, f"{ts}-{slug}-{_safe_slug(stage)}")
 
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "captured_at": datetime.now().isoformat(timespec="seconds"),
         "stage": stage,
         "profile_url": profile_url,
@@ -3374,7 +3717,8 @@ def _write_send_diagnostics(
 # Session envelope — warm-up and cool-down
 # ---------------------------------------------------------------------------
 
-def session_warm_up(cdp: CDPConnection, sim: HumanSimulator, state: Dict) -> Dict[str, Any]:
+
+def session_warm_up(cdp: CDPConnection, sim: HumanSimulator, state: dict) -> dict[str, Any]:
     """Execute the session warm-up routine.
 
     1. Navigate to feed
@@ -3411,7 +3755,7 @@ def session_warm_up(cdp: CDPConnection, sim: HumanSimulator, state: Dict) -> Dic
     # Maybe check notifications (30-50% chance)
     checked_notifications = False
     if random.random() < random.uniform(0.3, 0.5):
-        notifs = check_notifications(cdp, sim)
+        check_notifications(cdp, sim)
         checked_notifications = True
         human_delay(2, 5)
         # Navigate back to feed
@@ -3427,7 +3771,7 @@ def session_warm_up(cdp: CDPConnection, sim: HumanSimulator, state: Dict) -> Dic
     }
 
 
-def session_cool_down(cdp: CDPConnection, sim: HumanSimulator) -> Dict[str, Any]:
+def session_cool_down(cdp: CDPConnection, sim: HumanSimulator) -> dict[str, Any]:
     """Execute the session cool-down routine."""
     # Return to feed or messaging (randomized)
     if random.random() < 0.7:
@@ -3457,7 +3801,8 @@ def session_cool_down(cdp: CDPConnection, sim: HumanSimulator) -> Dict[str, Any]
 # Safety rails — pre-flight checks, quota enforcement, circuit breakers
 # ---------------------------------------------------------------------------
 
-def preflight_check(state: Optional[Dict] = None) -> Dict[str, Any]:
+
+def preflight_check(state: dict | None = None) -> dict[str, Any]:
     """Run pre-flight checks before any automation session.
 
     Returns dict with 'ok' boolean and details.
@@ -3520,7 +3865,9 @@ def preflight_check(state: Optional[Dict] = None) -> Dict[str, Any]:
 
         if page.get("page_type") == "unknown":
             results["ok"] = False
-            results["block_reason"] = "LinkedIn session could not be verified after opening LinkedIn"
+            results["block_reason"] = (
+                "LinkedIn session could not be verified after opening LinkedIn"
+            )
             cdp.disconnect()
             return results
 
@@ -3634,17 +3981,18 @@ def preflight_check(state: Optional[Dict] = None) -> Dict[str, Any]:
 # Phase 3: Connection request engine + engagement scanner
 # ---------------------------------------------------------------------------
 
+
 def send_connection_request(
     cdp: CDPConnection,
     sim: HumanSimulator,
-    state: Dict,
+    state: dict,
     profile_url: str,
-    note: Optional[str] = None,
+    note: str | None = None,
     enable_notifications: bool = False,
-    profile_data: Optional[Dict[str, Any]] = None,
-    activity_data: Optional[Dict[str, Any]] = None,
+    profile_data: dict[str, Any] | None = None,
+    activity_data: dict[str, Any] | None = None,
     verify_connection_modal_only: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Send a connection request only; activity timing is owned by the runner."""
     result = {
         "action": "send_connection_request",
@@ -3692,7 +4040,10 @@ def send_connection_request(
         if action_state in {"profile_unavailable", "unknown"}:
             result["error"] = action_state
             return result
-        if not profile_data.get("has_connect_button") and action_state not in {"connect_direct", "connect_in_more"}:
+        if not profile_data.get("has_connect_button") and action_state not in {
+            "connect_direct",
+            "connect_in_more",
+        }:
             result["error"] = "no_connect_button"
             result["detail"] = "Profile may require InMail or Follow only"
             return result
@@ -3704,7 +4055,7 @@ def send_connection_request(
             expected_selector=PROFILE_ACTION_READY_SELECTOR,
             timeout=30,
             stable_for=0.8,
-            ignored_overlays={'.authentication-outlet'},
+            ignored_overlays={".authentication-outlet"},
         )
         human_delay(1, 2)
 
@@ -3722,7 +4073,7 @@ def send_connection_request(
             expected_selector=PROFILE_ACTION_READY_SELECTOR,
             timeout=45,
             stable_for=1.0,
-            ignored_overlays={'.authentication-outlet'},
+            ignored_overlays={".authentication-outlet"},
         )
         result["connect_ready_state"] = ready_state
         if not ready_state.get("ready"):
@@ -3763,7 +4114,9 @@ def send_connection_request(
         if modal_state.get("emailRequired"):
             _dismiss_connect_modal(cdp, sim)
             result["error"] = "email_required_to_connect"
-            result["detail"] = "LinkedIn requires the member's email before sending this invitation."
+            result["detail"] = (
+                "LinkedIn requires the member's email before sending this invitation."
+            )
             return result
 
         if verify_connection_modal_only:
@@ -3800,12 +4153,12 @@ def send_connection_request(
         stage = "verify_success"
         _wait_for_linkedin_ready(
             cdp,
-            expected_selector='body',
+            expected_selector="body",
             timeout=20,
             stable_for=0.8,
-            ignored_overlays={'.authentication-outlet'},
+            ignored_overlays={".authentication-outlet"},
         )
-        verification: Dict[str, Any] = {"pending": False, "state": None, "attempts": []}
+        verification: dict[str, Any] = {"pending": False, "state": None, "attempts": []}
         for _attempt in range(3):
             live_state = inspect_profile_action_state(cdp, profile_url)
             state_name = str(live_state.get("state") or "").strip()
@@ -3841,18 +4194,19 @@ def send_connection_request(
 def send_connection_only(
     cdp: CDPConnection,
     sim: HumanSimulator,
-    state: Dict,
+    state: dict,
     profile_url: str,
-    profile_state: Optional[Dict[str, Any]] = None,
-    note: Optional[str] = None,
+    profile_state: dict[str, Any] | None = None,
+    note: str | None = None,
     verify_connection_modal_only: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Explicit send-only interface used by the outreach state machine."""
     profile_data = profile_state
     if profile_data and "action_state" not in profile_data:
         profile_data = {
             "name": str(profile_data.get("profileName", "")).strip(),
-            "has_connect_button": profile_data.get("state") in {"connect_direct", "connect_in_more"},
+            "has_connect_button": profile_data.get("state")
+            in {"connect_direct", "connect_in_more"},
             "is_pending": profile_data.get("state") == "already_pending",
             "is_connected": profile_data.get("state") == "already_connected",
             "action_state": profile_data.get("state"),
@@ -3874,10 +4228,10 @@ def send_connection_only(
 def verify_no_note_send_ui(
     cdp: CDPConnection,
     sim: HumanSimulator,
-    state: Dict[str, Any],
+    state: dict[str, Any],
     profile_url: str,
-    profile_state: Dict[str, Any],
-) -> Dict[str, Any]:
+    profile_state: dict[str, Any],
+) -> dict[str, Any]:
     """Use the production send path through the modal, then dismiss it safely."""
     action_state = str(profile_state.get("state") or "").strip()
     profile_data = {
@@ -3889,7 +4243,10 @@ def verify_no_note_send_ui(
         "inspection": profile_state,
     }
     send_path = send_connection_request(
-        cdp, sim, state, profile_url,
+        cdp,
+        sim,
+        state,
+        profile_url,
         note=None,
         enable_notifications=False,
         profile_data=profile_data,
@@ -3910,9 +4267,10 @@ def verify_no_note_send_ui(
     }
 
 
-def _inspect_connect_modal(cdp: CDPConnection) -> Dict[str, Any]:
+def _inspect_connect_modal(cdp: CDPConnection) -> dict[str, Any]:
     """Inspect LinkedIn's invite modal, including open shadow-root render paths."""
-    raw = cdp.evaluate("""
+    raw = cdp.evaluate(
+        """
         (() => {
             const visible = (el) => {
                 if (!el) return false;
@@ -3993,12 +4351,15 @@ def _inspect_connect_modal(cdp: CDPConnection) -> Dict[str, Any]:
                 buttonCount: buttons.length,
             });
         })()
-    """, timeout=5)
+    """,
+        timeout=5,
+    )
     return json.loads(raw) if raw else {"modalRootFound": False, "dialogFound": False}
 
 
-def _dismiss_connect_modal(cdp: CDPConnection, sim: Optional[HumanSimulator] = None) -> bool:
+def _dismiss_connect_modal(cdp: CDPConnection, sim: HumanSimulator | None = None) -> bool:
     """Dismiss the invite modal and confirm that it is no longer visible."""
+
     def modal_is_open() -> bool:
         try:
             state = _inspect_connect_modal(cdp)
@@ -4019,7 +4380,8 @@ def _dismiss_connect_modal(cdp: CDPConnection, sim: Optional[HumanSimulator] = N
         return True
 
     try:
-        clicked = cdp.evaluate("""
+        clicked = cdp.evaluate(
+            """
             (() => {
                 const visible = (el) => {
                     if (!el) return false;
@@ -4057,13 +4419,15 @@ def _dismiss_connect_modal(cdp: CDPConnection, sim: Optional[HumanSimulator] = N
                         el.getAttribute('title') || '',
                         el.innerText || el.textContent || '',
                     ].join(' '));
-                    return /(^|\s)(dismiss|close)(\s|$)/.test(label);
+                    return /(^|\\s)(dismiss|close)(\\s|$)/.test(label);
                 });
                 if (!close) return false;
                 close.click();
                 return true;
             })()
-        """, timeout=5)
+        """,
+            timeout=5,
+        )
         if bool(clicked) and wait_until_closed():
             return True
     except Exception:
@@ -4085,8 +4449,14 @@ def _dismiss_connect_modal(cdp: CDPConnection, sim: Optional[HumanSimulator] = N
     # control.  Confirm closure after dispatching it rather than trusting the
     # key event itself.
     try:
-        cdp.send("Input.dispatchKeyEvent", {"type": "keyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27})
-        cdp.send("Input.dispatchKeyEvent", {"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27})
+        cdp.send(
+            "Input.dispatchKeyEvent",
+            {"type": "keyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27},
+        )
+        cdp.send(
+            "Input.dispatchKeyEvent",
+            {"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27},
+        )
         return wait_until_closed()
     except Exception:
         return False
@@ -4223,7 +4593,7 @@ def _click_add_note_button(cdp: CDPConnection, sim: HumanSimulator) -> bool:
         'button[aria-label*="add a note"], '
         'button[data-control-name*="add_note"], '
         'button[data-control-name*="invite"], '
-        'button.artdeco-button--secondary'
+        "button.artdeco-button--secondary"
     ):
         return True
 
@@ -4329,12 +4699,13 @@ def _click_send_button(cdp: CDPConnection, sim: HumanSimulator) -> bool:
 # Engagement actions (Approaches A-E)
 # ---------------------------------------------------------------------------
 
+
 def like_post(
     cdp: CDPConnection,
     sim: HumanSimulator,
-    state: Dict,
-    post_url: Optional[str] = None,
-) -> Dict[str, Any]:
+    state: dict,
+    post_url: str | None = None,
+) -> dict[str, Any]:
     """Like a post visible in the current viewport or navigate to a specific post URL.
 
     Approach E: Feed engagement / filler activity between connection requests.
@@ -4411,10 +4782,10 @@ def like_post(
 def follow_engagement_trail(
     cdp: CDPConnection,
     sim: HumanSimulator,
-    state: Dict,
+    state: dict,
     post_url: str,
     max_profiles: int = 3,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Visit profiles of people who engaged with a prospect's post.
 
     Approach B: Follow the engagement trail — visit likers/commenters
@@ -4509,11 +4880,13 @@ def follow_engagement_trail(
         human_delay(3, 10, distribution="gaussian")
 
         increment_counter(state, "profile_views")
-        result["profiles_visited"].append({
-            "url": profile["url"],
-            "name": profile.get("name", ""),
-            "source": profile.get("source", ""),
-        })
+        result["profiles_visited"].append(
+            {
+                "url": profile["url"],
+                "name": profile.get("name", ""),
+                "source": profile.get("source", ""),
+            }
+        )
 
     return result
 
@@ -4522,7 +4895,7 @@ def scan_reaction_list(
     cdp: CDPConnection,
     sim: HumanSimulator,
     post_url: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Open the reaction list on a post and extract reactor profiles.
 
     Approach C: Reaction mining — find new prospects from post reactions.
@@ -4543,9 +4916,9 @@ def scan_reaction_list(
 
     # Click on the reaction count to open the reactor list
     clicked = sim.click_element(
-        'button.social-details-social-counts__reactions-count, '
+        "button.social-details-social-counts__reactions-count, "
         'button[aria-label*="reaction"], '
-        'span.social-details-social-counts__reactions-count'
+        "span.social-details-social-counts__reactions-count"
     )
 
     if not clicked:
@@ -4603,6 +4976,7 @@ def scan_reaction_list(
 # Sent-invitations scraper & subtractive acceptance detection
 # ---------------------------------------------------------------------------
 
+
 def _normalize_linkedin_profile_url(url: str) -> str:
     raw = str(url or "").strip()
     if not raw:
@@ -4621,7 +4995,7 @@ def scrape_sent_invitations(
     cdp: CDPConnection,
     sim: HumanSimulator,
     max_scroll_passes: int = 20,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Scrape the Sent Invitations page for all currently pending invitations.
 
     Returns a dict with:
@@ -4631,13 +5005,14 @@ def scrape_sent_invitations(
     Uses LazyColumn structure. Scrolls to load more if needed and accumulates
     unique invitations across snapshots because LinkedIn can virtualize the list.
     """
-    result: Dict[str, Any] = {"action": "scrape_sent_invitations", "invitations": []}
+    result: dict[str, Any] = {"action": "scrape_sent_invitations", "invitations": []}
 
     SENT_URL = "https://www.linkedin.com/mynetwork/invitation-manager/sent/"
     EXPECTED_SELECTOR = '[data-component-type="LazyColumn"]'
 
     nav = _navigate_with_readiness(
-        cdp, SENT_URL,
+        cdp,
+        SENT_URL,
         expected_selector=EXPECTED_SELECTOR,
         nav_timeout=30,
         ready_timeout=20,
@@ -4647,7 +5022,8 @@ def scrape_sent_invitations(
     if not nav.get("ready"):
         human_delay(2, 4)
         nav = _navigate_with_readiness(
-            cdp, SENT_URL,
+            cdp,
+            SENT_URL,
             expected_selector=EXPECTED_SELECTOR,
             nav_timeout=30,
             ready_timeout=15,
@@ -4678,8 +5054,8 @@ def scrape_sent_invitations(
     # every observed snapshot instead of trusting the final LazyColumn contents.
     seen_keys: set = set()
     seen_urls: set = set()
-    unique: List[Dict[str, Any]] = []
-    snapshots: List[Dict[str, Any]] = []
+    unique: list[dict[str, Any]] = []
+    snapshots: list[dict[str, Any]] = []
     stale_passes = 0
 
     for scroll_pass in range(max_scroll_passes):
@@ -4712,15 +5088,17 @@ def scrape_sent_invitations(
             metrics.get("scrollY", 0) + metrics.get("innerHeight", 0)
             >= metrics.get("scrollHeight", 0) - 50
         )
-        snapshots.append({
-            "pass": scroll_pass + 1,
-            "snapshot_count": len(invitations),
-            "new_count": new_count,
-            "unique_count": len(unique),
-            "scrollY": metrics.get("scrollY", 0),
-            "scrollHeight": metrics.get("scrollHeight", 0),
-            "at_bottom": at_bottom,
-        })
+        snapshots.append(
+            {
+                "pass": scroll_pass + 1,
+                "snapshot_count": len(invitations),
+                "new_count": new_count,
+                "unique_count": len(unique),
+                "scrollY": metrics.get("scrollY", 0),
+                "scrollHeight": metrics.get("scrollHeight", 0),
+                "at_bottom": at_bottom,
+            }
+        )
 
         if new_count == 0:
             stale_passes += 1
@@ -4742,7 +5120,7 @@ def scrape_sent_invitations(
     return result
 
 
-def _extract_sent_invitations_dom(cdp: CDPConnection) -> Optional[str]:
+def _extract_sent_invitations_dom(cdp: CDPConnection) -> str | None:
     """Extract sent invitation data from the LazyColumn DOM structure.
 
     Each invitation card is a div child of LazyColumn (alternating with hr dividers).
@@ -4812,7 +5190,7 @@ def verify_acceptance_via_profile(
     cdp: CDPConnection,
     sim: HumanSimulator,
     profile_url: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Visit a profile to verify whether a connection was accepted, declined, or expired.
 
     Uses inspect_profile_action_state which is already part of view_profile.
@@ -4820,7 +5198,7 @@ def verify_acceptance_via_profile(
     - status: 'accepted', 'declined_or_expired', 'still_pending', 'unknown'
     - action_state: raw state from inspect_profile_action_state
     """
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "action": "verify_acceptance",
         "profile_url": profile_url,
         "action_state": "",
@@ -4828,7 +5206,8 @@ def verify_acceptance_via_profile(
     }
 
     nav = _navigate_with_readiness(
-        cdp, profile_url,
+        cdp,
+        profile_url,
         nav_timeout=30,
         ready_timeout=15,
     )
@@ -4884,9 +5263,9 @@ def verify_acceptance_via_profile(
 def check_acceptances_subtractive(
     cdp: CDPConnection,
     sim: HumanSimulator,
-    state: Dict,
-    pending_prospects: List[Dict[str, Any]],
-) -> Dict[str, Any]:
+    state: dict,
+    pending_prospects: list[dict[str, Any]],
+) -> dict[str, Any]:
     """Detect new acceptances by comparing pending prospects against sent invitations.
 
     Subtractive strategy:
@@ -4901,7 +5280,7 @@ def check_acceptances_subtractive(
 
     Returns dict with acceptances, declines, still_pending, and verification details.
     """
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "action": "check_acceptances_subtractive",
         "acceptances": [],
         "declines": [],
@@ -4921,7 +5300,7 @@ def check_acceptances_subtractive(
         return result
 
     sent_urls = set()
-    sent_names: Dict[str, List[Dict[str, Any]]] = {}
+    sent_names: dict[str, list[dict[str, Any]]] = {}
     for inv in sent.get("invitations", []):
         url = _normalize_linkedin_profile_url(inv.get("url", ""))
         if url:
@@ -4936,30 +5315,36 @@ def check_acceptances_subtractive(
     result["sent_invitations_scroll_snapshots"] = sent.get("scroll_snapshots", [])
 
     # Step 2: Compare each pending prospect against sent page
-    missing_from_sent: List[Dict[str, Any]] = []
+    missing_from_sent: list[dict[str, Any]] = []
     for prospect in pending_prospects:
         prospect_url = _normalize_linkedin_profile_url(prospect.get("contact_linkedin") or "")
         prospect_name_key = _normalize_sent_invitation_name(prospect.get("contact_name", ""))
         if not prospect_url:
-            result["errors"].append({
-                "contact_name": prospect.get("contact_name", ""),
-                "error": "no_linkedin_url_in_sheet",
-            })
+            result["errors"].append(
+                {
+                    "contact_name": prospect.get("contact_name", ""),
+                    "error": "no_linkedin_url_in_sheet",
+                }
+            )
             continue
 
         if prospect_url in sent_urls:
-            result["still_pending"].append({
-                "contact_name": prospect.get("contact_name", ""),
-                "url": prospect_url,
-                "status": "still_on_sent_page",
-            })
+            result["still_pending"].append(
+                {
+                    "contact_name": prospect.get("contact_name", ""),
+                    "url": prospect_url,
+                    "status": "still_on_sent_page",
+                }
+            )
         elif prospect_name_key and len(sent_names.get(prospect_name_key, [])) == 1:
-            result["still_pending"].append({
-                "contact_name": prospect.get("contact_name", ""),
-                "url": prospect_url,
-                "status": "still_on_sent_page_name_match",
-                "sent_page_name": sent_names[prospect_name_key][0].get("name", ""),
-            })
+            result["still_pending"].append(
+                {
+                    "contact_name": prospect.get("contact_name", ""),
+                    "url": prospect_url,
+                    "status": "still_on_sent_page_name_match",
+                    "sent_page_name": sent_names[prospect_name_key][0].get("name", ""),
+                }
+            )
         else:
             missing_from_sent.append(prospect)
 
@@ -4990,11 +5375,13 @@ def check_acceptances_subtractive(
                 human_delay(3, 5)
 
         if verification is None:
-            result["errors"].append({
-                "contact_name": contact_name,
-                "url": prospect_url,
-                "error": last_error or "verification_failed_after_retries",
-            })
+            result["errors"].append(
+                {
+                    "contact_name": contact_name,
+                    "url": prospect_url,
+                    "error": last_error or "verification_failed_after_retries",
+                }
+            )
             continue
 
         status = verification.get("status", "unknown")
@@ -5012,16 +5399,20 @@ def check_acceptances_subtractive(
             result["declines"].append(entry)
         elif status == "still_pending":
             # Was missing from sent page but profile says pending — possible pagination miss
-            result["still_pending"].append({
-                **entry,
-                "note": "missing_from_sent_but_profile_shows_pending",
-            })
+            result["still_pending"].append(
+                {
+                    **entry,
+                    "note": "missing_from_sent_but_profile_shows_pending",
+                }
+            )
         else:
             verify_error = verification.get("error", "")
-            result["errors"].append({
-                **entry,
-                "error": f"unknown_status_after_retry:{status}|detail={verify_error}",
-            })
+            result["errors"].append(
+                {
+                    **entry,
+                    "error": f"unknown_status_after_retry:{status}|detail={verify_error}",
+                }
+            )
 
     return result
 
@@ -5029,8 +5420,8 @@ def check_acceptances_subtractive(
 def check_acceptances(
     cdp: CDPConnection,
     sim: HumanSimulator,
-    state: Dict,
-) -> Dict[str, Any]:
+    state: dict,
+) -> dict[str, Any]:
     """Scan My Network for new connection acceptances.
 
     Used in the 10:00 AM acceptance check session.
@@ -5040,18 +5431,18 @@ def check_acceptances(
     retry/fallback so this works reliably in unattended/background-window
     scenarios. Human-sim mouse events are attempted but not required.
     """
-    result: Dict[str, Any] = {"action": "check_acceptances", "acceptances": []}
+    result: dict[str, Any] = {"action": "check_acceptances", "acceptances": []}
 
     # --- Navigate with readiness gate ---
     CONNECTIONS_URL = "https://www.linkedin.com/mynetwork/invite-connect/connections/"
     # Selector covers current (LazyColumn) and legacy LinkedIn connection layouts
     EXPECTED_SELECTOR = (
-        '[data-component-type="LazyColumn"], '
-        '.mn-connection-card, [class*="connection-card"]'
+        '[data-component-type="LazyColumn"], .mn-connection-card, [class*="connection-card"]'
     )
 
     nav = _navigate_with_readiness(
-        cdp, CONNECTIONS_URL,
+        cdp,
+        CONNECTIONS_URL,
         expected_selector=EXPECTED_SELECTOR,
         nav_timeout=30,
         ready_timeout=20,
@@ -5062,7 +5453,8 @@ def check_acceptances(
         # One retry: sometimes LinkedIn redirects through an interstitial
         human_delay(2, 4)
         nav = _navigate_with_readiness(
-            cdp, CONNECTIONS_URL,
+            cdp,
+            CONNECTIONS_URL,
             expected_selector=EXPECTED_SELECTOR,
             nav_timeout=30,
             ready_timeout=15,
@@ -5105,10 +5497,22 @@ def check_acceptances(
     recent = []
     for conn in connections:
         time_text = conn.get("time_text", "")
-        is_recent = any(t in time_text for t in [
-            "just now", "today", "hour", "minute", "1 day", "yesterday",
-            "1d", "2d", "1h", "2h", "3h",
-        ])
+        is_recent = any(
+            t in time_text
+            for t in [
+                "just now",
+                "today",
+                "hour",
+                "minute",
+                "1 day",
+                "yesterday",
+                "1d",
+                "2d",
+                "1h",
+                "2h",
+                "3h",
+            ]
+        )
 
         # Also match "connected on <date>" format (e.g. "connected on april 27, 2026")
         if not is_recent and "connected on" in time_text:
@@ -5133,7 +5537,7 @@ def check_acceptances(
     return result
 
 
-def _extract_connections_dom(cdp: CDPConnection) -> Optional[str]:
+def _extract_connections_dom(cdp: CDPConnection) -> str | None:
     """Extract connection card data from the DOM via Runtime.evaluate.
 
     Factored out of check_acceptances to enable retry logic.
@@ -5251,7 +5655,7 @@ def _extract_connections_dom(cdp: CDPConnection) -> Optional[str]:
 def scan_prospect_box(
     cdp: CDPConnection,
     sim: HumanSimulator,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Scan the 'People you may know' suggestions box on profiles or My Network.
 
     Approach D: Prospect box scan — find related prospects from LinkedIn's suggestions.
@@ -5322,12 +5726,13 @@ def scan_prospect_box(
 # Withdrawal manager — withdraw stale pending connection requests
 # ---------------------------------------------------------------------------
 
+
 def withdraw_connection(
     cdp: CDPConnection,
     sim: HumanSimulator,
-    state: Dict,
+    state: dict,
     profile_url: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Withdraw a pending connection request from a prospect's profile.
 
     Sequence:
@@ -5399,9 +5804,7 @@ def withdraw_connection(
 
     # Click Pending button
     human_delay(1, 2, distribution="gaussian")
-    clicked = sim.click_element(
-        'button[aria-label*="Pending"], button[class*="pending"]'
-    )
+    clicked = sim.click_element('button[aria-label*="Pending"], button[class*="pending"]')
 
     if not clicked:
         result["error"] = "pending_click_failed"
@@ -5473,8 +5876,8 @@ def withdraw_connection(
 def check_acceptance_notifications(
     cdp: CDPConnection,
     sim: HumanSimulator,
-    state: Dict,
-) -> Dict[str, Any]:
+    state: dict,
+) -> dict[str, Any]:
     """Check the LinkedIn notifications page for connection acceptance events.
 
     More natural than checking My Network directly — humans check notifications.
@@ -5485,7 +5888,7 @@ def check_acceptance_notifications(
     Hardened path: uses readiness-gated navigation and safe scroll fallbacks
     for reliable unattended operation.
     """
-    result: Dict[str, Any] = {"action": "check_acceptance_notifications", "acceptances": []}
+    result: dict[str, Any] = {"action": "check_acceptance_notifications", "acceptances": []}
 
     # --- Navigate with readiness gate ---
     NOTIF_URL = "https://www.linkedin.com/notifications/"
@@ -5495,7 +5898,8 @@ def check_acceptance_notifications(
     )
 
     nav = _navigate_with_readiness(
-        cdp, NOTIF_URL,
+        cdp,
+        NOTIF_URL,
         expected_selector=EXPECTED_SELECTOR,
         nav_timeout=30,
         ready_timeout=20,
@@ -5505,7 +5909,8 @@ def check_acceptance_notifications(
     if not nav.get("ready"):
         human_delay(2, 4)
         nav = _navigate_with_readiness(
-            cdp, NOTIF_URL,
+            cdp,
+            NOTIF_URL,
             expected_selector=EXPECTED_SELECTOR,
             nav_timeout=30,
             ready_timeout=15,
@@ -5551,19 +5956,34 @@ def check_acceptance_notifications(
     # Surface the freshest notification matches separately for the runner,
     # but leave counting to the higher-level acceptance workflow.
     if acceptances:
-        new_accepts = [a for a in acceptances if any(
-            t in a.get("time_text", "") for t in [
-                "just now", "today", "hour", "minute", "1d",
-                "1 day", "yesterday", "2h", "3h", "4h", "5h",
-            ]
-        ) or a.get("index", 99) < 5]
+        new_accepts = [
+            a
+            for a in acceptances
+            if any(
+                t in a.get("time_text", "")
+                for t in [
+                    "just now",
+                    "today",
+                    "hour",
+                    "minute",
+                    "1d",
+                    "1 day",
+                    "yesterday",
+                    "2h",
+                    "3h",
+                    "4h",
+                    "5h",
+                ]
+            )
+            or a.get("index", 99) < 5
+        ]
         if new_accepts:
             result["new_acceptances"] = new_accepts
 
     return result
 
 
-def _extract_acceptance_notifs_dom(cdp: CDPConnection) -> Optional[str]:
+def _extract_acceptance_notifs_dom(cdp: CDPConnection) -> str | None:
     """Extract acceptance notification data from the DOM via Runtime.evaluate.
 
     Factored out of check_acceptance_notifications to enable retry logic.
@@ -5622,14 +6042,15 @@ def _extract_acceptance_notifs_dom(cdp: CDPConnection) -> Optional[str]:
 # Session orchestrator — batch connection requests with interleaved engagement
 # ---------------------------------------------------------------------------
 
+
 def run_session(
     cdp: CDPConnection,
     sim: HumanSimulator,
-    state: Dict,
-    prospects: List[Dict[str, Any]],
-    burst_size: Tuple[int, int] = (3, 6),
-    engagement_approaches: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    state: dict,
+    prospects: list[dict[str, Any]],
+    burst_size: tuple[int, int] = (3, 6),
+    engagement_approaches: list[str] | None = None,
+) -> dict[str, Any]:
     """Run a full connection request session with interleaved engagement.
 
     This is the main orchestrator that combines:
@@ -5677,7 +6098,7 @@ def run_session(
     while prospect_idx < len(prospects):
         # Determine burst size (randomized within range)
         this_burst = random.randint(burst_size[0], burst_size[1])
-        burst_prospects = prospects[prospect_idx:prospect_idx + this_burst]
+        burst_prospects = prospects[prospect_idx : prospect_idx + this_burst]
         prospect_idx += this_burst
         burst_count += 1
 
@@ -5697,7 +6118,9 @@ def run_session(
 
             # Send the connection request
             cr_result = send_connection_request(
-                cdp, sim, state,
+                cdp,
+                sim,
+                state,
                 profile_url=prospect.get("contact_linkedin", ""),
                 note=prospect.get("_note"),
                 enable_notifications=prospect.get("_enable_notifications", False),
@@ -5713,7 +6136,11 @@ def run_session(
 
             # Circuit breaker from connection request
             if cr_result.get("error") in (
-                "captcha", "restriction", "email_verify", "robot_check", "login"
+                "captcha",
+                "restriction",
+                "email_verify",
+                "robot_check",
+                "login",
             ):
                 session_report["aborted"] = True
                 session_report["abort_reason"] = cr_result["error"]
@@ -5725,9 +6152,7 @@ def run_session(
 
         # --- Between-burst interleave ---
         if prospect_idx < len(prospects):
-            interleave_result = _execute_interleave(
-                cdp, sim, state, engagement_approaches
-            )
+            interleave_result = _execute_interleave(cdp, sim, state, engagement_approaches)
             session_report["engagement_actions"].append(interleave_result)
 
     # --- Cool-down ---
@@ -5752,9 +6177,9 @@ def run_session(
 def _execute_interleave(
     cdp: CDPConnection,
     sim: HumanSimulator,
-    state: Dict,
-    approaches: List[str],
-) -> Dict[str, Any]:
+    state: dict,
+    approaches: list[str],
+) -> dict[str, Any]:
     """Execute a random interleave activity between connection request bursts.
 
     Picks a random approach from the provided list and executes it.
@@ -5806,6 +6231,7 @@ def _execute_interleave(
 # LinkedInSession — high-level session manager
 # ---------------------------------------------------------------------------
 
+
 class LinkedInSession:
     """High-level LinkedIn automation session manager.
 
@@ -5820,12 +6246,12 @@ class LinkedInSession:
 
     def __init__(self):
         self.cdp = CDPConnection()
-        self.sim: Optional[HumanSimulator] = None
+        self.sim: HumanSimulator | None = None
         self.state = load_state()
         self.connected = False
-        self._action_times: List[float] = []  # timestamps of recent actions
+        self._action_times: list[float] = []  # timestamps of recent actions
 
-    def connect(self, skip_rate_check: bool = False) -> Dict[str, Any]:
+    def connect(self, skip_rate_check: bool = False) -> dict[str, Any]:
         """Connect to Chrome CDP, inject stealth, run preflight.
 
         Args:
@@ -5841,7 +6267,10 @@ class LinkedInSession:
             # sources) must not make the browser lane look unhealthy.  Keep
             # every other preflight blocker -- CDP, login, danger and quota --
             # fully enforced.
-            rate_gate_failed = "acceptance" in str(preflight.get("block_reason", "")).lower() or "outreach log" in str(preflight.get("block_reason", "")).lower()
+            rate_gate_failed = (
+                "acceptance" in str(preflight.get("block_reason", "")).lower()
+                or "outreach log" in str(preflight.get("block_reason", "")).lower()
+            )
             if skip_rate_check and rate_gate_failed:
                 preflight["ok"] = True
                 preflight["acceptance_rate_skipped"] = True
@@ -5855,7 +6284,11 @@ class LinkedInSession:
         # second CDP evaluation phase before the first profile can open.
         self.sim = HumanSimulator(self.cdp)
         self.connected = True
-        return {"ok": True, "status": "connected", **{k: v for k, v in preflight.items() if k.startswith("acceptance_rate")}}
+        return {
+            "ok": True,
+            "status": "connected",
+            **{k: v for k, v in preflight.items() if k.startswith("acceptance_rate")},
+        }
 
     def disconnect(self):
         """Disconnect from Chrome CDP."""
@@ -5874,23 +6307,23 @@ class LinkedInSession:
                 time.sleep(wait_until - now + random.uniform(0.5, 2.0))
         self._action_times.append(time.time())
 
-    def _check_danger(self) -> Optional[str]:
+    def _check_danger(self) -> str | None:
         """Check for circuit breaker conditions."""
         return check_circuit_breakers(self.cdp)
 
-    def warm_up(self) -> Dict[str, Any]:
+    def warm_up(self) -> dict[str, Any]:
         """Execute session warm-up."""
         if not self.connected:
             return {"error": True, "message": "Not connected"}
         return session_warm_up(self.cdp, self.sim, self.state)
 
-    def cool_down(self) -> Dict[str, Any]:
+    def cool_down(self) -> dict[str, Any]:
         """Execute session cool-down."""
         if not self.connected:
             return {"error": True, "message": "Not connected"}
         return session_cool_down(self.cdp, self.sim)
 
-    def view_profile(self, profile_url: str) -> Dict[str, Any]:
+    def view_profile(self, profile_url: str) -> dict[str, Any]:
         """View a profile with human-like behavior."""
         self._enforce_rate_limit()
         danger = self._check_danger()
@@ -5901,7 +6334,7 @@ class LinkedInSession:
         increment_counter(self.state, "profile_views")
         return result
 
-    def inspect_profile_action_state(self, profile_url: str) -> Dict[str, Any]:
+    def inspect_profile_action_state(self, profile_url: str) -> dict[str, Any]:
         """Inspect profile action state without heavy browsing."""
         self._enforce_rate_limit()
         danger = self._check_danger()
@@ -5914,7 +6347,9 @@ class LinkedInSession:
         increment_counter(self.state, "profile_views")
         return result
 
-    def verify_no_note_send_ui(self, profile_url: str, profile_state: Dict[str, Any]) -> Dict[str, Any]:
+    def verify_no_note_send_ui(
+        self, profile_url: str, profile_state: dict[str, Any]
+    ) -> dict[str, Any]:
         """Verify the no-note invite modal controls without sending."""
         self._enforce_rate_limit()
         danger = self._check_danger()
@@ -5922,7 +6357,7 @@ class LinkedInSession:
             return {"ok": False, "error": danger, "profile_url": profile_url}
         return verify_no_note_send_ui(self.cdp, self.sim, self.state, profile_url, profile_state)
 
-    def read_activity(self, profile_url: str, max_seconds: float = 30.0) -> Dict[str, Any]:
+    def read_activity(self, profile_url: str, max_seconds: float = 30.0) -> dict[str, Any]:
         """Read a profile's activity tab."""
         self._enforce_rate_limit()
         danger = self._check_danger()
@@ -5936,10 +6371,10 @@ class LinkedInSession:
         profile_url: str,
         max_seconds: float = 45.0,
         navigation_type: str = "direct_url",
-        tab_order: Optional[List[Tuple[str, str]]] = None,
+        tab_order: list[tuple[str, str]] | None = None,
         minimum_direct_comments: int = 2,
         disable_early_stop: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Read profile activity tabs separately for ranking."""
         self._enforce_rate_limit()
         danger = self._check_danger()
@@ -5961,13 +6396,13 @@ class LinkedInSession:
         """Toggle notifications for the current profile."""
         return toggle_profile_notifications(self.cdp, self.sim, enable)
 
-    def read_feed(self, num_stops: int = 5) -> List[Dict]:
+    def read_feed(self, num_stops: int = 5) -> list[dict]:
         """Scroll the feed with content-aware behavior."""
         self._enforce_rate_limit()
         sequence = generate_scroll_stop_sequence(num_stops)
         return execute_feed_scroll(self.sim, sequence)
 
-    def get_quotas(self) -> Dict[str, Any]:
+    def get_quotas(self) -> dict[str, Any]:
         """Get current quota status."""
         return {
             "conn_req_today": get_counter(self.state, "conn_req_sent"),
@@ -5983,33 +6418,41 @@ class LinkedInSession:
     def send_connection(
         self,
         profile_url: str,
-        note: Optional[str] = None,
+        note: str | None = None,
         enable_notifications: bool = False,
-        profile_data: Optional[Dict[str, Any]] = None,
-        activity_data: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        profile_data: dict[str, Any] | None = None,
+        activity_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Send a connection request to a profile."""
         self._enforce_rate_limit()
         if not self.connected:
             return {"error": True, "message": "Not connected"}
         return send_connection_request(
-            self.cdp, self.sim, self.state,
-            profile_url, note, enable_notifications, profile_data, activity_data,
+            self.cdp,
+            self.sim,
+            self.state,
+            profile_url,
+            note,
+            enable_notifications,
+            profile_data,
+            activity_data,
         )
 
     def send_connection_only(
         self,
         profile_url: str,
-        profile_state: Optional[Dict[str, Any]] = None,
-        note: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        profile_state: dict[str, Any] | None = None,
+        note: str | None = None,
+    ) -> dict[str, Any]:
         """Send a connection request without reading activity internally."""
         self._enforce_rate_limit()
         if not self.connected:
             return {"error": True, "message": "Not connected"}
-        return send_connection_only(self.cdp, self.sim, self.state, profile_url, profile_state, note)
+        return send_connection_only(
+            self.cdp, self.sim, self.state, profile_url, profile_state, note
+        )
 
-    def like(self, post_url: Optional[str] = None) -> Dict[str, Any]:
+    def like(self, post_url: str | None = None) -> dict[str, Any]:
         """Like a post (Approach E)."""
         self._enforce_rate_limit()
         if not self.connected:
@@ -6017,31 +6460,37 @@ class LinkedInSession:
         return like_post(self.cdp, self.sim, self.state, post_url)
 
     def engagement_trail(
-        self, post_url: str, max_profiles: int = 3,
-    ) -> Dict[str, Any]:
+        self,
+        post_url: str,
+        max_profiles: int = 3,
+    ) -> dict[str, Any]:
         """Follow engagement trail on a post (Approach B)."""
         self._enforce_rate_limit()
         if not self.connected:
             return {"error": True, "message": "Not connected"}
         return follow_engagement_trail(
-            self.cdp, self.sim, self.state, post_url, max_profiles,
+            self.cdp,
+            self.sim,
+            self.state,
+            post_url,
+            max_profiles,
         )
 
-    def reaction_scan(self, post_url: str) -> Dict[str, Any]:
+    def reaction_scan(self, post_url: str) -> dict[str, Any]:
         """Scan reaction list on a post (Approach C)."""
         self._enforce_rate_limit()
         if not self.connected:
             return {"error": True, "message": "Not connected"}
         return scan_reaction_list(self.cdp, self.sim, post_url)
 
-    def check_accepts(self) -> Dict[str, Any]:
+    def check_accepts(self) -> dict[str, Any]:
         """Check for new connection acceptances (legacy: connections page scan)."""
         self._enforce_rate_limit()
         if not self.connected:
             return {"error": True, "message": "Not connected"}
         return check_acceptances(self.cdp, self.sim, self.state)
 
-    def check_accepts_subtractive(self, pending_prospects: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def check_accepts_subtractive(self, pending_prospects: list[dict[str, Any]]) -> dict[str, Any]:
         """Check for acceptances by comparing pending prospects against sent invitations.
 
         Subtractive strategy: anyone pending in sheet but missing from sent page
@@ -6051,10 +6500,13 @@ class LinkedInSession:
         if not self.connected:
             return {"error": True, "message": "Not connected"}
         return check_acceptances_subtractive(
-            self.cdp, self.sim, self.state, pending_prospects,
+            self.cdp,
+            self.sim,
+            self.state,
+            pending_prospects,
         )
 
-    def prospect_box(self) -> Dict[str, Any]:
+    def prospect_box(self) -> dict[str, Any]:
         """Scan 'People you may know' suggestions (Approach D)."""
         self._enforce_rate_limit()
         if not self.connected:
@@ -6063,26 +6515,30 @@ class LinkedInSession:
 
     def batch_session(
         self,
-        prospects: List[Dict[str, Any]],
-        burst_size: Tuple[int, int] = (3, 6),
-        engagement_approaches: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
+        prospects: list[dict[str, Any]],
+        burst_size: tuple[int, int] = (3, 6),
+        engagement_approaches: list[str] | None = None,
+    ) -> dict[str, Any]:
         """Run a full batch session with interleaved engagement."""
         if not self.connected:
             return {"error": True, "message": "Not connected"}
         return run_session(
-            self.cdp, self.sim, self.state,
-            prospects, burst_size, engagement_approaches,
+            self.cdp,
+            self.sim,
+            self.state,
+            prospects,
+            burst_size,
+            engagement_approaches,
         )
 
-    def withdraw(self, profile_url: str) -> Dict[str, Any]:
+    def withdraw(self, profile_url: str) -> dict[str, Any]:
         """Withdraw a pending connection request."""
         self._enforce_rate_limit()
         if not self.connected:
             return {"error": True, "message": "Not connected"}
         return withdraw_connection(self.cdp, self.sim, self.state, profile_url)
 
-    def check_acceptance_notifs(self) -> Dict[str, Any]:
+    def check_acceptance_notifs(self) -> dict[str, Any]:
         """Check notifications page for connection acceptances."""
         self._enforce_rate_limit()
         if not self.connected:
@@ -6093,6 +6549,7 @@ class LinkedInSession:
 # ---------------------------------------------------------------------------
 # CLI interface
 # ---------------------------------------------------------------------------
+
 
 def main():
     parser = argparse.ArgumentParser(description="LinkedIn automation helper")
@@ -6136,7 +6593,9 @@ def main():
     sc.add_argument("--note", default=None, help="Personalized note (max 300 chars)")
     sc.add_argument("--notify", action="store_true", help="Enable notifications if active")
 
-    vm = sub.add_parser("verify-connection-modal", help="Open and dismiss the connection modal without sending")
+    vm = sub.add_parser(
+        "verify-connection-modal", help="Open and dismiss the connection modal without sending"
+    )
     vm.add_argument("--url", required=True, help="LinkedIn profile URL")
 
     # like-post
@@ -6218,7 +6677,9 @@ def main():
             result = detect_page(session.cdp)
         elif args.command == "send-connection":
             result = session.send_connection(
-                args.url, note=args.note, enable_notifications=args.notify,
+                args.url,
+                note=args.note,
+                enable_notifications=args.notify,
             )
         elif args.command == "verify-connection-modal":
             profile_state = session.inspect_profile_action_state(args.url)

@@ -3,8 +3,9 @@
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -23,7 +24,9 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly",
 ]
 
-DEFAULT_CREDS = os.environ.get("GOOGLE_SHEETS_CREDENTIALS", "~/.openclaw/credentials/google-sheets.json")
+DEFAULT_CREDS = os.environ.get(
+    "GOOGLE_SHEETS_CREDENTIALS", "~/.openclaw/credentials/google-sheets.json"
+)
 DEFAULT_SHEET_URL = os.environ.get("OBF_SHEET_URL", "")
 DEFAULT_TAB = "Messaging"
 
@@ -48,7 +51,9 @@ OPTIONAL_RESULT_COLUMNS = [
 
 
 def get_client(credentials_path: str) -> gspread.Client:
-    creds = Credentials.from_service_account_file(str(Path(credentials_path).expanduser()), scopes=SCOPES)
+    creds = Credentials.from_service_account_file(
+        str(Path(credentials_path).expanduser()), scopes=SCOPES
+    )
     return gspread.authorize(creds)
 
 
@@ -58,7 +63,7 @@ def get_worksheet(credentials_path: str, sheet_url: str, tab: str):
     return spreadsheet.worksheet(tab)
 
 
-def normalize_rows(values: List[List[Any]]) -> List[Dict[str, Any]]:
+def normalize_rows(values: list[list[Any]]) -> list[dict[str, Any]]:
     if not values:
         return []
     headers = [str(value).strip() for value in values[0]]
@@ -69,7 +74,10 @@ def normalize_rows(values: List[List[Any]]) -> List[Dict[str, Any]]:
     rows = []
     for row_number, row in enumerate(values[1:], start=2):
         padded = row + [""] * (len(headers) - len(row))
-        item = {headers[index]: padded[index] if index < len(padded) else "" for index in range(len(headers))}
+        item = {
+            headers[index]: padded[index] if index < len(padded) else ""
+            for index in range(len(headers))
+        }
         item["_row_number"] = row_number
         rows.append(item)
     return rows
@@ -136,7 +144,7 @@ def update_result(args) -> None:
     print(json.dumps({"ok": True, "row_number": args.row_number}, ensure_ascii=False))
 
 
-def ensure_optional_columns(worksheet, headers: List[str], columns: List[str]) -> List[str]:
+def ensure_optional_columns(worksheet, headers: list[str], columns: list[str]) -> list[str]:
     next_col = len(headers) + 1
     for column in columns:
         if column in headers:
@@ -148,7 +156,9 @@ def ensure_optional_columns(worksheet, headers: List[str], columns: List[str]) -
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Read/write Messaging research rows in the OBF Google Sheet.")
+    parser = argparse.ArgumentParser(
+        description="Read/write Messaging research rows in the OBF Google Sheet."
+    )
     parser.add_argument("--credentials", default=DEFAULT_CREDS)
     parser.add_argument("--sheet-url", default=DEFAULT_SHEET_URL)
     parser.add_argument("--tab", default=DEFAULT_TAB)

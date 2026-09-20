@@ -15,14 +15,13 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPERS = ROOT / "helpers"
 sys.path.insert(0, str(HELPERS))
 
 from linkedin_helper import LinkedInSession, check_circuit_breakers  # noqa: E402
-
 
 PROFILE_NAME_PROBE_JS = """
 (() => {
@@ -75,13 +74,17 @@ PROFILE_NAME_PROBE_JS = """
 """
 
 
-def probe_profile_name(profile_url: str, settle_seconds: float) -> Dict[str, Any]:
+def probe_profile_name(profile_url: str, settle_seconds: float) -> dict[str, Any]:
     session = LinkedInSession()
     connected = False
     try:
         connect_result = session.connect(skip_rate_check=True)
         if not connect_result.get("ok"):
-            return {"ok": False, "reason": "linkedin_session_connect_failed", "connect_result": connect_result}
+            return {
+                "ok": False,
+                "reason": "linkedin_session_connect_failed",
+                "connect_result": connect_result,
+            }
         connected = True
         session.cdp.navigate(profile_url, wait_load=False, timeout=10)
         time.sleep(max(1.0, settle_seconds))
@@ -89,7 +92,11 @@ def probe_profile_name(profile_url: str, settle_seconds: float) -> Dict[str, Any
         if danger:
             return {"ok": False, "reason": "circuit_breaker", "danger": danger}
         result = session.cdp.evaluate(PROFILE_NAME_PROBE_JS, timeout=20)
-        return result if isinstance(result, dict) else {"ok": False, "reason": "unexpected_probe_result", "raw": result}
+        return (
+            result
+            if isinstance(result, dict)
+            else {"ok": False, "reason": "unexpected_probe_result", "raw": result}
+        )
     finally:
         if connected:
             session.disconnect()
@@ -98,9 +105,18 @@ def probe_profile_name(profile_url: str, settle_seconds: float) -> Dict[str, Any
 def main() -> int:
     parser = argparse.ArgumentParser(description="Probe LinkedIn profile display-name selectors.")
     parser.add_argument("--url", required=True, help="LinkedIn profile URL to inspect.")
-    parser.add_argument("--settle-seconds", type=float, default=4.0, help="Seconds to wait after navigation.")
+    parser.add_argument(
+        "--settle-seconds", type=float, default=4.0, help="Seconds to wait after navigation."
+    )
     args = parser.parse_args()
-    print(json.dumps(probe_profile_name(args.url, args.settle_seconds), indent=2, ensure_ascii=False, sort_keys=True))
+    print(
+        json.dumps(
+            probe_profile_name(args.url, args.settle_seconds),
+            indent=2,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
     return 0
 
 

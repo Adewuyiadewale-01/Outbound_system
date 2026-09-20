@@ -5,7 +5,6 @@ from pathlib import Path
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-
 ROOT = Path(__file__).resolve().parents[1]
 WATCHER = ROOT / "ORCHESTRATION" / "watcher"
 if str(WATCHER) not in sys.path:
@@ -38,27 +37,39 @@ class WatcherRecoveryTests(unittest.TestCase):
                 "activity": {
                     "days": {
                         "2026-08-06": {
-                            "checkpoints": {"activity_check_9pm": {"status": "running", "attempt": 1}}
+                            "checkpoints": {
+                                "activity_check_9pm": {"status": "running", "attempt": 1}
+                            }
                         }
                     }
                 }
             }
         }
         released = watcher.close_stale_running_checkpoints(state, "2026-08-06", self.now)
-        checkpoint = state["workflows"]["activity"]["days"]["2026-08-06"]["checkpoints"]["activity_check_9pm"]
+        checkpoint = state["workflows"]["activity"]["days"]["2026-08-06"]["checkpoints"][
+            "activity_check_9pm"
+        ]
         self.assertEqual(released, [{"workflow": "activity", "checkpoint": "activity_check_9pm"}])
         self.assertEqual(checkpoint["status"], "resume_pending")
-        self.assertTrue(watcher.checkpoint_ready({"checkpoints": {"task": checkpoint}}, "task", self.now))
+        self.assertTrue(
+            watcher.checkpoint_ready({"checkpoints": {"task": checkpoint}}, "task", self.now)
+        )
 
     def test_timeout_and_interruption_are_retryable_reasons(self):
         timeout_result = {"commands": [{"ok": False, "timed_out": True, "returncode": -15}]}
         interrupted_result = {"commands": [{"ok": False, "returncode": -15}]}
-        self.assertEqual(watcher.checkpoint_failure_reason(timeout_result), "runtime_budget_exceeded")
-        self.assertEqual(watcher.checkpoint_failure_reason(interrupted_result), "runner_interrupted")
+        self.assertEqual(
+            watcher.checkpoint_failure_reason(timeout_result), "runtime_budget_exceeded"
+        )
+        self.assertEqual(
+            watcher.checkpoint_failure_reason(interrupted_result), "runner_interrupted"
+        )
         self.assertFalse(watcher.failure_requires_attention_immediately("runner_interrupted"))
 
     def test_authentication_failure_needs_immediate_attention(self):
-        result = {"commands": [{"ok": False, "returncode": 1, "stderr_tail": "LinkedIn login required"}]}
+        result = {
+            "commands": [{"ok": False, "returncode": 1, "stderr_tail": "LinkedIn login required"}]
+        }
         reason = watcher.checkpoint_failure_reason(result)
         self.assertEqual(reason, "linkedin_authentication_required")
         self.assertTrue(watcher.failure_requires_attention_immediately(reason))

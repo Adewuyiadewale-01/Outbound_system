@@ -3,8 +3,8 @@
 
 import argparse
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Dict, Optional, Sequence
 
 import gspread
 
@@ -13,23 +13,28 @@ HELPERS = ROOT / "helpers"
 if str(HELPERS) not in sys.path:
     sys.path.insert(0, str(HELPERS))
 
-from sheets_helper import get_client, open_sheet  # noqa: E402
 from lead_exec_research import (  # noqa: E402
     DEFAULT_OBF_SHEET_URL,
     DEFAULT_PROSPECTS_TAB,
     DEFAULT_SHEET_URL,
 )
+from sheets_helper import get_client, open_sheet  # noqa: E402
 
 REPO_CREDS = ROOT / "credentials" / "google-sheets.json"
 OPENCLAW_CREDS = Path.home() / ".openclaw" / "credentials" / "google-sheets.json"
 DEFAULT_CREDS = REPO_CREDS if REPO_CREDS.exists() else OPENCLAW_CREDS
 
 
-def ensure_header(credentials: Path, sheet_url: str, tab: str, dry_run: bool) -> Dict[str, object]:
+def ensure_header(credentials: Path, sheet_url: str, tab: str, dry_run: bool) -> dict[str, object]:
     worksheet = open_sheet(get_client(str(credentials)), sheet_url).worksheet(tab)
     headers = worksheet.row_values(1)
     if "Primary Lane" in headers:
-        return {"sheet": sheet_url, "tab": tab, "action": "already_present", "column": headers.index("Primary Lane") + 1}
+        return {
+            "sheet": sheet_url,
+            "tab": tab,
+            "action": "already_present",
+            "column": headers.index("Primary Lane") + 1,
+        }
     column = len(headers) + 1
     if not dry_run:
         if worksheet.col_count < column:
@@ -39,10 +44,15 @@ def ensure_header(credentials: Path, sheet_url: str, tab: str, dry_run: bool) ->
             values=[["Primary Lane"]],
             value_input_option="USER_ENTERED",
         )
-    return {"sheet": sheet_url, "tab": tab, "action": "would_add" if dry_run else "added", "column": column}
+    return {
+        "sheet": sheet_url,
+        "tab": tab,
+        "action": "would_add" if dry_run else "added",
+        "column": column,
+    }
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--credentials", default=str(DEFAULT_CREDS))
     parser.add_argument("--dry-run", action="store_true")

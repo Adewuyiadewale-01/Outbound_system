@@ -17,10 +17,12 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Iterable
 from contextlib import contextmanager
-from datetime import date, datetime, time as clock_time, timedelta
+from datetime import date, datetime, timedelta
+from datetime import time as clock_time
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -80,9 +82,10 @@ ACTIVITY_CHECKPOINTS = [
         "commands": [],
     }
 ]
-ACTIVITY_WORKERS_CONFIG_PATH = STATE_DIR / "activity_workers.json"
-OUTREACH_WORKERS_CONFIG_PATH = STATE_DIR / "outreach_workers.json"
+ACTIVITY_WORKERS_CONFIG_PATH = ROOT / "config" / "activity_workers.json"
+OUTREACH_WORKERS_CONFIG_PATH = ROOT / "config" / "outreach_workers.json"
 ACTIVITY_LANE_RUNNER = ROOT / "scripts" / "run_activity_lanes.py"
+START_CUTOFF_BUFFER = timedelta(minutes=10)
 
 DEFAULT_OBF_CONFIG = {
     "enabled": False,
@@ -116,7 +119,7 @@ def activity_commands(
     limit: int = 0,
     mode: str = "full",
     runner_dry_run: bool = False,
-) -> List[List[str]]:
+) -> list[list[str]]:
     # The activity runner derives its prepared-session path from --date.
     command = [PYTHON, str(ROOT / "scripts" / "check_prefinal_activity.py"), "--date", day]
     if mode == "prepare-only":
@@ -130,7 +133,13 @@ def activity_commands(
     lane_config = read_json(ACTIVITY_WORKERS_CONFIG_PATH)
     sequential_lanes_enabled = bool(lane_config.get("enabled")) and not runner_dry_run
     if sequential_lanes_enabled and mode == "full":
-        prepare_command = [PYTHON, str(ROOT / "scripts" / "check_prefinal_activity.py"), "--date", day, "--prepare-only"]
+        prepare_command = [
+            PYTHON,
+            str(ROOT / "scripts" / "check_prefinal_activity.py"),
+            "--date",
+            day,
+            "--prepare-only",
+        ]
         if limit > 0:
             prepare_command.extend(["--limit", str(limit)])
         return [prepare_command, [PYTHON, str(ACTIVITY_LANE_RUNNER), "--date", day]]
@@ -139,7 +148,7 @@ def activity_commands(
     return [command]
 
 
-def obf_config() -> Dict[str, Any]:
+def obf_config() -> dict[str, Any]:
     payload = {**DEFAULT_OBF_CONFIG, **read_json(OBF_CONFIG_PATH)}
     payload["enabled"] = bool(payload.get("enabled"))
     payload["max_sends"] = max(1, min(30, int(payload.get("max_sends") or 30)))
@@ -149,14 +158,16 @@ def obf_config() -> Dict[str, Any]:
     return payload
 
 
-def lead_prep_config() -> Dict[str, Any]:
+def lead_prep_config() -> dict[str, Any]:
     stored = read_json(LEAD_PREP_CONFIG_PATH)
     if not stored.get("overlap_scan_mode") and stored.get("reconciliation_mode"):
         stored["overlap_scan_mode"] = stored["reconciliation_mode"]
     payload = {**DEFAULT_LEAD_PREP_CONFIG, **stored}
     payload["autonomous_prep_enabled"] = bool(payload.get("autonomous_prep_enabled"))
     payload["base_volume"] = max(1, min(500, int(payload.get("base_volume") or 60)))
-    payload["processing_batch_size"] = max(1, min(500, int(payload.get("processing_batch_size") or 30)))
+    payload["processing_batch_size"] = max(
+        1, min(500, int(payload.get("processing_batch_size") or 30))
+    )
     payload["approval_gate_enabled"] = bool(payload.get("approval_gate_enabled"))
     payload["overlap_scan_mode"] = "off" if payload.get("overlap_scan_mode") == "off" else "auto"
     payload["fresh_volume_top_up_mode"] = (
@@ -168,19 +179,19 @@ def lead_prep_config() -> Dict[str, Any]:
     return payload
 
 
-def followup_config() -> Dict[str, Any]:
+def followup_config() -> dict[str, Any]:
     payload = {**DEFAULT_FOLLOWUP_CONFIG, **read_json(FOLLOWUP_CONFIG_PATH)}
     payload["enabled"] = bool(payload.get("enabled"))
     return payload
 
 
-def withdrawal_config() -> Dict[str, Any]:
+def withdrawal_config() -> dict[str, Any]:
     payload = {**DEFAULT_WITHDRAWAL_CONFIG, **read_json(WITHDRAWAL_CONFIG_PATH)}
     payload["enabled"] = bool(payload.get("enabled"))
     return payload
 
 
-def lead_prep_commands(config: Dict[str, Any]) -> List[List[str]]:
+def lead_prep_commands(config: dict[str, Any]) -> list[list[str]]:
     command = [
         PYTHON,
         str(ROOT / "scripts" / "lead_exec_research.py"),
@@ -197,25 +208,34 @@ def lead_prep_commands(config: Dict[str, Any]) -> List[List[str]]:
     return [command]
 
 
-def lead_review_cache_commands() -> List[List[str]]:
+def lead_review_cache_commands() -> list[list[str]]:
     return [[PYTHON, str(ROOT / "scripts" / "cache_lead_review_dashboard.py")]]
 
 
-def obf_commands(day: str, action: str, config: Dict[str, Any]) -> List[List[str]]:
+def obf_commands(day: str, action: str, config: dict[str, Any]) -> list[list[str]]:
     if action == "prepare":
         return [[PYTHON, str(OBF_RUNNER), "prepare-8_30-session", "--date", day]]
-    return [[
+    return [
+        [
+            PYTHON,
+            str(ROOT / "scripts" / "run_outreach_lanes.py"),
+            "--date",
+            day,
+            "--max-sends",
+            str(config["max_sends"]),
+        ]
+    ]
+
+
+def followup_run_command(day: str) -> list[str]:
+    return [
         PYTHON,
-        str(ROOT / "scripts" / "run_outreach_lanes.py"),
-        "--date",
-        day,
-        "--max-sends",
-        str(config["max_sends"]),
-    ]]
-
-
-def followup_run_command(day: str) -> List[str]:
-    return [PYTHON, str(FOLLOWUP_RUNNER), "--mode", "run", "--session", str(followup_session_path(day))]
+        str(FOLLOWUP_RUNNER),
+        "--mode",
+        "run",
+        "--session",
+        str(followup_session_path(day)),
+    ]
 
 
 def withdrawal_commands(
@@ -224,17 +244,33 @@ def withdrawal_commands(
     prepare: bool = True,
     limit: int = 0,
     resume: bool = False,
-    cooldown_hours: Optional[float] = None,
-) -> List[List[str]]:
+    cooldown_hours: float | None = None,
+) -> list[list[str]]:
     session = STATE_DIR / "withdrawal_sessions" / f"{day}.json"
-    commands: List[List[str]] = []
+    commands: list[list[str]] = []
     if prepare:
-        commands.extend([
-            [PYTHON, str(ROOT / "scripts" / "backfill_withdrawal_countdown.py")],
-            [PYTHON, str(ROOT / "scripts" / "prepare_connection_withdrawals.py"), "--date", day, "--session", str(session)],
-            ["sleep", "300"],
-        ])
-    withdraw = [PYTHON, str(ROOT / "scripts" / "run_withdrawal_lanes.py"), "--session", str(session), "--date", day]
+        commands.extend(
+            [
+                [PYTHON, str(ROOT / "scripts" / "backfill_withdrawal_countdown.py")],
+                [
+                    PYTHON,
+                    str(ROOT / "scripts" / "prepare_connection_withdrawals.py"),
+                    "--date",
+                    day,
+                    "--session",
+                    str(session),
+                ],
+                ["sleep", "300"],
+            ]
+        )
+    withdraw = [
+        PYTHON,
+        str(ROOT / "scripts" / "run_withdrawal_lanes.py"),
+        "--session",
+        str(session),
+        "--date",
+        day,
+    ]
     if limit > 0:
         withdraw.extend(["--limit", str(limit)])
     if resume:
@@ -244,11 +280,12 @@ def withdrawal_commands(
     commands.append(withdraw)
     return commands
 
+
 def clean(value: Any) -> str:
     return str(value or "").strip()
 
 
-def read_json(path: Path) -> Dict[str, Any]:
+def read_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
@@ -257,9 +294,11 @@ def read_json(path: Path) -> Dict[str, Any]:
         return {}
 
 
-def write_json(path: Path, payload: Dict[str, Any]) -> None:
+def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=True, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=True, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def parse_hhmm(value: str) -> clock_time:
@@ -267,7 +306,7 @@ def parse_hhmm(value: str) -> clock_time:
     return clock_time(hour=hour, minute=minute)
 
 
-def checkpoint_due(checkpoint: Dict[str, Any], now: datetime) -> bool:
+def checkpoint_due(checkpoint: dict[str, Any], now: datetime) -> bool:
     return now.time() >= parse_hhmm(checkpoint["due"])
 
 
@@ -280,7 +319,7 @@ def today_key(now: datetime) -> str:
     return now.date().isoformat()
 
 
-def day_state(state: Dict[str, Any], workflow: str, day: str) -> Dict[str, Any]:
+def day_state(state: dict[str, Any], workflow: str, day: str) -> dict[str, Any]:
     workflows = state.setdefault("workflows", {})
     workflow_state = workflows.setdefault(workflow, {})
     days = workflow_state.setdefault("days", {})
@@ -289,12 +328,12 @@ def day_state(state: Dict[str, Any], workflow: str, day: str) -> Dict[str, Any]:
     return current
 
 
-def checkpoint_done(day_payload: Dict[str, Any], checkpoint_name: str) -> bool:
+def checkpoint_done(day_payload: dict[str, Any], checkpoint_name: str) -> bool:
     checkpoint = day_payload.get("checkpoints", {}).get(checkpoint_name, {})
     return checkpoint.get("status") in TERMINAL_CHECKPOINT_STATUSES
 
 
-def checkpoint_ready(day_payload: Dict[str, Any], checkpoint_name: str, now: datetime) -> bool:
+def checkpoint_ready(day_payload: dict[str, Any], checkpoint_name: str, now: datetime) -> bool:
     checkpoint = day_payload.get("checkpoints", {}).get(checkpoint_name, {})
     if checkpoint.get("status") in TERMINAL_CHECKPOINT_STATUSES:
         return False
@@ -325,7 +364,7 @@ def process_table() -> str:
         return ""
 
 
-def related_runner_active() -> List[str]:
+def related_runner_active() -> list[str]:
     current_pid = os.getpid()
     active = []
     for line in process_table().splitlines():
@@ -353,7 +392,7 @@ def related_runner_active() -> List[str]:
     return active
 
 
-def should_wait_for_chrome() -> Dict[str, Any]:
+def should_wait_for_chrome() -> dict[str, Any]:
     active = related_runner_active()
     if active:
         return {"busy": True, "reason": "orchestration_process_active", "processes": active[:8]}
@@ -362,31 +401,37 @@ def should_wait_for_chrome() -> Dict[str, Any]:
     return {"busy": False}
 
 
-def close_stale_running_checkpoints(state: Dict[str, Any], day: str, now: datetime) -> List[Dict[str, str]]:
+def close_stale_running_checkpoints(
+    state: dict[str, Any], day: str, now: datetime
+) -> list[dict[str, str]]:
     """Release checkpoints orphaned by a killed watcher so they can resume."""
     active = related_runner_active()
     if active:
         return []
 
-    released: List[Dict[str, str]] = []
+    released: list[dict[str, str]] = []
     for workflow, workflow_payload in state.get("workflows", {}).items():
         day_payload = workflow_payload.get("days", {}).get(day, {})
         checkpoints = day_payload.get("checkpoints", {})
         for checkpoint_name, checkpoint in checkpoints.items():
             if checkpoint.get("status") != "running":
                 continue
-            checkpoint.update({
-                "status": "resume_pending",
-                "interrupted_at": now.isoformat(timespec="seconds"),
-                "reason": "runner_process_not_found_after_interruption",
-                "next_retry_at": now.isoformat(timespec="seconds"),
-            })
+            checkpoint.update(
+                {
+                    "status": "resume_pending",
+                    "interrupted_at": now.isoformat(timespec="seconds"),
+                    "reason": "runner_process_not_found_after_interruption",
+                    "next_retry_at": now.isoformat(timespec="seconds"),
+                }
+            )
             released.append({"workflow": workflow, "checkpoint": checkpoint_name})
     return released
 
 
-def required_cdp_workers(workflow: str) -> List[Dict[str, Any]]:
-    config_path = ACTIVITY_WORKERS_CONFIG_PATH if workflow == "activity" else OUTREACH_WORKERS_CONFIG_PATH
+def required_cdp_workers(workflow: str) -> list[dict[str, Any]]:
+    config_path = (
+        ACTIVITY_WORKERS_CONFIG_PATH if workflow == "activity" else OUTREACH_WORKERS_CONFIG_PATH
+    )
     config = read_json(config_path)
     workers = [item for item in config.get("workers", []) if item.get("enabled", True)]
     if workflow == "followups":
@@ -394,11 +439,18 @@ def required_cdp_workers(workflow: str) -> List[Dict[str, Any]]:
     return workers
 
 
-def ensure_chrome_workers(workflow: str) -> Dict[str, Any]:
+def ensure_chrome_workers(workflow: str) -> dict[str, Any]:
     workers = required_cdp_workers(workflow)
     if not workers:
-        workers = [{"id": "account_1", "cdp_host": "127.0.0.1", "cdp_port": 18800, "launch_script": "scripts/launch-chrome.sh"}]
-    launched: List[str] = []
+        workers = [
+            {
+                "id": "account_1",
+                "cdp_host": "127.0.0.1",
+                "cdp_port": 18800,
+                "launch_script": "scripts/launch-chrome.sh",
+            }
+        ]
+    launched: list[str] = []
     for worker in workers:
         host = clean(worker.get("cdp_host")) or "127.0.0.1"
         port = int(worker.get("cdp_port") or 18800)
@@ -408,7 +460,12 @@ def ensure_chrome_workers(workflow: str) -> Dict[str, Any]:
         if not script.is_absolute():
             script = ROOT / script
         if not script.is_file():
-            return {"ok": False, "reason": "chrome_launch_script_missing", "worker_id": worker.get("id"), "script": str(script)}
+            return {
+                "ok": False,
+                "reason": "chrome_launch_script_missing",
+                "worker_id": worker.get("id"),
+                "script": str(script),
+            }
         try:
             subprocess.Popen(
                 ["bash", str(script)],
@@ -419,14 +476,26 @@ def ensure_chrome_workers(workflow: str) -> Dict[str, Any]:
             )
             launched.append(clean(worker.get("id")) or str(port))
         except Exception as exc:
-            return {"ok": False, "reason": "chrome_launch_failed", "worker_id": worker.get("id"), "error": str(exc)}
+            return {
+                "ok": False,
+                "reason": "chrome_launch_failed",
+                "worker_id": worker.get("id"),
+                "error": str(exc),
+            }
     for _ in range(20):
         unhealthy = [
-            worker for worker in workers
-            if not cdp_port_open(clean(worker.get("cdp_host")) or "127.0.0.1", int(worker.get("cdp_port") or 18800))
+            worker
+            for worker in workers
+            if not cdp_port_open(
+                clean(worker.get("cdp_host")) or "127.0.0.1", int(worker.get("cdp_port") or 18800)
+            )
         ]
         if not unhealthy:
-            return {"ok": True, "workers": [worker.get("id") for worker in workers], "launched": launched}
+            return {
+                "ok": True,
+                "workers": [worker.get("id") for worker in workers],
+                "launched": launched,
+            }
         time.sleep(2)
     return {
         "ok": False,
@@ -446,7 +515,7 @@ def process_alive(pid: int) -> bool:
         return False
 
 
-def ensure_operating_window_awake(now: datetime) -> Dict[str, Any]:
+def ensure_operating_window_awake(now: datetime) -> dict[str, Any]:
     if not (OPERATING_WINDOW_START <= now.time() < OPERATING_WINDOW_END):
         return {"active": False, "reason": "outside_operating_window"}
     existing = read_json(WATCHER_AWAKE_PATH)
@@ -461,7 +530,11 @@ def ensure_operating_window_awake(now: datetime) -> Dict[str, Any]:
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
-    payload = {"pid": proc.pid, "started_at": now.isoformat(timespec="seconds"), "until": end_at.isoformat(timespec="seconds")}
+    payload = {
+        "pid": proc.pid,
+        "started_at": now.isoformat(timespec="seconds"),
+        "until": end_at.isoformat(timespec="seconds"),
+    }
     write_json(WATCHER_AWAKE_PATH, payload)
     return {"active": True, **payload}
 
@@ -470,7 +543,11 @@ def notify_attention(workflow: str, checkpoint: str, reason: str) -> None:
     message = f"{workflow}: {checkpoint} needs attention ({reason})"
     try:
         subprocess.Popen(
-            ["osascript", "-e", f'display notification {json.dumps(message)} with title "Outreach watcher"'],
+            [
+                "osascript",
+                "-e",
+                f'display notification {json.dumps(message)} with title "Outreach watcher"',
+            ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
@@ -485,9 +562,7 @@ def watcher_lock() -> Iterable[None]:
     now = time.time()
     if WATCHER_LOCK_PATH.exists():
         lock = read_json(WATCHER_LOCK_PATH)
-        started = float(lock.get("started_epoch") or 0)
         pid = int(lock.get("pid") or 0)
-        stale = started and now - started > LOCK_STALE_SECONDS
         alive = False
         if pid:
             try:
@@ -512,7 +587,7 @@ def watcher_lock() -> Iterable[None]:
         WATCHER_LOCK_PATH.unlink(missing_ok=True)
 
 
-def command_timeout_seconds(command: List[str]) -> int:
+def command_timeout_seconds(command: list[str]) -> int:
     joined = " ".join(command)
     if "run_activity_lanes.py" in joined or "check_prefinal_activity.py" in joined:
         day = ""
@@ -554,7 +629,7 @@ def terminate_process_group(proc: subprocess.Popen) -> None:
             pass
 
 
-def run_command(command: List[str], dry_run: bool) -> Dict[str, Any]:
+def run_command(command: list[str], dry_run: bool) -> dict[str, Any]:
     if dry_run:
         return {"ok": True, "dry_run": True, "command": command, "returncode": 0}
     started = datetime.now().isoformat(timespec="seconds")
@@ -564,7 +639,7 @@ def run_command(command: List[str], dry_run: bool) -> Dict[str, Any]:
     stdout_path = Path(stdout_file.name)
     stderr_path = Path(stderr_file.name)
     timed_out = False
-    proc: Optional[subprocess.Popen] = None
+    proc: subprocess.Popen | None = None
     try:
         proc = subprocess.Popen(
             command,
@@ -577,22 +652,33 @@ def run_command(command: List[str], dry_run: bool) -> Dict[str, Any]:
         stderr_file.close()
         deadline = time.monotonic() + timeout_seconds
         while proc.poll() is None:
-            write_json(WATCHER_RUNTIME_PATH, {
-                "watcher_pid": os.getpid(),
-                "command_pid": proc.pid,
-                "command": command,
-                "started_at": started,
-                "heartbeat_at": datetime.now().isoformat(timespec="seconds"),
-                "timeout_seconds": timeout_seconds,
-            })
+            write_json(
+                WATCHER_RUNTIME_PATH,
+                {
+                    "watcher_pid": os.getpid(),
+                    "command_pid": proc.pid,
+                    "command": command,
+                    "started_at": started,
+                    "heartbeat_at": datetime.now().isoformat(timespec="seconds"),
+                    "timeout_seconds": timeout_seconds,
+                },
+            )
             if time.monotonic() >= deadline:
                 timed_out = True
                 terminate_process_group(proc)
                 break
             time.sleep(5)
         returncode = proc.wait() if proc.poll() is None else proc.returncode
-        stdout_text = stdout_path.read_text(encoding="utf-8", errors="replace") if stdout_path.exists() else ""
-        stderr_text = stderr_path.read_text(encoding="utf-8", errors="replace") if stderr_path.exists() else ""
+        stdout_text = (
+            stdout_path.read_text(encoding="utf-8", errors="replace")
+            if stdout_path.exists()
+            else ""
+        )
+        stderr_text = (
+            stderr_path.read_text(encoding="utf-8", errors="replace")
+            if stderr_path.exists()
+            else ""
+        )
         return {
             "ok": returncode == 0 and not timed_out,
             "command": command,
@@ -624,7 +710,7 @@ def run_command(command: List[str], dry_run: bool) -> Dict[str, Any]:
         WATCHER_RUNTIME_PATH.unlink(missing_ok=True)
 
 
-def run_checkpoint(checkpoint: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
+def run_checkpoint(checkpoint: dict[str, Any], dry_run: bool) -> dict[str, Any]:
     results = []
     for command in checkpoint["commands"]:
         wrapped_command = ["caffeinate", "-dimsu"] + command
@@ -640,28 +726,48 @@ def run_checkpoint(checkpoint: Dict[str, Any], dry_run: bool) -> Dict[str, Any]:
     }
 
 
-def checkpoint_failure_reason(result: Dict[str, Any]) -> str:
+def checkpoint_failure_reason(result: dict[str, Any]) -> str:
     failed = next((item for item in result.get("commands", []) if not item.get("ok")), {})
     if failed.get("timed_out"):
         return "runtime_budget_exceeded"
     if isinstance(failed.get("returncode"), int) and failed.get("returncode") < 0:
         return "runner_interrupted"
-    text = " ".join([
-        clean(failed.get("error")),
-        clean(failed.get("stderr_tail")),
-        clean(failed.get("stdout_tail")),
-    ]).lower()
-    if any(marker in text for marker in (
-        "nameresolutionerror", "failed to resolve", "ssleoferror",
-        "connectionerror", "connection reset", "network is unreachable",
-        "connecttimeout", "readtimeout", "temporarily unavailable",
-    )):
+    text = " ".join(
+        [
+            clean(failed.get("error")),
+            clean(failed.get("stderr_tail")),
+            clean(failed.get("stdout_tail")),
+        ]
+    ).lower()
+    if any(
+        marker in text
+        for marker in (
+            "nameresolutionerror",
+            "failed to resolve",
+            "ssleoferror",
+            "connectionerror",
+            "connection reset",
+            "network is unreachable",
+            "connecttimeout",
+            "readtimeout",
+            "temporarily unavailable",
+        )
+    ):
         return "network_failure"
     if '"termination_signal"' in text or '"interrupted": true' in text:
         return "runner_interrupted"
     if "login" in text or "checkpoint challenge" in text or "security challenge" in text:
         return "linkedin_authentication_required"
-    if any(marker in text for marker in ("missing required", "schema error", "invalid_grant", "invalid_client", "credentials file not found")):
+    if any(
+        marker in text
+        for marker in (
+            "missing required",
+            "schema error",
+            "invalid_grant",
+            "invalid_client",
+            "credentials file not found",
+        )
+    ):
         return "configuration_or_schema_error"
     if "chrome" in text or "cdp" in text or "timeout" in text:
         return "browser_or_cdp_failure"
@@ -677,12 +783,12 @@ def retry_at_for_attempt(now: datetime, attempt: int) -> datetime:
     return now + timedelta(minutes=RETRY_DELAYS_MINUTES[delay_index])
 
 
-def extract_command_json(command_result: Dict[str, Any]) -> Dict[str, Any]:
+def extract_command_json(command_result: dict[str, Any]) -> dict[str, Any]:
     text = clean(command_result.get("stdout_tail"))
     if not text:
         return {}
     decoder = json.JSONDecoder()
-    best: Dict[str, Any] = {}
+    best: dict[str, Any] = {}
     for idx, char in enumerate(text):
         if char != "{":
             continue
@@ -695,7 +801,7 @@ def extract_command_json(command_result: Dict[str, Any]) -> Dict[str, Any]:
     return best
 
 
-def latest_followup_runner_summary(checkpoint_payload: Dict[str, Any]) -> Dict[str, Any]:
+def latest_followup_runner_summary(checkpoint_payload: dict[str, Any]) -> dict[str, Any]:
     result = checkpoint_payload.get("result", {})
     commands = result.get("commands") or []
     if not commands:
@@ -703,18 +809,17 @@ def latest_followup_runner_summary(checkpoint_payload: Dict[str, Any]) -> Dict[s
     return extract_command_json(commands[-1])
 
 
-def followup_continuation_needed(checkpoint_payload: Dict[str, Any]) -> bool:
+def followup_continuation_needed(checkpoint_payload: dict[str, Any]) -> bool:
     if checkpoint_payload.get("status") != "completed":
         return False
     summary = latest_followup_runner_summary(checkpoint_payload)
-    capped_with_remaining = (
-        int(summary.get("remaining_due") or 0) > 0
-        and int(summary.get("sent") or 0) >= int(summary.get("send_cap") or 20)
-    )
+    capped_with_remaining = int(summary.get("remaining_due") or 0) > 0 and int(
+        summary.get("sent") or 0
+    ) >= int(summary.get("send_cap") or 20)
     return bool(summary.get("next_run_recommended")) or capped_with_remaining
 
 
-def withdrawal_continuation_needed(checkpoint_payload: Dict[str, Any], session_path: Path) -> bool:
+def withdrawal_continuation_needed(checkpoint_payload: dict[str, Any], session_path: Path) -> bool:
     """Continue after a clean first pass left prepared targets unprocessed."""
     if checkpoint_payload.get("status") != "completed" or not session_path.exists():
         return False
@@ -731,7 +836,9 @@ def withdrawal_continuation_needed(checkpoint_payload: Dict[str, Any], session_p
     )
 
 
-def due_followup_checkpoint(now: datetime, day_payload: Dict[str, Any], day: str) -> Optional[Dict[str, Any]]:
+def due_followup_checkpoint(
+    now: datetime, day_payload: dict[str, Any], day: str
+) -> dict[str, Any] | None:
     if not followups_allowed(now):
         return None
     base = FOLLOWUP_CHECKPOINTS[0]
@@ -739,7 +846,13 @@ def due_followup_checkpoint(now: datetime, day_payload: Dict[str, Any], day: str
         return {
             **base,
             "commands": [
-                [PYTHON, str(FOLLOWUP_RUNNER), "--prepare-only", "--session", str(followup_session_path(day))],
+                [
+                    PYTHON,
+                    str(FOLLOWUP_RUNNER),
+                    "--prepare-only",
+                    "--session",
+                    str(followup_session_path(day)),
+                ],
                 ["sleep", "300"],
                 followup_run_command(day),
             ],
@@ -770,10 +883,10 @@ def due_followup_checkpoint(now: datetime, day_payload: Dict[str, Any], day: str
 
 def due_obf_checkpoint(
     now: datetime,
-    day_payload: Dict[str, Any],
+    day_payload: dict[str, Any],
     day: str,
-    config: Dict[str, Any],
-) -> Optional[Dict[str, Any]]:
+    config: dict[str, Any],
+) -> dict[str, Any] | None:
     if not config.get("enabled"):
         return None
     # Python weekday: Monday=0, Saturday=5, Sunday=6.  The runner has the
@@ -785,7 +898,10 @@ def due_obf_checkpoint(
         item.get("status") in {"retry_waiting", "resume_pending"}
         for item in existing_checkpoints.values()
     )
-    if now.time() > parse_hhmm(str(config.get("window_end") or "10:30")) and not recoverable_after_cutoff:
+    if (
+        now.time() > parse_hhmm(str(config.get("window_end") or "10:30"))
+        and not recoverable_after_cutoff
+    ):
         return None
     checkpoints = [
         {
@@ -805,23 +921,27 @@ def due_obf_checkpoint(
             prepared = read_json(prepared_path)
             if not prepared.get("ready"):
                 continue
-        if checkpoint_due(checkpoint, now) and checkpoint_ready(day_payload, checkpoint["name"], now):
+        if checkpoint_due(checkpoint, now) and checkpoint_ready(
+            day_payload, checkpoint["name"], now
+        ):
             return checkpoint
     return None
 
 
-def due_activity_checkpoint(now: datetime, day_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def due_activity_checkpoint(now: datetime, day_payload: dict[str, Any]) -> dict[str, Any] | None:
     for checkpoint in ACTIVITY_CHECKPOINTS:
-        if checkpoint_due(checkpoint, now) and checkpoint_ready(day_payload, checkpoint["name"], now):
+        if checkpoint_due(checkpoint, now) and checkpoint_ready(
+            day_payload, checkpoint["name"], now
+        ):
             return {**checkpoint, "commands": activity_commands(today_key(now))}
     return None
 
 
 def due_forced_activity_retry(
     now: datetime,
-    day_payload: Dict[str, Any],
+    day_payload: dict[str, Any],
     day: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Resume a watcher-owned manual activity run on later launchd ticks.
 
     A forced run prepares its durable session on the first attempt.  Subsequent
@@ -846,13 +966,13 @@ def due_forced_activity_retry(
 
 def due_lead_prep_checkpoint(
     now: datetime,
-    day_payload: Dict[str, Any],
-    config: Dict[str, Any],
-) -> Optional[Dict[str, Any]]:
+    day_payload: dict[str, Any],
+    config: dict[str, Any],
+) -> dict[str, Any] | None:
     prep_due = str(config.get("prep_time") or "14:00")
     prep_clock = datetime.combine(now.date(), parse_hhmm(prep_due), tzinfo=now.tzinfo)
     cache_due = (prep_clock + timedelta(minutes=10)).strftime("%H:%M")
-    checkpoints: List[Dict[str, Any]] = []
+    checkpoints: list[dict[str, Any]] = []
     if config.get("autonomous_prep_enabled"):
         checkpoints.append(
             {
@@ -869,19 +989,25 @@ def due_lead_prep_checkpoint(
         }
     )
     for checkpoint in checkpoints:
-        if checkpoint_due(checkpoint, now) and checkpoint_ready(day_payload, checkpoint["name"], now):
+        if checkpoint_due(checkpoint, now) and checkpoint_ready(
+            day_payload, checkpoint["name"], now
+        ):
             return checkpoint
     return None
 
 
-def due_withdrawal_checkpoint(now: datetime, day_payload: Dict[str, Any], day: str) -> Optional[Dict[str, Any]]:
+def due_withdrawal_checkpoint(
+    now: datetime, day_payload: dict[str, Any], day: str
+) -> dict[str, Any] | None:
     if not withdrawal_config().get("enabled"):
         return None
     base_name = "withdrawals_run_1"
     session_path = STATE_DIR / "withdrawal_sessions" / f"{day}.json"
     if checkpoint_ready(day_payload, base_name, now):
         existing = day_payload.get("checkpoints", {}).get(base_name, {})
-        resuming = existing.get("status") in {"retry_waiting", "resume_pending"} and session_path.exists()
+        resuming = (
+            existing.get("status") in {"retry_waiting", "resume_pending"} and session_path.exists()
+        )
         checkpoint = {
             "name": base_name,
             "due": "18:00",
@@ -917,11 +1043,13 @@ def due_withdrawal_checkpoint(now: datetime, day_payload: Dict[str, Any], day: s
     return {
         "name": current_name,
         "due": next_due_dt.strftime("%H:%M"),
-        "commands": withdrawal_commands(day, prepare=False, limit=20, resume=True, cooldown_hours=0),
+        "commands": withdrawal_commands(
+            day, prepare=False, limit=20, resume=True, cooldown_hours=0
+        ),
     }
 
 
-def next_workflow_window(now: datetime, active_workflow: str) -> Optional[Dict[str, Any]]:
+def next_workflow_window(now: datetime, active_workflow: str) -> dict[str, Any] | None:
     """Return the next other workflow's scheduled base window."""
     windows = {
         "obf": str(obf_config().get("prep_time") or "08:25"),
@@ -944,7 +1072,7 @@ def next_workflow_window(now: datetime, active_workflow: str) -> Optional[Dict[s
     return {"workflow": workflow, "due": due, "due_at": due_at}
 
 
-def start_cutoff(now: datetime, active_workflow: str) -> Optional[Dict[str, Any]]:
+def start_cutoff(now: datetime, active_workflow: str) -> dict[str, Any] | None:
     next_window = next_workflow_window(now, active_workflow)
     if not next_window:
         return None
@@ -954,7 +1082,7 @@ def start_cutoff(now: datetime, active_workflow: str) -> Optional[Dict[str, Any]
     return None
 
 
-def status_payload(now: datetime, state: Dict[str, Any]) -> Dict[str, Any]:
+def status_payload(now: datetime, state: dict[str, Any]) -> dict[str, Any]:
     day = today_key(now)
     payload = day_state(state, "followups", day)
     due = due_followup_checkpoint(now, payload, day)
@@ -973,7 +1101,7 @@ def status_payload(now: datetime, state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def tick(args: argparse.Namespace) -> Dict[str, Any]:
+def tick(args: argparse.Namespace) -> dict[str, Any]:
     now = datetime.now(ZoneInfo(args.timezone))
     state = read_json(WATCHER_STATE_PATH)
     day = today_key(now)
@@ -1017,7 +1145,11 @@ def tick(args: argparse.Namespace) -> Dict[str, Any]:
         day = requested_day
 
     forced_run = forced_activity or forced_lead_prep
-    awake = ensure_operating_window_awake(now) if not forced_run else {"active": True, "reason": "forced_run"}
+    awake = (
+        ensure_operating_window_awake(now)
+        if not forced_run
+        else {"active": True, "reason": "forced_run"}
+    )
 
     released = close_stale_running_checkpoints(state, day, now)
 
@@ -1101,13 +1233,12 @@ def tick(args: argparse.Namespace) -> Dict[str, Any]:
             **status_payload(now, state),
         }
 
-    preflight_result: Optional[Dict[str, Any]] = None
+    preflight_result: dict[str, Any] | None = None
     # OBF preparation is a Sheets-only operation.  Starting either LinkedIn
     # browser before it passes its control-row checks is unnecessary and can
     # leave an idle CDP window open after a blocked preparation.
-    requires_chrome = (
-        active_workflow in {"activity", "followups", "withdrawals"}
-        or (active_workflow == "obf" and due["name"] == "obf_execute")
+    requires_chrome = active_workflow in {"activity", "followups", "withdrawals"} or (
+        active_workflow == "obf" and due["name"] == "obf_execute"
     )
     if requires_chrome:
         chrome = should_wait_for_chrome()
@@ -1120,7 +1251,13 @@ def tick(args: argparse.Namespace) -> Dict[str, Any]:
             }
             state["last_tick_at"] = now.isoformat(timespec="seconds")
             write_json(WATCHER_STATE_PATH, state)
-            return {"ok": True, "status": "waiting", "checkpoint": due["name"], "chrome": chrome, "released_interrupted": released}
+            return {
+                "ok": True,
+                "status": "waiting",
+                "checkpoint": due["name"],
+                "chrome": chrome,
+                "released_interrupted": released,
+            }
 
         chrome_preflight = ensure_chrome_workers(active_workflow)
         if not chrome_preflight.get("ok"):
@@ -1128,12 +1265,14 @@ def tick(args: argparse.Namespace) -> Dict[str, Any]:
                 "name": due["name"],
                 "due": due["due"],
                 "ok": False,
-                "commands": [{
-                    "ok": False,
-                    "returncode": None,
-                    "error": chrome_preflight.get("reason"),
-                    "stderr_tail": json.dumps(chrome_preflight, ensure_ascii=True),
-                }],
+                "commands": [
+                    {
+                        "ok": False,
+                        "returncode": None,
+                        "error": chrome_preflight.get("reason"),
+                        "stderr_tail": json.dumps(chrome_preflight, ensure_ascii=True),
+                    }
+                ],
             }
 
     previous_checkpoint = active_payload.get("checkpoints", {}).get(due["name"], {})
@@ -1151,7 +1290,7 @@ def tick(args: argparse.Namespace) -> Dict[str, Any]:
     result = preflight_result or run_checkpoint(due, args.dry_run)
     completed_now = datetime.now(ZoneInfo(args.timezone))
     completed_at = completed_now.isoformat(timespec="seconds")
-    checkpoint_result: Dict[str, Any] = {
+    checkpoint_result: dict[str, Any] = {
         "started_at": active_payload["checkpoints"][due["name"]].get("started_at"),
         "completed_at": completed_at,
         "dry_run": bool(args.dry_run),
@@ -1165,21 +1304,25 @@ def tick(args: argparse.Namespace) -> Dict[str, Any]:
         checkpoint_result["reason"] = reason
         if not failure_requires_attention_immediately(reason) and attempt < MAX_CHECKPOINT_ATTEMPTS:
             checkpoint_result["status"] = "retry_waiting"
-            checkpoint_result["next_retry_at"] = retry_at_for_attempt(completed_now, attempt).isoformat(timespec="seconds")
+            checkpoint_result["next_retry_at"] = retry_at_for_attempt(
+                completed_now, attempt
+            ).isoformat(timespec="seconds")
         else:
             checkpoint_result["status"] = "needs_attention"
             alerts = state.setdefault("alerts", [])
             alert_id = f"{day}:{active_workflow}:{due['name']}"
             alerts[:] = [item for item in alerts if item.get("id") != alert_id]
-            alerts.append({
-                "id": alert_id,
-                "day": day,
-                "workflow": active_workflow,
-                "checkpoint": due["name"],
-                "reason": reason,
-                "created_at": completed_at,
-                "acknowledged": False,
-            })
+            alerts.append(
+                {
+                    "id": alert_id,
+                    "day": day,
+                    "workflow": active_workflow,
+                    "checkpoint": due["name"],
+                    "reason": reason,
+                    "created_at": completed_at,
+                    "acknowledged": False,
+                }
+            )
             notify_attention(active_workflow, due["name"], reason)
     active_payload["checkpoints"][due["name"]] = checkpoint_result
     state["last_tick_at"] = completed_at
@@ -1194,7 +1337,7 @@ def tick(args: argparse.Namespace) -> Dict[str, Any]:
     }
 
 
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run one short orchestration watcher tick.")
     parser.add_argument("--timezone", default=DEFAULT_TIMEZONE)
     parser.add_argument("--dry-run", action="store_true")
@@ -1231,7 +1374,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         with watcher_lock():

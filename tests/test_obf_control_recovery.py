@@ -3,7 +3,6 @@ import unittest
 from argparse import Namespace
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 HELPERS = ROOT / "helpers"
 if str(HELPERS) not in sys.path:
@@ -103,12 +102,8 @@ class ObfControlRecoveryTests(unittest.TestCase):
         self.assertIn(obf.DEFAULT_LANE_SPLIT_MARKER, row["Notes"])
 
     def test_baseline_queue_selects_exactly_fifteen_per_lane(self):
-        queue = [
-            {"id": f"d-{index}", "primary_lane": "Design"}
-            for index in range(20)
-        ] + [
-            {"id": f"a-{index}", "primary_lane": "Automation"}
-            for index in range(20)
+        queue = [{"id": f"d-{index}", "primary_lane": "Design"} for index in range(20)] + [
+            {"id": f"a-{index}", "primary_lane": "Automation"} for index in range(20)
         ]
 
         selected, selected_counts, available_counts = obf._select_queue_for_lane_targets(
@@ -132,9 +127,17 @@ class ObfControlRecoveryTests(unittest.TestCase):
         )
 
         self.assertEqual(queue[-1]["primary_lane"], "Automation")
-        self.assertEqual(assigned["assignments"], [{
-            "prospect_id": "blank", "company": "", "row_number": 7, "primary_lane": "Automation"
-        }])
+        self.assertEqual(
+            assigned["assignments"],
+            [
+                {
+                    "prospect_id": "blank",
+                    "company": "",
+                    "row_number": 7,
+                    "primary_lane": "Automation",
+                }
+            ],
+        )
 
     def test_prep_auto_assignment_respects_explicit_lane_deficits(self):
         queue = [
@@ -152,9 +155,10 @@ class ObfControlRecoveryTests(unittest.TestCase):
             lane_targets={"Design": 3, "Automation": 3},
         )
 
-        self.assertEqual([row["primary_lane"] for row in queue], [
-            "Design", "Design", "Automation", "Design", "Automation", "Automation"
-        ])
+        self.assertEqual(
+            [row["primary_lane"] for row in queue],
+            ["Design", "Design", "Automation", "Design", "Automation", "Automation"],
+        )
         self.assertEqual(len(assigned["assignments"]), 3)
 
     def test_lane_targets_scale_with_remaining_volume(self):
