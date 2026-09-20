@@ -1,0 +1,24 @@
+{
+  "enabled": true,
+  "normal_handoff_gap_minutes": 10,
+  "workers": [
+    {
+      "id": "design_account",
+      "primary_lane": "Design",
+      "cdp_host": "127.0.0.1",
+      "cdp_port": 18800,
+      "profile_dir": "/Users/tonyisbuiding/.openclaw/chrome-profile",
+      "launch_script": "scripts/launch-chrome.sh",
+      "enabled": true
+    },
+    {
+      "id": "automation_account",
+      "primary_lane": "Automation",
+      "cdp_host": "127.0.0.1",
+      "cdp_port": 18801,
+      "profile_dir": "/Users/tonyisbuiding/.openclaw/chrome-profile-2",
+      "launch_script": "scripts/launch-chrome-2.sh",
+      "enabled": true
+    }
+  ]
+}

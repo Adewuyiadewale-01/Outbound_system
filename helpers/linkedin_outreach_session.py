@@ -17,7 +17,7 @@ import sys
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from gspread.exceptions import WorksheetNotFound
 from runtime_environment import load_repo_env
@@ -30,7 +30,8 @@ STATE_DIR = ROOT_DIR / "state" / "outreach_sequences"
 JOURNAL_DIR = ROOT_DIR / "state" / "outreach_journal"
 ACCEPTANCE_STATE_DIR = ROOT_DIR / "state" / "acceptance_monitoring"
 ACCEPTANCE_STATE_FILE = ACCEPTANCE_STATE_DIR / "state.json"
-OUTREACH_WORKERS_CONFIG_PATH = ROOT_DIR / "state" / "outreach_workers.json"
+OUTREACH_WORKERS_CONFIG_PATH = ROOT_DIR / "config" / "outreach_workers.json"
+
 
 def _resolve_default_creds() -> str:
     """Resolve credentials path, checking workspace symlink as fallback.
@@ -129,18 +130,6 @@ PROFILE_UI_GUARD_ERRORS = {
 
 sys.path.insert(0, str(HELPERS_DIR))
 
-from sheets_helper import (  # noqa: E402
-    daily_approval_state,
-    format_sheet_date,
-    get_client,
-    get_daily_group_data,
-    get_worksheet,
-    is_checked_value,
-    open_sheet,
-    safe_number,
-    sheet_values_equal,
-    update_row,
-)
 from outreach_helper import (  # noqa: E402
     append_pipeline_row_for_acceptance,
     apply_prospect_fields,
@@ -156,6 +145,20 @@ from outreach_helper import (  # noqa: E402
     mark_outreach_log_connected,
     pick_connection_template,
     render_template,
+)
+from sheets_helper import (  # noqa: E402
+    complete_daily_row,
+    daily_approval_state,
+    format_sheet_date,
+    get_client,
+    get_daily_group_data,
+    get_worksheet,
+    is_checked_value,
+    open_sheet,
+    partial_daily_row,
+    safe_number,
+    sheet_values_equal,
+    update_row,
 )
 
 
@@ -187,7 +190,7 @@ def _verify_sheet_url_identity(actual_url: str, expected_url: str, label: str) -
         )
 
 
-def sheet_date(value: Optional[str]) -> str:
+def sheet_date(value: str | None) -> str:
     parsed = _parse_date(value) if value else date.today()
     return f"{parsed.month}/{parsed.day}/{parsed.year}"
 
@@ -221,7 +224,7 @@ def journal_path(date_value: str) -> Path:
     return JOURNAL_DIR / f"{sequence_date_key(date_value)}.jsonl"
 
 
-def _append_jsonl(path: Path, payload: Dict[str, Any]) -> str:
+def _append_jsonl(path: Path, payload: dict[str, Any]) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
@@ -232,10 +235,10 @@ def _journal_event(
     date_value: str,
     event_type: str,
     status: str,
-    prospect: Optional[Dict[str, Any]] = None,
+    prospect: dict[str, Any] | None = None,
     **extra: Any,
 ) -> str:
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "recorded_at": datetime.now().isoformat(timespec="seconds"),
         "date": sheet_date(date_value),
         "event_type": event_type,
@@ -248,7 +251,8 @@ def _journal_event(
                 "prospect_row": prospect.get("_row_number"),
                 "company": str(prospect.get("company", "")).strip(),
                 "contact_name": str(prospect.get("contact_name", "")).strip(),
-                "engaged_person": str(prospect.get("engaged_person", "Person 1")).strip() or "Person 1",
+                "engaged_person": str(prospect.get("engaged_person", "Person 1")).strip()
+                or "Person 1",
                 "contact_linkedin": str(prospect.get("contact_linkedin", "")).strip(),
             }
         )
@@ -257,11 +261,11 @@ def _journal_event(
 
 
 def _record_journal_event(
-    result: Dict[str, Any],
+    result: dict[str, Any],
     date_value: str,
     event_type: str,
     status: str,
-    prospect: Optional[Dict[str, Any]] = None,
+    prospect: dict[str, Any] | None = None,
     **extra: Any,
 ) -> str:
     path = _journal_event(date_value, event_type, status, prospect=prospect, **extra)
@@ -272,9 +276,9 @@ def _record_journal_event(
 
 
 def _record_breadcrumb(
-    result: Dict[str, Any],
+    result: dict[str, Any],
     date_value: str,
-    prospect: Dict[str, Any],
+    prospect: dict[str, Any],
     stage: str,
     lead_started_at: float,
     status: str = "ok",
@@ -294,19 +298,19 @@ def _record_breadcrumb(
 
 
 def _emit_outreach_progress(
-    result: Dict[str, Any],
+    result: dict[str, Any],
     *,
     date_value: str,
     stage: str,
     processed: int,
     selected_count: int,
-    prospect: Optional[Dict[str, Any]] = None,
+    prospect: dict[str, Any] | None = None,
 ) -> None:
     """Emit machine-readable progress without contaminating final stdout JSON."""
     try:
         journal = result.get("journal", {}) if isinstance(result.get("journal"), dict) else {}
         runtime = result.get("runtime_enforcement", {})
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "event": "outreach_progress",
             "emitted_at": datetime.now().isoformat(timespec="seconds"),
             "date": sheet_date(date_value),
@@ -333,7 +337,7 @@ def _emit_outreach_progress(
         return
 
 
-def _prospect_identity(prospect: Dict[str, Any]) -> Dict[str, str]:
+def _prospect_identity(prospect: dict[str, Any]) -> dict[str, str]:
     return {
         "prospect_id": str(prospect.get("id", "")).strip(),
         "company": str(prospect.get("company", "")).strip(),
@@ -342,7 +346,7 @@ def _prospect_identity(prospect: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
-def _journal_event_matches_prospect(event: Dict[str, Any], prospect: Dict[str, Any]) -> bool:
+def _journal_event_matches_prospect(event: dict[str, Any], prospect: dict[str, Any]) -> bool:
     prospect_id = str(prospect.get("id", "")).strip()
     event_id = str(event.get("prospect_id", "")).strip()
     if prospect_id and event_id and prospect_id == event_id:
@@ -352,11 +356,13 @@ def _journal_event_matches_prospect(event: Dict[str, Any], prospect: Dict[str, A
     return bool(prospect_url and event_url and prospect_url == event_url)
 
 
-def _read_journal_events_for_prospect(date_value: str, prospect: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _read_journal_events_for_prospect(
+    date_value: str, prospect: dict[str, Any]
+) -> list[dict[str, Any]]:
     path = journal_path(date_value)
     if not path.exists():
         return []
-    events: List[Dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
     try:
         with path.open("r", encoding="utf-8") as handle:
             for line in handle:
@@ -371,11 +377,11 @@ def _read_journal_events_for_prospect(date_value: str, prospect: Dict[str, Any])
     return events
 
 
-def _read_journal_events(date_value: str) -> List[Dict[str, Any]]:
+def _read_journal_events(date_value: str) -> list[dict[str, Any]]:
     path = journal_path(date_value)
     if not path.exists():
         return []
-    events: List[Dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
     try:
         with path.open("r", encoding="utf-8") as handle:
             for line in handle:
@@ -388,7 +394,7 @@ def _read_journal_events(date_value: str) -> List[Dict[str, Any]]:
     return events
 
 
-def _confirmed_send_key(event: Dict[str, Any]) -> str:
+def _confirmed_send_key(event: dict[str, Any]) -> str:
     prospect_id = str(event.get("prospect_id", "")).strip()
     if prospect_id:
         return f"id:{prospect_id}"
@@ -400,17 +406,21 @@ def _confirmed_send_key(event: Dict[str, Any]) -> str:
     return f"name:{company}|{contact}"
 
 
-def _journal_has_confirmed_send(date_value: str, prospect: Dict[str, Any]) -> bool:
+def _journal_has_confirmed_send(date_value: str, prospect: dict[str, Any]) -> bool:
     return any(
-        event.get("event_type") == "connection_request_confirmed" and event.get("status") == "recorded"
+        event.get("event_type") == "connection_request_confirmed"
+        and event.get("status") == "recorded"
         for event in _read_journal_events_for_prospect(date_value, prospect)
     )
 
 
-def _journal_confirmed_send_records(date_value: str) -> List[Dict[str, Any]]:
-    records: Dict[str, Dict[str, Any]] = {}
+def _journal_confirmed_send_records(date_value: str) -> list[dict[str, Any]]:
+    records: dict[str, dict[str, Any]] = {}
     for event in _read_journal_events(date_value):
-        if event.get("event_type") != "connection_request_confirmed" or event.get("status") != "recorded":
+        if (
+            event.get("event_type") != "connection_request_confirmed"
+            or event.get("status") != "recorded"
+        ):
             continue
         key = _confirmed_send_key(event)
         if key:
@@ -419,8 +429,8 @@ def _journal_confirmed_send_records(date_value: str) -> List[Dict[str, Any]]:
 
 
 def _journal_pending_sync_count(date_value: str) -> int:
-    pending: Set[Tuple[str, str]] = set()
-    synced: Set[Tuple[str, str]] = set()
+    pending: set[tuple[str, str]] = set()
+    synced: set[tuple[str, str]] = set()
     for event in _read_journal_events(date_value):
         event_type = str(event.get("event_type", "")).strip()
         if not event_type.endswith("_sync") and event_type != "prospect_reconciliation":
@@ -434,10 +444,10 @@ def _journal_pending_sync_count(date_value: str) -> int:
 
 
 def _reconcile_result_from_journal(
-    result: Dict[str, Any],
+    result: dict[str, Any],
     date_value: str,
-    starting_progress: Optional[int] = None,
-    target: Optional[int] = None,
+    starting_progress: int | None = None,
+    target: int | None = None,
 ) -> None:
     confirmed = _journal_confirmed_send_records(date_value)
     journal_count = len(confirmed)
@@ -461,12 +471,13 @@ def _reconcile_result_from_journal(
 
 def _pending_sync_payload_for_confirmed_send(
     date_value: str,
-    prospect: Dict[str, Any],
+    prospect: dict[str, Any],
     sync_event_type: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     events = _read_journal_events_for_prospect(date_value, prospect)
     has_confirmed_send = any(
-        event.get("event_type") == "connection_request_confirmed" and event.get("status") == "recorded"
+        event.get("event_type") == "connection_request_confirmed"
+        and event.get("status") == "recorded"
         for event in events
     )
     if not has_confirmed_send:
@@ -484,15 +495,21 @@ def _pending_sync_payload_for_confirmed_send(
 
 def _recover_confirmed_send_sheet_sync(
     *,
-    result: Dict[str, Any],
-    prospect: Dict[str, Any],
+    result: dict[str, Any],
+    prospect: dict[str, Any],
     date_value: str,
     creds: str,
     args: argparse.Namespace,
 ) -> None:
     """Replay only sheet syncs that the local journal proves were pending."""
-    prospects_payload = _pending_sync_payload_for_confirmed_send(date_value, prospect, "prospects_sync")
-    if prospects_payload and prospects_payload.get("fields") and prospects_payload.get("row_number"):
+    prospects_payload = _pending_sync_payload_for_confirmed_send(
+        date_value, prospect, "prospects_sync"
+    )
+    if (
+        prospects_payload
+        and prospects_payload.get("fields")
+        and prospects_payload.get("row_number")
+    ):
         try:
             apply_prospect_fields(
                 prospect_row=int(prospects_payload["row_number"]),
@@ -514,7 +531,9 @@ def _recover_confirmed_send_sheet_sync(
                 {"prospect_id": prospect.get("id"), "target": "Prospects", "error": str(exc)}
             )
 
-    outreach_payload = _pending_sync_payload_for_confirmed_send(date_value, prospect, "outreach_log_sync")
+    outreach_payload = _pending_sync_payload_for_confirmed_send(
+        date_value, prospect, "outreach_log_sync"
+    )
     if outreach_payload and outreach_payload.get("fields"):
         try:
             insert_outreach_log_row(
@@ -536,12 +555,16 @@ def _recover_confirmed_send_sheet_sync(
                 {"prospect_id": prospect.get("id"), "target": "Outreach Log", "error": str(exc)}
             )
 
-    control_payload = _pending_sync_payload_for_confirmed_send(date_value, prospect, "outreach_control_sync")
+    control_payload = _pending_sync_payload_for_confirmed_send(
+        date_value, prospect, "outreach_control_sync"
+    )
     if control_payload and control_payload.get("fields") and control_payload.get("row_number"):
         fields = control_payload["fields"]
         row_number = int(control_payload["row_number"])
         progress_value = int(safe_number(fields.get("Current Progress", ""), 0) or 0)
-        target_value = int(safe_number(fields.get("Effective Target", ""), progress_value) or progress_value)
+        target_value = int(
+            safe_number(fields.get("Effective Target", ""), progress_value) or progress_value
+        )
         progress_notes = str(fields.get("Notes", "")).strip()
         try:
             result["outreach_control_update"] = _update_outreach_control_progress(
@@ -563,17 +586,21 @@ def _recover_confirmed_send_sheet_sync(
             )
         except Exception as exc:
             result["sync_failures"].append(
-                {"prospect_id": prospect.get("id"), "target": OUTREACH_CONTROL_TAB, "error": str(exc)}
+                {
+                    "prospect_id": prospect.get("id"),
+                    "target": OUTREACH_CONTROL_TAB,
+                    "error": str(exc),
+                }
             )
 
 
 def _sheet_target_payload(
     target: str,
-    fields: Dict[str, Any],
-    row_number: Optional[int] = None,
-    insert_mode: Optional[str] = None,
-) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {
+    fields: dict[str, Any],
+    row_number: int | None = None,
+    insert_mode: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "target": target,
         "fields": fields,
     }
@@ -584,19 +611,19 @@ def _sheet_target_payload(
     return payload
 
 
-def _load_acceptance_state(path: Path = ACCEPTANCE_STATE_FILE) -> Dict[str, Any]:
+def _load_acceptance_state(path: Path = ACCEPTANCE_STATE_FILE) -> dict[str, Any]:
     if not path.exists():
         return {}
     payload = json.loads(path.read_text(encoding="utf-8"))
     return payload if isinstance(payload, dict) else {}
 
 
-def _save_acceptance_state(state: Dict[str, Any], path: Path = ACCEPTANCE_STATE_FILE) -> None:
+def _save_acceptance_state(state: dict[str, Any], path: Path = ACCEPTANCE_STATE_FILE) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(state, indent=2, ensure_ascii=True), encoding="utf-8")
 
 
-def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+def _parse_iso_datetime(value: str | None) -> datetime | None:
     raw = str(value or "").strip()
     if not raw:
         return None
@@ -606,9 +633,11 @@ def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
-def _prune_seen_acceptances(seen: Dict[str, Any], now: datetime, keep_days: int = 14) -> Dict[str, str]:
+def _prune_seen_acceptances(
+    seen: dict[str, Any], now: datetime, keep_days: int = 14
+) -> dict[str, str]:
     threshold = now - timedelta(days=keep_days)
-    pruned: Dict[str, str] = {}
+    pruned: dict[str, str] = {}
     for key, value in (seen or {}).items():
         seen_at = _parse_iso_datetime(str(value))
         if seen_at is None or seen_at >= threshold:
@@ -622,7 +651,9 @@ def _normalize_profile_url(url: str) -> str:
         return ""
     normalized = raw.split("?", 1)[0].split("#", 1)[0].rstrip("/").lower()
     # Canonicalize LinkedIn country subdomains (nl., de., uk., etc.) to www.
-    normalized = re.sub(r"^https?://[a-z]{2,3}\.linkedin\.com", "https://www.linkedin.com", normalized)
+    normalized = re.sub(
+        r"^https?://[a-z]{2,3}\.linkedin\.com", "https://www.linkedin.com", normalized
+    )
     return normalized
 
 
@@ -632,7 +663,7 @@ def _normalize_person_name(name: str) -> str:
     return re.sub(r"\s+", " ", lowered).strip()
 
 
-def _acceptance_fingerprint(candidate: Dict[str, Any]) -> str:
+def _acceptance_fingerprint(candidate: dict[str, Any]) -> str:
     url_key = _normalize_profile_url(candidate.get("url", ""))
     if url_key:
         return f"url:{url_key}"
@@ -642,7 +673,7 @@ def _acceptance_fingerprint(candidate: Dict[str, Any]) -> str:
     return ""
 
 
-def _load_pending_queue(creds: str, obf_url: str, mock_pending: Optional[Any]) -> List[Dict[str, Any]]:
+def _load_pending_queue(creds: str, obf_url: str, mock_pending: Any | None) -> list[dict[str, Any]]:
     if mock_pending:
         if isinstance(mock_pending, list):
             return mock_pending
@@ -659,7 +690,7 @@ def _is_active_hour(now: datetime, start_hour: int, end_hour: int) -> bool:
     return current >= start_hour or current < end_hour
 
 
-def _schedule_acceptance_check(args: argparse.Namespace, now: datetime) -> Dict[str, Any]:
+def _schedule_acceptance_check(args: argparse.Namespace, now: datetime) -> dict[str, Any]:
     active_window = _is_active_hour(now, args.active_start_hour, args.active_end_hour)
     if active_window:
         min_minutes = args.active_min_minutes
@@ -685,9 +716,11 @@ def _schedule_acceptance_check(args: argparse.Namespace, now: datetime) -> Dict[
     }
 
 
-def _build_pending_indexes(pending: List[Dict[str, Any]]) -> Tuple[Dict[str, List[Dict[str, Any]]], Dict[str, List[Dict[str, Any]]]]:
-    by_url: Dict[str, List[Dict[str, Any]]] = {}
-    by_name: Dict[str, List[Dict[str, Any]]] = {}
+def _build_pending_indexes(
+    pending: list[dict[str, Any]],
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]:
+    by_url: dict[str, list[dict[str, Any]]] = {}
+    by_name: dict[str, list[dict[str, Any]]] = {}
     for prospect in pending:
         url_key = _normalize_profile_url(prospect.get("contact_linkedin", ""))
         if url_key:
@@ -699,14 +732,14 @@ def _build_pending_indexes(pending: List[Dict[str, Any]]) -> Tuple[Dict[str, Lis
 
 
 def _match_pending_acceptance(
-    acceptance: Dict[str, Any],
-    by_url: Dict[str, List[Dict[str, Any]]],
-    by_name: Dict[str, List[Dict[str, Any]]],
-) -> Tuple[Optional[Dict[str, Any]], str, str]:
+    acceptance: dict[str, Any],
+    by_url: dict[str, list[dict[str, Any]]],
+    by_name: dict[str, list[dict[str, Any]]],
+) -> tuple[dict[str, Any] | None, str, str]:
     url_key = _normalize_profile_url(acceptance.get("url", ""))
     name_key = _normalize_person_name(acceptance.get("name", ""))
 
-    matches: List[Dict[str, Any]] = []
+    matches: list[dict[str, Any]] = []
     match_source = ""
     if url_key and url_key in by_url:
         matches = by_url[url_key]
@@ -722,7 +755,7 @@ def _match_pending_acceptance(
     return None, "", "no_pending_match"
 
 
-def _pick_first_message_template(templates: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _pick_first_message_template(templates: list[dict[str, Any]]) -> dict[str, Any] | None:
     if not templates:
         return None
     for template in templates:
@@ -732,9 +765,9 @@ def _pick_first_message_template(templates: List[Dict[str, Any]]) -> Optional[Di
 
 
 def _render_first_message_draft(
-    prospect: Dict[str, Any],
-    templates: List[Dict[str, Any]],
-) -> Optional[Dict[str, Any]]:
+    prospect: dict[str, Any],
+    templates: list[dict[str, Any]],
+) -> dict[str, Any] | None:
     template = _pick_first_message_template(templates)
     if not template:
         return None
@@ -751,7 +784,7 @@ def _clamped_gauss(rng: random.Random, mean: int, stddev: int, lower: int, upper
     return max(lower, min(upper, int(rng.gauss(mean, stddev))))
 
 
-def _parse_int(value: Any) -> Optional[int]:
+def _parse_int(value: Any) -> int | None:
     raw = str(value).strip()
     if raw == "":
         return None
@@ -772,7 +805,9 @@ def _is_enabled(value: Any, default: bool = True) -> bool:
     return default
 
 
-def _find_first_index(headers: List[str], label: str, start: int = 0, end: Optional[int] = None) -> Optional[int]:
+def _find_first_index(
+    headers: list[str], label: str, start: int = 0, end: int | None = None
+) -> int | None:
     needle = str(label).strip().lower()
     stop = len(headers) if end is None else end
     for i in range(start, stop):
@@ -781,7 +816,9 @@ def _find_first_index(headers: List[str], label: str, start: int = 0, end: Optio
     return None
 
 
-def _find_last_index(headers: List[str], label: str, start: int = 0, end: Optional[int] = None) -> Optional[int]:
+def _find_last_index(
+    headers: list[str], label: str, start: int = 0, end: int | None = None
+) -> int | None:
     needle = str(label).strip().lower()
     stop = len(headers) if end is None else end
     for i in range(stop - 1, start - 1, -1):
@@ -793,7 +830,7 @@ def _find_last_index(headers: List[str], label: str, start: int = 0, end: Option
 def _col_to_a1(col_number: int) -> str:
     if col_number < 1:
         raise ValueError(f"Invalid column number for A1 conversion: {col_number}")
-    chars: List[str] = []
+    chars: list[str] = []
     n = col_number
     while n > 0:
         n, rem = divmod(n - 1, 26)
@@ -805,7 +842,7 @@ def _a1_cell(row_number: int, col_number: int) -> str:
     return f"{_col_to_a1(col_number)}{row_number}"
 
 
-def _batch_update_cells(worksheet: Any, updates: List[Tuple[int, int, Any]]) -> None:
+def _batch_update_cells(worksheet: Any, updates: list[tuple[int, int, Any]]) -> None:
     if not updates:
         return
     payload = [
@@ -818,7 +855,7 @@ def _batch_update_cells(worksheet: Any, updates: List[Tuple[int, int, Any]]) -> 
     worksheet.batch_update(payload, value_input_option="USER_ENTERED")
 
 
-def _resolve_sequence_columns(headers: List[str]) -> Dict[str, int]:
+def _resolve_sequence_columns(headers: list[str]) -> dict[str, int]:
     slot_col = _find_first_index(headers, "Slot ID")
     batch_size_col = _find_first_index(headers, "Batch Size")
     if slot_col is None or batch_size_col is None:
@@ -826,7 +863,9 @@ def _resolve_sequence_columns(headers: List[str]) -> Dict[str, int]:
 
     lead_batch_col = _find_first_index(headers, "Batch #", start=slot_col + 1, end=batch_size_col)
     lead_enabled_col = _find_first_index(headers, "Enabled", start=slot_col + 1, end=batch_size_col)
-    batch_batch_col = _find_last_index(headers, "Batch #", start=batch_size_col - 1, end=batch_size_col + 1)
+    batch_batch_col = _find_last_index(
+        headers, "Batch #", start=batch_size_col - 1, end=batch_size_col + 1
+    )
     batch_enabled_col = _find_first_index(headers, "Enabled", start=batch_size_col + 1)
 
     if lead_batch_col is None or lead_enabled_col is None:
@@ -844,7 +883,7 @@ def _resolve_sequence_columns(headers: List[str]) -> Dict[str, int]:
     }
 
 
-def _random_positive_partition(total: int, parts: int, rng: random.Random) -> List[int]:
+def _random_positive_partition(total: int, parts: int, rng: random.Random) -> list[int]:
     if parts <= 0:
         return []
     if total < parts:
@@ -852,7 +891,7 @@ def _random_positive_partition(total: int, parts: int, rng: random.Random) -> Li
     if parts == 1:
         return [total]
 
-    out: List[int] = []
+    out: list[int] = []
     for _ in range(50):
         cuts = sorted(rng.sample(range(1, total), parts - 1))
         out = []
@@ -867,7 +906,9 @@ def _random_positive_partition(total: int, parts: int, rng: random.Random) -> Li
     return out
 
 
-def generate_batch_size_plan(date_value: str, total_slots: int, batch_numbers: List[int]) -> Dict[str, Any]:
+def generate_batch_size_plan(
+    date_value: str, total_slots: int, batch_numbers: list[int]
+) -> dict[str, Any]:
     if total_slots < 0:
         raise ValueError("total_slots must be >= 0")
 
@@ -894,8 +935,7 @@ def generate_batch_size_plan(date_value: str, total_slots: int, batch_numbers: L
         "total_slots": total_slots,
         "batch_count": len(ordered_batches),
         "sizes": [
-            {"batch_number": batch, "size": size}
-            for batch, size in zip(ordered_batches, chunks)
+            {"batch_number": batch, "size": size} for batch, size in zip(ordered_batches, chunks)
         ],
     }
 
@@ -906,7 +946,7 @@ def generate_batch_sizes_from_sheet(
     date_value: str,
     sequence_tab: str = OUTREACH_SEQUENCE_TAB,
     write: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     client = get_client(creds)
     spreadsheet = open_sheet(client, obf_url)
     worksheet = get_worksheet(spreadsheet, sequence_tab)
@@ -917,8 +957,8 @@ def generate_batch_sizes_from_sheet(
     headers = values[0]
     cols = _resolve_sequence_columns(headers)
 
-    lead_rows: List[Dict[str, Any]] = []
-    batch_rows: List[Dict[str, Any]] = []
+    lead_rows: list[dict[str, Any]] = []
+    batch_rows: list[dict[str, Any]] = []
     for idx, row in enumerate(values[1:], start=2):
         padded = row + [""] * (len(headers) - len(row))
         slot_id = _parse_int(padded[cols["slot_col"]])
@@ -953,7 +993,7 @@ def generate_batch_sizes_from_sheet(
     )
     size_by_batch = {item["batch_number"]: item["size"] for item in plan["sizes"]}
 
-    assignments: List[Tuple[int, str]] = []
+    assignments: list[tuple[int, str]] = []
     remaining_rows = enabled_leads[:]
     for batch_row in enabled_batches:
         batch_number = batch_row["batch_number"]
@@ -968,7 +1008,7 @@ def generate_batch_sizes_from_sheet(
             assignments.append((lead["row_number"], ""))
 
     if write:
-        cell_updates: List[Tuple[int, int, Any]] = []
+        cell_updates: list[tuple[int, int, Any]] = []
         for batch_row in batch_rows:
             value = size_by_batch.get(batch_row["batch_number"], "")
             cell_updates.append((batch_row["row_number"], cols["batch_size_col"] + 1, value))
@@ -988,7 +1028,7 @@ def generate_batch_sizes_from_sheet(
     }
 
 
-def generate_lead_diversion_plan(date_value: str, slot_ids: List[int]) -> Dict[str, Any]:
+def generate_lead_diversion_plan(date_value: str, slot_ids: list[int]) -> dict[str, Any]:
     ordered_slots = sorted(int(x) for x in slot_ids)
     options = [
         ("none", 45),
@@ -1023,7 +1063,7 @@ def generate_lead_diversions_from_sheet(
     date_value: str,
     sequence_tab: str = OUTREACH_SEQUENCE_TAB,
     write: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     client = get_client(creds)
     spreadsheet = open_sheet(client, obf_url)
     worksheet = get_worksheet(spreadsheet, sequence_tab)
@@ -1042,7 +1082,7 @@ def generate_lead_diversions_from_sheet(
     if lead_diversion_col is None:
         raise ValueError("Could not resolve lead table column: Lead Diversion")
 
-    lead_rows: List[Dict[str, Any]] = []
+    lead_rows: list[dict[str, Any]] = []
     for idx, row in enumerate(values[1:], start=2):
         padded = row + [""] * (len(headers) - len(row))
         slot_id = _parse_int(padded[cols["slot_col"]])
@@ -1064,7 +1104,7 @@ def generate_lead_diversions_from_sheet(
     )
     diversion_by_slot = {item["slot_id"]: item["lead_diversion"] for item in plan["entries"]}
 
-    updates: List[Tuple[int, str]] = []
+    updates: list[tuple[int, str]] = []
     for row in lead_rows:
         if row["enabled"]:
             updates.append((row["row_number"], diversion_by_slot[row["slot_id"]]))
@@ -1077,7 +1117,7 @@ def generate_lead_diversions_from_sheet(
             [(row_number, lead_diversion_col + 1, value) for row_number, value in updates],
         )
 
-    distribution: Dict[str, int] = {}
+    distribution: dict[str, int] = {}
     for _, value in updates:
         if not value:
             continue
@@ -1094,7 +1134,7 @@ def generate_lead_diversions_from_sheet(
     }
 
 
-def generate_activity_timing_plan(date_value: str, slot_ids: List[int]) -> Dict[str, Any]:
+def generate_activity_timing_plan(date_value: str, slot_ids: list[int]) -> dict[str, Any]:
     ordered_slots = sorted(int(x) for x in slot_ids)
     options = [
         ("before_conn", 58),
@@ -1125,7 +1165,7 @@ def generate_activity_timing_from_sheet(
     date_value: str,
     sequence_tab: str = OUTREACH_SEQUENCE_TAB,
     write: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     client = get_client(creds)
     spreadsheet = open_sheet(client, obf_url)
     worksheet = get_worksheet(spreadsheet, sequence_tab)
@@ -1144,7 +1184,7 @@ def generate_activity_timing_from_sheet(
     if timing_col is None:
         raise ValueError("Could not resolve lead table column: Activity Log Timing")
 
-    lead_rows: List[Dict[str, Any]] = []
+    lead_rows: list[dict[str, Any]] = []
     for idx, row in enumerate(values[1:], start=2):
         padded = row + [""] * (len(headers) - len(row))
         slot_id = _parse_int(padded[cols["slot_col"]])
@@ -1166,7 +1206,7 @@ def generate_activity_timing_from_sheet(
     )
     timing_by_slot = {item["slot_id"]: item["activity_log_timing"] for item in plan["entries"]}
 
-    updates: List[Tuple[int, str]] = []
+    updates: list[tuple[int, str]] = []
     for row in lead_rows:
         if row["enabled"]:
             updates.append((row["row_number"], timing_by_slot[row["slot_id"]]))
@@ -1179,7 +1219,7 @@ def generate_activity_timing_from_sheet(
             [(row_number, timing_col + 1, value) for row_number, value in updates],
         )
 
-    distribution: Dict[str, int] = {}
+    distribution: dict[str, int] = {}
     for _, value in updates:
         if not value:
             continue
@@ -1198,10 +1238,10 @@ def generate_activity_timing_from_sheet(
 
 def generate_delay_seconds_plan(
     date_value: str,
-    slot_ids: List[int],
+    slot_ids: list[int],
     min_sec: int = 10,
     max_sec: int = 95,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     if min_sec < 1 or max_sec < 1 or min_sec > max_sec:
         raise ValueError("Invalid delay bounds: require 1 <= min_sec <= max_sec")
 
@@ -1233,7 +1273,7 @@ def generate_delay_seconds_from_sheet(
     min_sec: int = 10,
     max_sec: int = 95,
     write: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     client = get_client(creds)
     spreadsheet = open_sheet(client, obf_url)
     worksheet = get_worksheet(spreadsheet, sequence_tab)
@@ -1252,7 +1292,7 @@ def generate_delay_seconds_from_sheet(
     if delay_col is None:
         raise ValueError("Could not resolve lead table column: Delay Sec")
 
-    lead_rows: List[Dict[str, Any]] = []
+    lead_rows: list[dict[str, Any]] = []
     for idx, row in enumerate(values[1:], start=2):
         padded = row + [""] * (len(headers) - len(row))
         slot_id = _parse_int(padded[cols["slot_col"]])
@@ -1276,7 +1316,7 @@ def generate_delay_seconds_from_sheet(
     )
     delay_by_slot = {item["slot_id"]: item["delay_sec"] for item in plan["entries"]}
 
-    updates: List[Tuple[int, str]] = []
+    updates: list[tuple[int, str]] = []
     for row in lead_rows:
         if row["enabled"]:
             updates.append((row["row_number"], str(delay_by_slot[row["slot_id"]])))
@@ -1306,7 +1346,7 @@ def generate_delay_seconds_from_sheet(
     }
 
 
-def _diversion_range(diversion: str) -> Optional[Tuple[int, int]]:
+def _diversion_range(diversion: str) -> tuple[int, int] | None:
     kind = str(diversion).strip().lower()
     if kind in {"", "none"}:
         return None
@@ -1326,14 +1366,22 @@ def _diversion_range(diversion: str) -> Optional[Tuple[int, int]]:
 
 def generate_lead_diversion_seconds_plan(
     date_value: str,
-    slot_diversions: List[Dict[str, Any]],
-) -> Dict[str, Any]:
+    slot_diversions: list[dict[str, Any]],
+) -> dict[str, Any]:
     normalized = sorted(
-        [{"slot_id": int(item["slot_id"]), "lead_diversion": str(item["lead_diversion"]).strip().lower()} for item in slot_diversions],
+        [
+            {
+                "slot_id": int(item["slot_id"]),
+                "lead_diversion": str(item["lead_diversion"]).strip().lower(),
+            }
+            for item in slot_diversions
+        ],
         key=lambda x: x["slot_id"],
     )
     seed_key = ",".join(f"{item['slot_id']}:{item['lead_diversion']}" for item in normalized)
-    rng = random.Random(f"linkedin-outreach-lead-diversion-sec:{sequence_date_key(date_value)}:{seed_key}")
+    rng = random.Random(
+        f"linkedin-outreach-lead-diversion-sec:{sequence_date_key(date_value)}:{seed_key}"
+    )
 
     entries = []
     for item in normalized:
@@ -1361,7 +1409,7 @@ def generate_lead_diversion_seconds_from_sheet(
     date_value: str,
     sequence_tab: str = OUTREACH_SEQUENCE_TAB,
     write: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     client = get_client(creds)
     spreadsheet = open_sheet(client, obf_url)
     worksheet = get_worksheet(spreadsheet, sequence_tab)
@@ -1388,7 +1436,7 @@ def generate_lead_diversion_seconds_from_sheet(
     if lead_diversion_sec_col is None:
         raise ValueError("Could not resolve lead table column: Lead Diversion Sec")
 
-    lead_rows: List[Dict[str, Any]] = []
+    lead_rows: list[dict[str, Any]] = []
     for idx, row in enumerate(values[1:], start=2):
         padded = row + [""] * (len(headers) - len(row))
         slot_id = _parse_int(padded[cols["slot_col"]])
@@ -1414,7 +1462,7 @@ def generate_lead_diversion_seconds_from_sheet(
     )
     seconds_by_slot = {item["slot_id"]: item["lead_diversion_sec"] for item in plan["entries"]}
 
-    updates: List[Tuple[int, str]] = []
+    updates: list[tuple[int, str]] = []
     for row in lead_rows:
         if not row["enabled"]:
             updates.append((row["row_number"], ""))
@@ -1445,15 +1493,15 @@ def generate_lead_diversion_seconds_from_sheet(
     }
 
 
-def generate_sequence(date_value: str, target: int, write: bool = True) -> Dict[str, Any]:
+def generate_sequence(date_value: str, target: int, write: bool = True) -> dict[str, Any]:
     """Generate a stable per-date outreach behavior sequence."""
     if target < 0:
         raise ValueError("target must be >= 0")
 
     rng = random.Random(f"linkedin-outreach:{sequence_date_key(date_value)}:{target}")
     remaining = target
-    batches: List[Dict[str, Any]] = []
-    lead_plan: List[Dict[str, Any]] = []
+    batches: list[dict[str, Any]] = []
+    lead_plan: list[dict[str, Any]] = []
     lead_index = 1
     diversion_choices = ["feed_scroll", "engagement_trail", "reaction_scan", "post_like"]
 
@@ -1506,7 +1554,9 @@ def generate_sequence(date_value: str, target: int, write: bool = True) -> Dict[
     return sequence
 
 
-def load_or_generate_sequence(date_value: str, target: int, regenerate: bool = False) -> Dict[str, Any]:
+def load_or_generate_sequence(
+    date_value: str, target: int, regenerate: bool = False
+) -> dict[str, Any]:
     path = sequence_path(date_value)
     if path.exists() and not regenerate:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -1526,7 +1576,7 @@ def _load_runtime_plan_from_sequence_sheet(
     creds: str,
     obf_url: str,
     sequence_tab: str = OUTREACH_SEQUENCE_TAB,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     client = get_client(creds)
     spreadsheet = open_sheet(client, obf_url)
     worksheet = get_worksheet(spreadsheet, sequence_tab)
@@ -1536,14 +1586,27 @@ def _load_runtime_plan_from_sequence_sheet(
 
     headers = values[0]
     cols = _resolve_sequence_columns(headers)
-    timing_col = _find_first_index(headers, "Activity Log Timing", start=cols["slot_col"] + 1, end=cols["batch_size_col"])
-    delay_col = _find_first_index(headers, "Delay Sec", start=cols["slot_col"] + 1, end=cols["batch_size_col"])
-    diversion_col = _find_first_index(headers, "Lead Diversion", start=cols["slot_col"] + 1, end=cols["batch_size_col"])
-    diversion_sec_col = _find_first_index(headers, "Lead Diversion Sec", start=cols["slot_col"] + 1, end=cols["batch_size_col"])
-    if timing_col is None or delay_col is None or diversion_col is None or diversion_sec_col is None:
+    timing_col = _find_first_index(
+        headers, "Activity Log Timing", start=cols["slot_col"] + 1, end=cols["batch_size_col"]
+    )
+    delay_col = _find_first_index(
+        headers, "Delay Sec", start=cols["slot_col"] + 1, end=cols["batch_size_col"]
+    )
+    diversion_col = _find_first_index(
+        headers, "Lead Diversion", start=cols["slot_col"] + 1, end=cols["batch_size_col"]
+    )
+    diversion_sec_col = _find_first_index(
+        headers, "Lead Diversion Sec", start=cols["slot_col"] + 1, end=cols["batch_size_col"]
+    )
+    if (
+        timing_col is None
+        or delay_col is None
+        or diversion_col is None
+        or diversion_sec_col is None
+    ):
         raise ValueError("Outreach Sequence is missing one or more runtime columns")
 
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for row in values[1:]:
         padded = row + [""] * (len(headers) - len(row))
         slot_id = _parse_int(padded[cols["slot_col"]])
@@ -1561,15 +1624,17 @@ def _load_runtime_plan_from_sequence_sheet(
                 "activity_log_timing": _normalize_activity_timing(padded[timing_col]),
                 "delay_sec": max(0, delay_sec),
                 "lead_diversion": diversion,
-                "lead_diversion_sec": diversion_sec if diversion_sec is not None and diversion_sec >= 0 else None,
+                "lead_diversion_sec": diversion_sec
+                if diversion_sec is not None and diversion_sec >= 0
+                else None,
             }
         )
     out.sort(key=lambda x: x["slot_id"])
     return out
 
 
-def _runtime_plan_from_generated_sequence(sequence: Dict[str, Any]) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
+def _runtime_plan_from_generated_sequence(sequence: dict[str, Any]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
     lead_plan = sequence.get("lead_plan", [])
     for idx, item in enumerate(lead_plan, start=1):
         timing = _normalize_activity_timing(item.get("activity_report_timing"))
@@ -1589,10 +1654,10 @@ def _runtime_plan_from_generated_sequence(sequence: Dict[str, Any]) -> List[Dict
 def _run_diversion(
     session: Any,
     diversion: str,
-    diversion_sec: Optional[int],
-    activity: Optional[Dict[str, Any]] = None,
+    diversion_sec: int | None,
+    activity: dict[str, Any] | None = None,
     company_linkedin: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     kind = str(diversion).strip().lower()
     if kind in {"", "none"}:
         return {"ok": True, "executed": False, "reason": "none"}
@@ -1604,7 +1669,7 @@ def _run_diversion(
             seconds = bounds[0]
     seconds = max(0, int(seconds or 0))
 
-    payload: Dict[str, Any] = {"ok": True, "executed": True, "type": kind, "seconds": seconds}
+    payload: dict[str, Any] = {"ok": True, "executed": True, "type": kind, "seconds": seconds}
     post_url = _first_post_url(activity or {})
     try:
         if kind == "feed_scroll":
@@ -1623,7 +1688,12 @@ def _run_diversion(
             if not company_url:
                 # Company URLs are optional enrichment, so this one diversion
                 # must not turn an otherwise valid lead into a failed run.
-                return {"ok": True, "executed": False, "type": kind, "reason": "missing_company_linkedin"}
+                return {
+                    "ok": True,
+                    "executed": False,
+                    "type": kind,
+                    "reason": "missing_company_linkedin",
+                }
             payload["result"] = session.cdp.navigate(company_url)
         elif kind == "recent_post_read":
             if post_url:
@@ -1652,7 +1722,9 @@ def _normalize_failure_key(value: Any) -> str:
     return raw[:180]
 
 
-def _register_send_failure(result: Dict[str, Any], prospect_id: Any, error_value: Any) -> Optional[str]:
+def _register_send_failure(
+    result: dict[str, Any], prospect_id: Any, error_value: Any
+) -> str | None:
     guard = result.setdefault("failure_guard", {})
     if not guard.get("enabled", False):
         return None
@@ -1679,7 +1751,9 @@ def _register_send_failure(result: Dict[str, Any], prospect_id: Any, error_value
         if len(recent) > 10:
             del recent[:-10]
 
-    if int(guard.get("same_error_streak", 0)) >= int(guard.get("max_same_error_streak", MAX_SAME_SEND_ERROR_STREAK)):
+    if int(guard.get("same_error_streak", 0)) >= int(
+        guard.get("max_same_error_streak", MAX_SAME_SEND_ERROR_STREAK)
+    ):
         reason = (
             f"Failure guard tripped: same send error repeated "
             f"{guard['same_error_streak']}x ({error_key})"
@@ -1702,11 +1776,11 @@ def _register_send_failure(result: Dict[str, Any], prospect_id: Any, error_value
 
 
 def _register_browser_failure(
-    result: Dict[str, Any],
+    result: dict[str, Any],
     prospect_id: Any,
     error_value: Any,
     step: str,
-) -> Optional[str]:
+) -> str | None:
     guard = result.setdefault(
         "browser_guard",
         {
@@ -1755,7 +1829,7 @@ def _register_browser_failure(
     return None
 
 
-def _reset_browser_failure_guard(result: Dict[str, Any]) -> None:
+def _reset_browser_failure_guard(result: dict[str, Any]) -> None:
     guard = result.get("browser_guard")
     if not isinstance(guard, dict):
         return
@@ -1783,12 +1857,12 @@ def _is_profile_ui_failure(live_state: str, error_value: Any) -> bool:
 
 
 def _record_early_profile_guard(
-    result: Dict[str, Any],
+    result: dict[str, Any],
     prospect_id: Any,
     live_state: str,
-    profile_state: Dict[str, Any],
+    profile_state: dict[str, Any],
     selected_count: int,
-) -> Optional[str]:
+) -> str | None:
     sample_size = _outreach_ui_sample_size(selected_count)
     guard = result.setdefault(
         "early_profile_guard",
@@ -1824,7 +1898,9 @@ def _record_early_profile_guard(
     else:
         guard["non_failures"] = int(guard.get("non_failures", 0)) + 1
 
-    failures_count = len(guard.get("failures", [])) if isinstance(guard.get("failures"), list) else 0
+    failures_count = (
+        len(guard.get("failures", [])) if isinstance(guard.get("failures"), list) else 0
+    )
     inspected = int(guard.get("inspected", 0))
     if inspected >= sample_size and failures_count == inspected:
         first_error = error_key
@@ -1844,11 +1920,11 @@ def _record_early_profile_guard(
 def _run_outreach_ui_preflight(
     *,
     session: Any,
-    selected: List[Dict[str, Any]],
+    selected: list[dict[str, Any]],
     check_connect_modal: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     sample_size = _outreach_ui_sample_size(len(selected))
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "ok": True,
         "sample_size": sample_size,
         "inspected": [],
@@ -1865,13 +1941,13 @@ def _run_outreach_ui_preflight(
         payload["blocker"] = "No selected leads available for UI preflight"
         return payload
 
-    profile_readiness_failures: List[Dict[str, Any]] = []
+    profile_readiness_failures: list[dict[str, Any]] = []
     profile_readiness_non_failures = 0
     profile_readiness_candidates = 0
 
     for index, prospect in enumerate(selected[:sample_size]):
         profile_url = str(prospect.get("contact_linkedin", "") or "").strip()
-        item: Dict[str, Any] = {
+        item: dict[str, Any] = {
             "index": index,
             "prospect_id": prospect.get("id"),
             "profile_url": profile_url,
@@ -1915,7 +1991,10 @@ def _run_outreach_ui_preflight(
                 "profile loaded successfully; continuing preflight"
             )
 
-        if live_state in {"connect_direct", "connect_in_more"} and not payload["connectable_checked"]:
+        if (
+            live_state in {"connect_direct", "connect_in_more"}
+            and not payload["connectable_checked"]
+        ):
             if not check_connect_modal:
                 payload["connectable_checked"] = True
                 payload["modal_check_deferred"] = True
@@ -1935,7 +2014,9 @@ def _run_outreach_ui_preflight(
                             "reason": EMAIL_REQUIRED_TO_CONNECT,
                         }
                     )
-                    payload["warning"] = "At least one sampled lead requires email to connect; lead will be reported and skipped"
+                    payload["warning"] = (
+                        "At least one sampled lead requires email to connect; lead will be reported and skipped"
+                    )
                     continue
                 payload["ok"] = False
                 payload["blocker"] = (
@@ -1961,18 +2042,22 @@ def _run_outreach_ui_preflight(
 
     if not payload["connectable_checked"]:
         if payload.get("soft_skips"):
-            payload["warning"] = "Only email-required connectable leads were found in UI preflight sample"
+            payload["warning"] = (
+                "Only email-required connectable leads were found in UI preflight sample"
+            )
         else:
-            payload["warning"] = "No connectable lead found in UI preflight sample; send modal was not opened"
+            payload["warning"] = (
+                "No connectable lead found in UI preflight sample; send modal was not opened"
+            )
     return payload
 
 
-def _run_connection_modal_checks(*, session: Any, selected: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _run_connection_modal_checks(*, session: Any, selected: list[dict[str, Any]]) -> dict[str, Any]:
     """Run fail-closed no-send checks and stop at the first unsafe result."""
-    checks: List[Dict[str, Any]] = []
+    checks: list[dict[str, Any]] = []
     for prospect in selected:
         profile_url = str(prospect.get("contact_linkedin", "") or "").strip()
-        profile_state: Dict[str, Any] = {}
+        profile_state: dict[str, Any] = {}
         try:
             profile_state = session.inspect_profile_action_state(profile_url)
             modal = session.verify_no_note_send_ui(profile_url, profile_state)
@@ -1997,8 +2082,8 @@ def _run_connection_modal_checks(*, session: Any, selected: List[Dict[str, Any]]
     return {"ok": True, "checks": checks}
 
 
-def _session_cdp_health_check(session: Any, label: str) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {
+def _session_cdp_health_check(session: Any, label: str) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "label": label,
         "checked_at": datetime.now().isoformat(timespec="seconds"),
         "ok": False,
@@ -2027,7 +2112,7 @@ def _session_cdp_health_check(session: Any, label: str) -> Dict[str, Any]:
 
 def _ensure_session_healthy(
     *,
-    result: Dict[str, Any],
+    result: dict[str, Any],
     session: Any,
     label: str,
     args: argparse.Namespace,
@@ -2050,7 +2135,7 @@ def _ensure_session_healthy(
         )
         return False
 
-    recovery: Dict[str, Any] = {
+    recovery: dict[str, Any] = {
         "label": label,
         "started_at": datetime.now().isoformat(timespec="seconds"),
         "initial_error": health.get("error", "unknown"),
@@ -2061,7 +2146,9 @@ def _ensure_session_healthy(
             session.disconnect()
         except Exception as exc:
             recovery["disconnect_error"] = str(exc)
-        connect_result = session.connect(skip_rate_check=getattr(args, "skip_acceptance_rate_check", False))
+        connect_result = session.connect(
+            skip_rate_check=getattr(args, "skip_acceptance_rate_check", False)
+        )
         recovery["connect_result"] = connect_result
         if not connect_result.get("ok"):
             raise RuntimeError(connect_result.get("block_reason", "LinkedIn reconnect failed"))
@@ -2082,7 +2169,7 @@ def _ensure_session_healthy(
         return False
 
 
-def _reset_send_failure_guard(result: Dict[str, Any]) -> None:
+def _reset_send_failure_guard(result: dict[str, Any]) -> None:
     guard = result.get("failure_guard")
     if not isinstance(guard, dict):
         return
@@ -2091,7 +2178,7 @@ def _reset_send_failure_guard(result: Dict[str, Any]) -> None:
     guard["last_error"] = None
 
 
-def _sleep_failure_backoff(result: Dict[str, Any], is_last: bool) -> None:
+def _sleep_failure_backoff(result: dict[str, Any], is_last: bool) -> None:
     if is_last:
         return
     guard = result.get("failure_guard")
@@ -2107,13 +2194,13 @@ def _sleep_failure_backoff(result: Dict[str, Any], is_last: bool) -> None:
     guard["backoff_total_seconds"] = int(guard.get("backoff_total_seconds", 0)) + seconds
 
 
-def _read_json(path: Optional[str]) -> Optional[Any]:
+def _read_json(path: str | None) -> Any | None:
     if not path:
         return None
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-def _read_outreach_workers(path_value: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+def _read_outreach_workers(path_value: str | None = None) -> dict[str, dict[str, Any]]:
     """Return the configured lane -> account mapping for a frozen queue."""
     path = Path(path_value).expanduser() if path_value else OUTREACH_WORKERS_CONFIG_PATH
     if not path.exists():
@@ -2121,7 +2208,7 @@ def _read_outreach_workers(path_value: Optional[str] = None) -> Dict[str, Dict[s
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not payload.get("enabled"):
         return {}
-    workers: Dict[str, Dict[str, Any]] = {}
+    workers: dict[str, dict[str, Any]] = {}
     for raw_worker in payload.get("workers", []):
         if not raw_worker.get("enabled", True):
             continue
@@ -2138,12 +2225,14 @@ def _read_outreach_workers(path_value: Optional[str] = None) -> Dict[str, Dict[s
     return workers
 
 
-def _assign_outreach_workers(queue: List[Dict[str, Any]], worker_config: Optional[str] = None) -> Dict[str, Any]:
+def _assign_outreach_workers(
+    queue: list[dict[str, Any]], worker_config: str | None = None
+) -> dict[str, Any]:
     """Freeze account ownership in the prepared queue; never infer it at run time."""
     workers_by_lane = _read_outreach_workers(worker_config)
     if not workers_by_lane:
         return {"enabled": False, "workers": [], "counts": {}}
-    counts: Dict[str, int] = {}
+    counts: dict[str, int] = {}
     for prospect in queue:
         lane = str(prospect.get("primary_lane") or "").strip()
         worker = workers_by_lane.get(lane)
@@ -2160,23 +2249,22 @@ def _assign_outreach_workers(queue: List[Dict[str, Any]], worker_config: Optiona
         "assigned_at": datetime.now().isoformat(timespec="seconds"),
         "assignment": "primary_lane_to_account",
         "workers": [
-            {"id": worker["id"], "primary_lane": lane}
-            for lane, worker in workers_by_lane.items()
+            {"id": worker["id"], "primary_lane": lane} for lane, worker in workers_by_lane.items()
         ],
         "counts": counts,
     }
 
 
 def _select_queue_for_lane_targets(
-    queue: List[Dict[str, Any]], lane_targets: Dict[str, int]
-) -> Tuple[List[Dict[str, Any]], Dict[str, int], Dict[str, int]]:
+    queue: list[dict[str, Any]], lane_targets: dict[str, int]
+) -> tuple[list[dict[str, Any]], dict[str, int], dict[str, int]]:
     """Keep source order while selecting an exact, explicit lane allocation."""
     normalized_targets = {
         str(lane).strip(): max(0, int(target))
         for lane, target in lane_targets.items()
         if str(lane).strip()
     }
-    selected: List[Dict[str, Any]] = []
+    selected: list[dict[str, Any]] = []
     selected_counts = {lane: 0 for lane in normalized_targets}
     available_counts = {lane: 0 for lane in normalized_targets}
     for prospect in queue:
@@ -2191,11 +2279,11 @@ def _select_queue_for_lane_targets(
 
 
 def _auto_assign_missing_primary_lanes(
-    queue: List[Dict[str, Any]],
+    queue: list[dict[str, Any]],
     remaining: int,
-    lane_targets: Dict[str, int],
-    worker_config: Optional[str] = None,
-) -> Dict[str, Any]:
+    lane_targets: dict[str, int],
+    worker_config: str | None = None,
+) -> dict[str, Any]:
     """Assign only eligible blank-lane prospects before a queue is frozen.
 
     The input comes from ``load_prospect_queue``, which already excludes used
@@ -2205,7 +2293,7 @@ def _auto_assign_missing_primary_lanes(
     """
     workers_by_lane = _read_outreach_workers(worker_config)
     enabled_lanes = list(workers_by_lane)
-    summary: Dict[str, Any] = {
+    summary: dict[str, Any] = {
         "enabled": bool(enabled_lanes),
         "mode": "lane_targets" if lane_targets else "batch_balance",
         "assignments": [],
@@ -2220,7 +2308,7 @@ def _auto_assign_missing_primary_lanes(
         for lane, target in lane_targets.items()
         if lane in workers_by_lane and int(target) > 0
     }
-    scope = queue if normalized_targets else queue[:max(0, int(remaining))]
+    scope = queue if normalized_targets else queue[: max(0, int(remaining))]
     counts = {lane: 0 for lane in enabled_lanes}
     for prospect in scope:
         lane = str(prospect.get("primary_lane") or "").strip()
@@ -2232,15 +2320,18 @@ def _auto_assign_missing_primary_lanes(
             continue
         if normalized_targets:
             deficits = {
-                lane: normalized_targets[lane] - counts[lane]
-                for lane in normalized_targets
+                lane: normalized_targets[lane] - counts[lane] for lane in normalized_targets
             }
             candidates = [lane for lane in enabled_lanes if deficits.get(lane, 0) > 0]
             if not candidates:
                 break
-            chosen_lane = max(candidates, key=lambda lane: (deficits[lane], -enabled_lanes.index(lane)))
+            chosen_lane = max(
+                candidates, key=lambda lane: (deficits[lane], -enabled_lanes.index(lane))
+            )
         else:
-            chosen_lane = min(enabled_lanes, key=lambda lane: (counts[lane], enabled_lanes.index(lane)))
+            chosen_lane = min(
+                enabled_lanes, key=lambda lane: (counts[lane], enabled_lanes.index(lane))
+            )
         prospect["primary_lane"] = chosen_lane
         counts[chosen_lane] += 1
         summary["assignments"].append(
@@ -2260,7 +2351,7 @@ def _persist_primary_lane_assignments(
     creds: str,
     obf_url: str,
     prospects_tab: str,
-    assignments: List[Dict[str, Any]],
+    assignments: list[dict[str, Any]],
 ) -> None:
     """Write prep-time lane assignments in one bounded Sheets update."""
     if not assignments:
@@ -2282,7 +2373,7 @@ def _persist_primary_lane_assignments(
     _batch_update_cells(worksheet, updates)
 
 
-def _load_prepared_session(date_value: str, prepared_path: Optional[str] = None) -> Dict[str, Any]:
+def _load_prepared_session(date_value: str, prepared_path: str | None = None) -> dict[str, Any]:
     path = Path(prepared_path).expanduser() if prepared_path else prepared_session_path(date_value)
     if not path.exists():
         raise ValueError(f"Prepared session file not found: {path}")
@@ -2315,8 +2406,8 @@ def _load_prepared_session(date_value: str, prepared_path: Optional[str] = None)
     }
 
 
-def _prospect_reporting_missing_fields(prospect: Dict[str, Any]) -> List[str]:
-    missing: List[str] = []
+def _prospect_reporting_missing_fields(prospect: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
     base_required = [
         ("id", "ID"),
         ("company", "Company"),
@@ -2343,7 +2434,7 @@ def _prospect_reporting_missing_fields(prospect: Dict[str, Any]) -> List[str]:
     return missing
 
 
-def _extract_target(task_row: Dict[str, Any], default: int = DEFAULT_TARGET) -> int:
+def _extract_target(task_row: dict[str, Any], default: int = DEFAULT_TARGET) -> int:
     text = " ".join(
         str(task_row.get(key, ""))
         for key in ("Task Description", "Notes")
@@ -2355,7 +2446,7 @@ def _extract_target(task_row: Dict[str, Any], default: int = DEFAULT_TARGET) -> 
     return default
 
 
-def _find_conn_req_row(task_rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _find_conn_req_row(task_rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     for row in task_rows:
         if str(row.get("Progress Key", "")).strip() == "conn_req":
             return row
@@ -2366,7 +2457,7 @@ def _find_conn_req_row(task_rows: List[Dict[str, Any]]) -> Optional[Dict[str, An
     return None
 
 
-def _ensure_outreach_control_tab(creds: str, obf_url: str) -> Dict[str, Any]:
+def _ensure_outreach_control_tab(creds: str, obf_url: str) -> dict[str, Any]:
     client = get_client(creds)
     spreadsheet = open_sheet(client, obf_url)
     created = False
@@ -2412,7 +2503,7 @@ def _normalize_control_status(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip()).lower()
 
 
-def _control_target(row: Dict[str, Any]) -> int:
+def _control_target(row: dict[str, Any]) -> int:
     effective = safe_number(row.get("Effective Target", ""), None)
     if effective is not None and int(effective) > 0:
         return int(effective)
@@ -2423,7 +2514,7 @@ def _control_target(row: Dict[str, Any]) -> int:
     return max(0, int(base) + rollover)
 
 
-def _control_prospects_start_row(row: Dict[str, Any]) -> Optional[int]:
+def _control_prospects_start_row(row: dict[str, Any]) -> int | None:
     value = safe_number(row.get(OUTREACH_CONTROL_PROSPECTS_START_ROW, ""), None)
     if value is None:
         return None
@@ -2431,7 +2522,7 @@ def _control_prospects_start_row(row: Dict[str, Any]) -> Optional[int]:
     return parsed if parsed >= 2 else None
 
 
-def _balanced_lane_targets(volume: int) -> Dict[str, int]:
+def _balanced_lane_targets(volume: int) -> dict[str, int]:
     """Split a prep volume as evenly as possible across the two offers."""
     volume = max(0, int(volume))
     if not volume:
@@ -2440,7 +2531,7 @@ def _balanced_lane_targets(volume: int) -> Dict[str, int]:
     return {"Design": volume - automation, "Automation": automation}
 
 
-def _control_lane_targets(row: Dict[str, Any], remaining: Optional[int] = None) -> Dict[str, int]:
+def _control_lane_targets(row: dict[str, Any], remaining: int | None = None) -> dict[str, int]:
     """Every two-account prep receives an explicit, target-aware lane split.
 
     Older Outreach Control rows did not carry a lane marker. Deriving the split
@@ -2452,9 +2543,9 @@ def _control_lane_targets(row: Dict[str, Any], remaining: Optional[int] = None) 
 
 
 def _latest_successful_control_row(
-    rows: List[Dict[str, Any]],
+    rows: list[dict[str, Any]],
     date_value: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Find the newest completed control row before ``date_value``.
 
     A row is a successful OBF reference only once it is marked Done and its
@@ -2462,7 +2553,7 @@ def _latest_successful_control_row(
     silently become the source for a new autonomous send target.
     """
     target_day = _parse_date(date_value)
-    candidates: List[Tuple[date, Dict[str, Any]]] = []
+    candidates: list[tuple[date, dict[str, Any]]] = []
     for row in rows:
         try:
             row_day = _parse_date(str(row.get("Date", "")))
@@ -2481,14 +2572,14 @@ def _latest_successful_control_row(
 
 def _append_auto_created_control_row(
     worksheet: Any,
-    headers: List[str],
-    rows: List[Dict[str, Any]],
+    headers: list[str],
+    rows: list[dict[str, Any]],
     date_value: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Append an approved weekday control row when the daily row is missing."""
     source = _latest_successful_control_row(rows, date_value)
-    source_target: Optional[int] = None
-    source_start_row: Optional[int] = None
+    source_target: int | None = None
+    source_start_row: int | None = None
     source_date = ""
     if source:
         source_target = _control_target(source)
@@ -2504,7 +2595,7 @@ def _append_auto_created_control_row(
         if source_date
         else f"Auto-created for {date_value}; no completed prior row found, using default target {target}.{lane_note}"
     )
-    data: Dict[str, Any] = {
+    data: dict[str, Any] = {
         "Date": date_value,
         "Base Target": str(target),
         "Rollover": "0",
@@ -2534,17 +2625,20 @@ def _read_outreach_control(
     creds: str,
     obf_url: str,
     date_value: str,
-    mock_daily: Optional[Dict[str, Any]] = None,
+    mock_daily: dict[str, Any] | None = None,
     auto_create_missing: bool = False,
     auto_approve_existing: bool = False,
-) -> Tuple[Dict[str, Any], Dict[str, Any], int, int]:
+) -> tuple[dict[str, Any], dict[str, Any], int, int]:
     if mock_daily:
         # Compatibility shim for existing dry/unit fixtures.
         if "control_row" in mock_daily:
             row = mock_daily["control_row"]
             row.setdefault("_row_number", 2)
             status = _normalize_control_status(row.get("Status", ""))
-            approved = is_checked_value(row.get("Approved", "")) or status in OUTREACH_CONTROL_TERMINAL_STATUSES
+            approved = (
+                is_checked_value(row.get("Approved", ""))
+                or status in OUTREACH_CONTROL_TERMINAL_STATUSES
+            )
             target = _control_target(row)
             current_progress = int(safe_number(row.get("Current Progress", ""), 0) or 0)
             remaining = max(0, target - current_progress)
@@ -2582,7 +2676,7 @@ def _read_outreach_control(
             f"{OUTREACH_CONTROL_TAB} is missing required columns: {', '.join(missing)}"
         )
     date_idx = headers.index("Date")
-    matches: List[Dict[str, Any]] = []
+    matches: list[dict[str, Any]] = []
     for sheet_row in range(2, len(values) + 1):
         raw = values[sheet_row - 1]
         padded = raw + [""] * (len(headers) - len(raw))
@@ -2592,7 +2686,7 @@ def _read_outreach_control(
             item["_row_number"] = sheet_row
             matches.append(item)
 
-    auto_created: Optional[Dict[str, Any]] = None
+    auto_created: dict[str, Any] | None = None
     if not matches and auto_create_missing:
         rows = []
         for sheet_row in range(2, len(values) + 1):
@@ -2629,8 +2723,12 @@ def _read_outreach_control(
 
     row = matches[0]
     status = _normalize_control_status(row.get("Status", ""))
-    auto_approved: Optional[Dict[str, Any]] = None
-    if auto_approve_existing and not is_checked_value(row.get("Approved", "")) and status not in OUTREACH_CONTROL_TERMINAL_STATUSES:
+    auto_approved: dict[str, Any] | None = None
+    if (
+        auto_approve_existing
+        and not is_checked_value(row.get("Approved", ""))
+        and status not in OUTREACH_CONTROL_TERMINAL_STATUSES
+    ):
         update = update_row(
             creds,
             obf_url,
@@ -2641,14 +2739,21 @@ def _read_outreach_control(
         row["Approved"] = "TRUE"
         auto_approved = {
             "row_number": row["_row_number"],
-            "preserved_fields": ["Base Target", "Rollover", "Effective Target", OUTREACH_CONTROL_PROSPECTS_START_ROW],
+            "preserved_fields": [
+                "Base Target",
+                "Rollover",
+                "Effective Target",
+                OUTREACH_CONTROL_PROSPECTS_START_ROW,
+            ],
             "update": update,
         }
     target = _control_target(row)
     current_progress = int(safe_number(row.get("Current Progress", ""), 0) or 0)
     remaining = max(0, target - current_progress)
     prospects_start_row = _control_prospects_start_row(row)
-    approved = is_checked_value(row.get("Approved", "")) or status in OUTREACH_CONTROL_TERMINAL_STATUSES
+    approved = (
+        is_checked_value(row.get("Approved", "")) or status in OUTREACH_CONTROL_TERMINAL_STATUSES
+    )
     approval = {
         "spreadsheet_title": spreadsheet.title,
         "worksheet": OUTREACH_CONTROL_TAB,
@@ -2676,7 +2781,7 @@ def _update_outreach_control_progress(
     progress: int,
     target: int,
     notes: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     status = "Done" if progress >= target else "Partial"
     fields = {
         "Current Progress": str(progress),
@@ -2688,7 +2793,7 @@ def _update_outreach_control_progress(
     return result
 
 
-def configure_outreach_control(args: argparse.Namespace) -> Dict[str, Any]:
+def configure_outreach_control(args: argparse.Namespace) -> dict[str, Any]:
     """Update the small set of daily OBF controls exposed by the local dashboard."""
     creds = str(Path(args.creds).expanduser())
     date_value = sheet_date(args.date)
@@ -2699,18 +2804,14 @@ def configure_outreach_control(args: argparse.Namespace) -> Dict[str, Any]:
         date_value,
     )
 
-    fields: Dict[str, str] = {}
+    fields: dict[str, str] = {}
     if args.daily_volume is not None:
         daily_volume = int(args.daily_volume)
         if daily_volume < 1 or daily_volume > DAILY_CONN_REQ_LIMIT:
-            raise ValueError(
-                f"Daily volume must be between 1 and {DAILY_CONN_REQ_LIMIT}."
-            )
+            raise ValueError(f"Daily volume must be between 1 and {DAILY_CONN_REQ_LIMIT}.")
         current_progress = int(safe_number(control_row.get("Current Progress", ""), 0) or 0)
         if daily_volume < current_progress:
-            raise ValueError(
-                f"Daily volume cannot be below current progress ({current_progress})."
-            )
+            raise ValueError(f"Daily volume cannot be below current progress ({current_progress}).")
         # The dashboard's volume is the effective work ceiling for the day.
         fields["Base Target"] = str(daily_volume)
         fields["Rollover"] = "0"
@@ -2761,8 +2862,8 @@ def _approval_and_task(
     creds: str,
     task_manager_url: str,
     date_value: str,
-    mock_daily: Optional[Dict[str, Any]] = None,
-) -> Tuple[Dict[str, Any], Dict[str, Any], int, int]:
+    mock_daily: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], int, int]:
     if mock_daily:
         approval = mock_daily.get("approval_state", {})
         task_rows = mock_daily.get("task_rows", [])
@@ -2783,7 +2884,7 @@ def _approval_and_task(
     return approval, conn_req_row, target, remaining
 
 
-def _quota_capacity(quotas: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+def _quota_capacity(quotas: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     today_remaining = int(quotas.get("conn_req_limit", DAILY_CONN_REQ_LIMIT)) - int(
         quotas.get("conn_req_today", 0)
     )
@@ -2797,7 +2898,7 @@ def _quota_capacity(quotas: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
     }
 
 
-def _load_quotas(mock_quotas: Optional[Dict[str, Any]], dry_run: bool) -> Dict[str, Any]:
+def _load_quotas(mock_quotas: dict[str, Any] | None, dry_run: bool) -> dict[str, Any]:
     if mock_quotas:
         return mock_quotas
     if dry_run:
@@ -2808,7 +2909,7 @@ def _load_quotas(mock_quotas: Optional[Dict[str, Any]], dry_run: bool) -> Dict[s
             "conn_req_week_limit": WEEKLY_CONN_REQ_LIMIT,
             "profile_views_today": 0,
         }
-    from linkedin_helper import LinkedInSession  # noqa: WPS433
+    from linkedin_helper import LinkedInSession
 
     return LinkedInSession().get_quotas()
 
@@ -2816,12 +2917,12 @@ def _load_quotas(mock_quotas: Optional[Dict[str, Any]], dry_run: bool) -> Dict[s
 def _load_queue(
     creds: str,
     obf_url: str,
-    mock_queue: Optional[Any],
+    mock_queue: Any | None,
     shuffle: bool = True,
-    start_row: Optional[int] = None,
+    start_row: int | None = None,
     prospects_tab: str = "Prospects",
     limit: int = QUEUE_BUFFER_LIMIT,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     if mock_queue:
         if isinstance(mock_queue, list):
             queue = mock_queue
@@ -2840,7 +2941,7 @@ def _load_queue(
     )["queue"]
 
 
-def _make_summary_message(result: Dict[str, Any]) -> str:
+def _make_summary_message(result: dict[str, Any]) -> str:
     blockers = result.get("blockers") or ["None"]
     journal = result.get("journal", {}) if isinstance(result.get("journal"), dict) else {}
     return "\n".join(
@@ -2860,7 +2961,7 @@ def _make_summary_message(result: Dict[str, Any]) -> str:
     )
 
 
-def _make_prepare_summary_message(result: Dict[str, Any]) -> str:
+def _make_prepare_summary_message(result: dict[str, Any]) -> str:
     blockers = result.get("blockers") or ["None"]
     lane_assignment = result.get("lane_auto_assignment") or {}
     assignments = lane_assignment.get("assignments") or []
@@ -2878,7 +2979,7 @@ def _make_prepare_summary_message(result: Dict[str, Any]) -> str:
     )
 
 
-def _make_acceptance_summary_message(result: Dict[str, Any]) -> str:
+def _make_acceptance_summary_message(result: dict[str, Any]) -> str:
     blockers = result.get("blockers") or ["None"]
     lines = [
         "LinkedIn acceptance summary",
@@ -2912,7 +3013,7 @@ def _make_acceptance_summary_message(result: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _activity_summary(activity: Dict[str, Any]) -> str:
+def _activity_summary(activity: dict[str, Any]) -> str:
     if not activity:
         return "No activity data returned"
     window = activity.get("activity_window_counts", {}) if isinstance(activity, dict) else {}
@@ -2932,7 +3033,7 @@ def _activity_summary(activity: Dict[str, Any]) -> str:
     )
 
 
-def _activity_dropdown_value(activity: Dict[str, Any]) -> str:
+def _activity_dropdown_value(activity: dict[str, Any]) -> str:
     """Map activity windows to Prospects dropdown values.
 
     Very active: engagement within 7 days
@@ -2955,11 +3056,11 @@ def _activity_dropdown_value(activity: Dict[str, Any]) -> str:
     return "Not active"
 
 
-def _activity_classification_uncertain(activity: Dict[str, Any]) -> bool:
+def _activity_classification_uncertain(activity: dict[str, Any]) -> bool:
     return bool(activity.get("activity_classification_uncertain"))
 
 
-def _first_post_url(activity: Dict[str, Any]) -> Optional[str]:
+def _first_post_url(activity: dict[str, Any]) -> str | None:
     for item in activity.get("recent_items", []):
         post_url = item.get("post_url")
         if post_url:
@@ -2971,9 +3072,9 @@ def _live_prospect_activity_value(
     *,
     creds: str,
     obf_url: str,
-    prospect: Dict[str, Any],
+    prospect: dict[str, Any],
     activity_field_name: str,
-) -> Tuple[Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None]:
     try:
         row_number = int(prospect["_row_number"])
         client = get_client(creds)
@@ -2990,15 +3091,15 @@ def _live_prospect_activity_value(
 
 
 def _read_and_sync_activity(
-    result: Dict[str, Any],
+    result: dict[str, Any],
     session: Any,
-    prospect: Dict[str, Any],
+    prospect: dict[str, Any],
     profile_url: str,
     date_value: str,
     creds: str,
     obf_url: str,
     write_phase: str,
-) -> Tuple[Dict[str, Any], str, Dict[str, Any]]:
+) -> tuple[dict[str, Any], str, dict[str, Any]]:
     try:
         activity = session.read_activity(profile_url, max_seconds=ACTIVITY_READ_TIMEOUT_SEC)
     except TypeError:
@@ -3027,7 +3128,7 @@ def _read_and_sync_activity(
         raise RuntimeError(activity.get("danger", "activity_read_failed"))
 
     activity_summary = _activity_summary(activity)
-    activity_fields: Dict[str, Any] = {}
+    activity_fields: dict[str, Any] = {}
     if _activity_classification_uncertain(activity):
         _record_journal_event(
             result,
@@ -3120,7 +3221,12 @@ def _read_and_sync_activity(
         )
         field_name, field_value = next(iter(activity_fields.items()))
         result.setdefault("activity_updates", []).append(
-            {"updated": True, "row": int(prospect["_row_number"]), "field": field_name, "value": field_value}
+            {
+                "updated": True,
+                "row": int(prospect["_row_number"]),
+                "field": field_name,
+                "value": field_value,
+            }
         )
         _record_journal_event(
             result,
@@ -3149,13 +3255,13 @@ def _read_and_sync_activity(
 
 
 def _reconcile_profile_state(
-    result: Dict[str, Any],
-    prospect: Dict[str, Any],
+    result: dict[str, Any],
+    prospect: dict[str, Any],
     state: str,
     date_value: str,
     creds: str,
     obf_url: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     if state == "already_pending":
         fields = build_connection_sent_fields(
             prospect=prospect,
@@ -3255,7 +3361,7 @@ def _reconcile_profile_state(
     return {"synced": False, "error": f"unsupported_state:{state}"}
 
 
-def _build_requires_email_fields(prospect: Dict[str, Any]) -> Dict[str, Any]:
+def _build_requires_email_fields(prospect: dict[str, Any]) -> dict[str, Any]:
     existing_notes = str(prospect.get("notes", "") or "").strip()
     note_fragment = f"LinkedIn requires email to connect {date.today().isoformat()}"
     notes = f"{existing_notes} | {note_fragment}" if existing_notes else note_fragment
@@ -3267,12 +3373,12 @@ def _build_requires_email_fields(prospect: Dict[str, Any]) -> Dict[str, Any]:
 
 def _record_requires_email_status(
     *,
-    result: Dict[str, Any],
-    prospect: Dict[str, Any],
+    result: dict[str, Any],
+    prospect: dict[str, Any],
     date_value: str,
     creds: str,
     obf_url: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     fields = _build_requires_email_fields(prospect)
     payload = _sheet_target_payload(
         target="Prospects",
@@ -3328,17 +3434,17 @@ def _short_skip_dwell() -> None:
 
 def _process_outreach_lead_state_machine(
     *,
-    result: Dict[str, Any],
+    result: dict[str, Any],
     session: Any,
-    prospect: Dict[str, Any],
-    plan_item: Dict[str, Any],
+    prospect: dict[str, Any],
+    plan_item: dict[str, Any],
     index: int,
     selected_count: int,
     date_value: str,
     creds: str,
     args: argparse.Namespace,
-    templates: List[Dict[str, Any]],
-    conn_req_row: Dict[str, Any],
+    templates: list[dict[str, Any]],
+    conn_req_row: dict[str, Any],
     starting_progress: int,
     target: int,
 ) -> str:
@@ -3347,17 +3453,36 @@ def _process_outreach_lead_state_machine(
     profile_url = prospect.get("contact_linkedin", "")
     lead_started_at = time.time()
     is_last = index >= (selected_count - 1)
-    activity: Dict[str, Any] = {}
+    activity: dict[str, Any] = {}
     activity_summary = ""
 
-    _record_breadcrumb(result, date_value, prospect, "lead_start", lead_started_at, profile_url=profile_url)
+    _record_breadcrumb(
+        result, date_value, prospect, "lead_start", lead_started_at, profile_url=profile_url
+    )
     if not profile_url:
-        result["skipped"].append({"prospect_id": prospect.get("id"), "reason": "missing_linkedin_url"})
-        _record_breadcrumb(result, date_value, prospect, "lead_done", lead_started_at, status="skipped", error="missing_linkedin_url")
+        result["skipped"].append(
+            {"prospect_id": prospect.get("id"), "reason": "missing_linkedin_url"}
+        )
+        _record_breadcrumb(
+            result,
+            date_value,
+            prospect,
+            "lead_done",
+            lead_started_at,
+            status="skipped",
+            error="missing_linkedin_url",
+        )
         return "continue"
 
     try:
-        _record_breadcrumb(result, date_value, prospect, "profile_inspect_start", lead_started_at, profile_url=profile_url)
+        _record_breadcrumb(
+            result,
+            date_value,
+            prospect,
+            "profile_inspect_start",
+            lead_started_at,
+            profile_url=profile_url,
+        )
         profile_state = session.inspect_profile_action_state(profile_url)
         live_state = str(profile_state.get("state", "unknown") or "unknown")
         _record_breadcrumb(
@@ -3373,7 +3498,9 @@ def _process_outreach_lead_state_machine(
         for retry_attempt in range(1, PROFILE_UNKNOWN_RETRIES + 1):
             if live_state != "unknown":
                 break
-            retry_wait = random.uniform(PROFILE_UNKNOWN_RETRY_MIN_SEC, PROFILE_UNKNOWN_RETRY_MAX_SEC)
+            retry_wait = random.uniform(
+                PROFILE_UNKNOWN_RETRY_MIN_SEC, PROFILE_UNKNOWN_RETRY_MAX_SEC
+            )
             _record_breadcrumb(
                 result,
                 date_value,
@@ -3444,9 +3571,24 @@ def _process_outreach_lead_state_machine(
         result.setdefault("browser_failures", []).append(
             {"prospect_id": prospect.get("id"), "step": "profile_inspect", "error": str(exc)}
         )
-        result["skipped"].append({"prospect_id": prospect.get("id"), "reason": f"profile_inspect_exception:{failure_key}"})
-        _record_breadcrumb(result, date_value, prospect, "lead_done", lead_started_at, status="skipped", error=f"profile_inspect_exception:{failure_key}")
-        trip_reason = _register_browser_failure(result, prospect.get("id"), failure_key, "profile_inspect")
+        result["skipped"].append(
+            {
+                "prospect_id": prospect.get("id"),
+                "reason": f"profile_inspect_exception:{failure_key}",
+            }
+        )
+        _record_breadcrumb(
+            result,
+            date_value,
+            prospect,
+            "lead_done",
+            lead_started_at,
+            status="skipped",
+            error=f"profile_inspect_exception:{failure_key}",
+        )
+        trip_reason = _register_browser_failure(
+            result, prospect.get("id"), failure_key, "profile_inspect"
+        )
         if trip_reason:
             result["ok"] = False
             result["status"] = "blocked_browser_guard"
@@ -3465,7 +3607,14 @@ def _process_outreach_lead_state_machine(
 
     if timing == "before_conn" and live_state not in {"profile_unavailable", "unknown"}:
         try:
-            _record_breadcrumb(result, date_value, prospect, "activity_before_start", lead_started_at, profile_url=profile_url)
+            _record_breadcrumb(
+                result,
+                date_value,
+                prospect,
+                "activity_before_start",
+                lead_started_at,
+                profile_url=profile_url,
+            )
             activity, activity_summary, _activity_fields = _read_and_sync_activity(
                 result=result,
                 session=session,
@@ -3479,14 +3628,22 @@ def _process_outreach_lead_state_machine(
         except Exception as exc:
             failure_key = _normalize_failure_key(exc)
             result.setdefault("browser_failures", []).append(
-                {"prospect_id": prospect.get("id"), "step": "before_conn_profile_activity", "error": str(exc)}
+                {
+                    "prospect_id": prospect.get("id"),
+                    "step": "before_conn_profile_activity",
+                    "error": str(exc),
+                }
             )
             if failure_key in HARD_STOP_ERRORS:
                 result["ok"] = False
                 result["status"] = "blocked_circuit_breaker"
                 result["blockers"].append(f"before_conn_profile_activity exception: {exc}")
                 return "break"
-            activity = {"error": True, "danger": "activity_read_exception", "exception": failure_key}
+            activity = {
+                "error": True,
+                "danger": "activity_read_exception",
+                "exception": failure_key,
+            }
             activity_summary = f"activity_read=activity_read_exception; reason={failure_key}"
             _record_journal_event(
                 result,
@@ -3526,11 +3683,24 @@ def _process_outreach_lead_state_machine(
             args=args,
         )
         result["reconciled"].append(
-            {"prospect_id": prospect.get("id"), "state": live_state, "synced": bool(reconciled.get("synced"))}
+            {
+                "prospect_id": prospect.get("id"),
+                "state": live_state,
+                "synced": bool(reconciled.get("synced")),
+            }
         )
-        result["skipped"].append({"prospect_id": prospect.get("id"), "reason": f"{live_state}_reconciled"})
+        result["skipped"].append(
+            {"prospect_id": prospect.get("id"), "reason": f"{live_state}_reconciled"}
+        )
         _short_skip_dwell()
-        _record_breadcrumb(result, date_value, prospect, "lead_done", lead_started_at, status=f"{live_state}_reconciled")
+        _record_breadcrumb(
+            result,
+            date_value,
+            prospect,
+            "lead_done",
+            lead_started_at,
+            status=f"{live_state}_reconciled",
+        )
         return "continue"
 
     if live_state in {"profile_unavailable", "unknown", "no_connect_button"}:
@@ -3545,7 +3715,15 @@ def _process_outreach_lead_state_machine(
         )
         result["skipped"].append({"prospect_id": prospect.get("id"), "reason": live_state})
         _short_skip_dwell()
-        _record_breadcrumb(result, date_value, prospect, "lead_done", lead_started_at, status="skipped", error=live_state)
+        _record_breadcrumb(
+            result,
+            date_value,
+            prospect,
+            "lead_done",
+            lead_started_at,
+            status="skipped",
+            error=live_state,
+        )
         return "continue"
 
     note = None
@@ -3555,15 +3733,27 @@ def _process_outreach_lead_state_machine(
             note = render_template(template, build_template_variables(prospect))
 
     try:
-        _record_breadcrumb(result, date_value, prospect, "send_start", lead_started_at, profile_url=profile_url, live_state=live_state)
-        send_result = session.send_connection_only(profile_url, profile_state=profile_state, note=note)
+        _record_breadcrumb(
+            result,
+            date_value,
+            prospect,
+            "send_start",
+            lead_started_at,
+            profile_url=profile_url,
+            live_state=live_state,
+        )
+        send_result = session.send_connection_only(
+            profile_url, profile_state=profile_state, note=note
+        )
     except Exception as exc:
         failure_key = _normalize_failure_key(exc)
         result.setdefault("warnings", []).append(f"send_connection_only exception: {failure_key}")
         result.setdefault("browser_failures", []).append(
             {"prospect_id": prospect.get("id"), "step": "send_connection_only", "error": str(exc)}
         )
-        result["skipped"].append({"prospect_id": prospect.get("id"), "reason": f"send_exception:{failure_key}"})
+        result["skipped"].append(
+            {"prospect_id": prospect.get("id"), "reason": f"send_exception:{failure_key}"}
+        )
         if failure_key == EMAIL_REQUIRED_TO_CONNECT:
             _record_requires_email_status(
                 result=result,
@@ -3572,7 +3762,15 @@ def _process_outreach_lead_state_machine(
                 creds=creds,
                 obf_url=args.obf_url,
             )
-            _record_breadcrumb(result, date_value, prospect, "lead_done", lead_started_at, status="skipped", error=failure_key)
+            _record_breadcrumb(
+                result,
+                date_value,
+                prospect,
+                "lead_done",
+                lead_started_at,
+                status="skipped",
+                error=failure_key,
+            )
             _reset_send_failure_guard(result)
             _sleep_failure_backoff(result, is_last=is_last)
             return "continue"
@@ -3604,7 +3802,15 @@ def _process_outreach_lead_state_machine(
                 creds=creds,
                 obf_url=args.obf_url,
             )
-        _record_breadcrumb(result, date_value, prospect, "lead_done", lead_started_at, status="skipped", error=send_error)
+        _record_breadcrumb(
+            result,
+            date_value,
+            prospect,
+            "lead_done",
+            lead_started_at,
+            status="skipped",
+            error=send_error,
+        )
         if send_error in NON_FATAL_SEND_ERRORS:
             _reset_send_failure_guard(result)
             _sleep_failure_backoff(result, is_last=is_last)
@@ -3620,7 +3826,15 @@ def _process_outreach_lead_state_machine(
 
     result["successful_sends"] += 1
     _reset_send_failure_guard(result)
-    _record_breadcrumb(result, date_value, prospect, "send_confirmed", lead_started_at, profile_url=profile_url, status="sent")
+    _record_breadcrumb(
+        result,
+        date_value,
+        prospect,
+        "send_confirmed",
+        lead_started_at,
+        profile_url=profile_url,
+        status="sent",
+    )
     _record_journal_event(
         result,
         date_value,
@@ -3634,7 +3848,14 @@ def _process_outreach_lead_state_machine(
 
     if timing != "before_conn":
         try:
-            _record_breadcrumb(result, date_value, prospect, "activity_after_start", lead_started_at, profile_url=profile_url)
+            _record_breadcrumb(
+                result,
+                date_value,
+                prospect,
+                "activity_after_start",
+                lead_started_at,
+                profile_url=profile_url,
+            )
             activity, activity_summary, _activity_fields = _read_and_sync_activity(
                 result=result,
                 session=session,
@@ -3648,9 +3869,17 @@ def _process_outreach_lead_state_machine(
         except Exception as exc:
             failure_key = _normalize_failure_key(exc)
             result.setdefault("browser_failures", []).append(
-                {"prospect_id": prospect.get("id"), "step": "after_conn_profile_activity", "error": str(exc)}
+                {
+                    "prospect_id": prospect.get("id"),
+                    "step": "after_conn_profile_activity",
+                    "error": str(exc),
+                }
             )
-            activity = {"error": True, "danger": "activity_read_exception", "exception": failure_key}
+            activity = {
+                "error": True,
+                "danger": "activity_read_exception",
+                "exception": failure_key,
+            }
             activity_summary = f"activity_read=activity_read_exception; reason={failure_key}"
             _record_journal_event(
                 result,
@@ -3679,9 +3908,17 @@ def _process_outreach_lead_state_machine(
         )
 
     if timing == "before_conn":
-        log_notes = f"activity_timing=instant; {activity_summary}" if activity_summary else "activity_timing=instant"
+        log_notes = (
+            f"activity_timing=instant; {activity_summary}"
+            if activity_summary
+            else "activity_timing=instant"
+        )
     elif timing == "after_conn":
-        log_notes = f"activity_timing=post_conn; {activity_summary}" if activity_summary else "activity_timing=post_conn"
+        log_notes = (
+            f"activity_timing=post_conn; {activity_summary}"
+            if activity_summary
+            else "activity_timing=post_conn"
+        )
     else:
         log_notes = activity_summary
 
@@ -3708,7 +3945,15 @@ def _process_outreach_lead_state_machine(
         "Notes": progress_notes,
     }
 
-    _record_breadcrumb(result, date_value, prospect, "report_start", lead_started_at, profile_url=profile_url, status="pending_sheet_sync")
+    _record_breadcrumb(
+        result,
+        date_value,
+        prospect,
+        "report_start",
+        lead_started_at,
+        profile_url=profile_url,
+        status="pending_sheet_sync",
+    )
     _record_journal_event(
         result,
         date_value,
@@ -3716,9 +3961,15 @@ def _process_outreach_lead_state_machine(
         "recorded",
         prospect=prospect,
         sheet_payloads={
-            "prospects": _sheet_target_payload(target="Prospects", row_number=int(prospect["_row_number"]), fields=prospect_fields),
-            "outreach_log": _sheet_target_payload(target="Outreach Log", fields=outreach_log_row, insert_mode="below_header"),
-            "outreach_control": _sheet_target_payload(target=OUTREACH_CONTROL_TAB, row_number=row_number, fields=control_progress_fields),
+            "prospects": _sheet_target_payload(
+                target="Prospects", row_number=int(prospect["_row_number"]), fields=prospect_fields
+            ),
+            "outreach_log": _sheet_target_payload(
+                target="Outreach Log", fields=outreach_log_row, insert_mode="below_header"
+            ),
+            "outreach_control": _sheet_target_payload(
+                target=OUTREACH_CONTROL_TAB, row_number=row_number, fields=control_progress_fields
+            ),
         },
     )
     try:
@@ -3737,7 +3988,9 @@ def _process_outreach_lead_state_machine(
             "prospects_sync",
             "synced",
             prospect=prospect,
-            sheet_payload=_sheet_target_payload(target="Prospects", row_number=int(prospect["_row_number"]), fields=prospect_fields),
+            sheet_payload=_sheet_target_payload(
+                target="Prospects", row_number=int(prospect["_row_number"]), fields=prospect_fields
+            ),
         )
     except Exception as exc:
         _record_journal_event(
@@ -3746,24 +3999,34 @@ def _process_outreach_lead_state_machine(
             "prospects_sync",
             "pending_sync",
             prospect=prospect,
-            sheet_payload=_sheet_target_payload(target="Prospects", row_number=int(prospect["_row_number"]), fields=prospect_fields),
+            sheet_payload=_sheet_target_payload(
+                target="Prospects", row_number=int(prospect["_row_number"]), fields=prospect_fields
+            ),
             error=str(exc),
         )
-        result["sync_failures"].append({"prospect_id": prospect.get("id"), "target": "Prospects", "error": str(exc)})
+        result["sync_failures"].append(
+            {"prospect_id": prospect.get("id"), "target": "Prospects", "error": str(exc)}
+        )
         result["ok"] = False
-        result["blockers"].append(f"Prospects sync failed after successful send for prospect {prospect.get('id')}: {exc}")
+        result["blockers"].append(
+            f"Prospects sync failed after successful send for prospect {prospect.get('id')}: {exc}"
+        )
         result["status"] = "blocked_prospect_sync"
         return "break"
 
     try:
-        insert_outreach_log_row(row_data=outreach_log_row, credentials_path=creds, sheet_url=args.obf_url)
+        insert_outreach_log_row(
+            row_data=outreach_log_row, credentials_path=creds, sheet_url=args.obf_url
+        )
         _record_journal_event(
             result,
             date_value,
             "outreach_log_sync",
             "synced",
             prospect=prospect,
-            sheet_payload=_sheet_target_payload(target="Outreach Log", fields=outreach_log_row, insert_mode="below_header"),
+            sheet_payload=_sheet_target_payload(
+                target="Outreach Log", fields=outreach_log_row, insert_mode="below_header"
+            ),
         )
     except Exception as exc:
         _record_journal_event(
@@ -3772,10 +4035,14 @@ def _process_outreach_lead_state_machine(
             "outreach_log_sync",
             "pending_sync",
             prospect=prospect,
-            sheet_payload=_sheet_target_payload(target="Outreach Log", fields=outreach_log_row, insert_mode="below_header"),
+            sheet_payload=_sheet_target_payload(
+                target="Outreach Log", fields=outreach_log_row, insert_mode="below_header"
+            ),
             error=str(exc),
         )
-        result["sync_failures"].append({"prospect_id": prospect.get("id"), "target": "Outreach Log", "error": str(exc)})
+        result["sync_failures"].append(
+            {"prospect_id": prospect.get("id"), "target": "Outreach Log", "error": str(exc)}
+        )
 
     _record_journal_event(
         result,
@@ -3783,7 +4050,9 @@ def _process_outreach_lead_state_machine(
         "outreach_control_sync",
         "recorded",
         prospect=prospect,
-        sheet_payload=_sheet_target_payload(target=OUTREACH_CONTROL_TAB, row_number=row_number, fields=control_progress_fields),
+        sheet_payload=_sheet_target_payload(
+            target=OUTREACH_CONTROL_TAB, row_number=row_number, fields=control_progress_fields
+        ),
     )
     try:
         result["outreach_control_update"] = _update_outreach_control_progress(
@@ -3795,7 +4064,9 @@ def _process_outreach_lead_state_machine(
             "outreach_control_sync",
             "synced",
             prospect=prospect,
-            sheet_payload=_sheet_target_payload(target=OUTREACH_CONTROL_TAB, row_number=row_number, fields=control_progress_fields),
+            sheet_payload=_sheet_target_payload(
+                target=OUTREACH_CONTROL_TAB, row_number=row_number, fields=control_progress_fields
+            ),
         )
     except Exception as exc:
         _record_journal_event(
@@ -3804,16 +4075,30 @@ def _process_outreach_lead_state_machine(
             "outreach_control_sync",
             "pending_sync",
             prospect=prospect,
-            sheet_payload=_sheet_target_payload(target=OUTREACH_CONTROL_TAB, row_number=row_number, fields=control_progress_fields),
+            sheet_payload=_sheet_target_payload(
+                target=OUTREACH_CONTROL_TAB, row_number=row_number, fields=control_progress_fields
+            ),
             error=str(exc),
         )
-        result["sync_failures"].append({"prospect_id": prospect.get("id"), "target": OUTREACH_CONTROL_TAB, "error": str(exc)})
+        result["sync_failures"].append(
+            {"prospect_id": prospect.get("id"), "target": OUTREACH_CONTROL_TAB, "error": str(exc)}
+        )
         result["ok"] = False
-        result["blockers"].append(f"{OUTREACH_CONTROL_TAB} sync failed after successful send for prospect {prospect.get('id')}: {exc}")
+        result["blockers"].append(
+            f"{OUTREACH_CONTROL_TAB} sync failed after successful send for prospect {prospect.get('id')}: {exc}"
+        )
         result["status"] = "blocked_outreach_control_sync"
         return "break"
 
-    _record_breadcrumb(result, date_value, prospect, "report_synced", lead_started_at, profile_url=profile_url, status="synced")
+    _record_breadcrumb(
+        result,
+        date_value,
+        prospect,
+        "report_synced",
+        lead_started_at,
+        profile_url=profile_url,
+        status="synced",
+    )
 
     diversion = str(plan_item.get("lead_diversion", "none")).strip().lower()
     diversion_sec = _parse_int(plan_item.get("lead_diversion_sec"))
@@ -3829,7 +4114,10 @@ def _process_outreach_lead_state_machine(
             diversion_sec=diversion_sec,
         )
         diversion_result = _run_diversion(
-            session=session, diversion=diversion, diversion_sec=diversion_sec, activity=activity,
+            session=session,
+            diversion=diversion,
+            diversion_sec=diversion_sec,
+            activity=activity,
             company_linkedin=str(prospect.get("company_linkedin") or ""),
         )
         if diversion_result.get("executed"):
@@ -3850,22 +4138,33 @@ def _process_outreach_lead_state_machine(
             result["runtime_enforcement"]["delays_applied"] += 1
             result["runtime_enforcement"]["delay_seconds_total"] += delay_sec
 
-    _record_breadcrumb(result, date_value, prospect, "lead_done", lead_started_at, profile_url=profile_url, status="sent")
+    _record_breadcrumb(
+        result,
+        date_value,
+        prospect,
+        "lead_done",
+        lead_started_at,
+        profile_url=profile_url,
+        status="sent",
+    )
     return "continue"
 
 
-def acceptance_check(args: argparse.Namespace) -> Dict[str, Any]:
+def acceptance_check(args: argparse.Namespace) -> dict[str, Any]:
     creds = str(Path(args.creds).expanduser())
     date_value = sheet_date(args.date)
     now = datetime.now()
     mock_pending = _read_json(getattr(args, "mock_pending_json", None))
     mock_acceptances = _read_json(getattr(args, "mock_acceptances_json", None))
-    mock_notifications = _read_json(getattr(args, "mock_notifications_json", None))
-    state_path = Path(getattr(args, "state_path", "")).expanduser() if getattr(args, "state_path", None) else ACCEPTANCE_STATE_FILE
+    state_path = (
+        Path(getattr(args, "state_path", "")).expanduser()
+        if getattr(args, "state_path", None)
+        else ACCEPTANCE_STATE_FILE
+    )
     state = _load_acceptance_state(state_path)
     state["seen_acceptances"] = _prune_seen_acceptances(state.get("seen_acceptances", {}), now)
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "ok": True,
         "date": date_value,
         "dry_run": bool(getattr(args, "dry_run", False)),
@@ -3915,11 +4214,9 @@ def acceptance_check(args: argparse.Namespace) -> Dict[str, Any]:
 
     by_url, by_name = _build_pending_indexes(pending)
 
-    live_acceptances: List[Dict[str, Any]] = []
-    notification_acceptances: List[Dict[str, Any]] = []
+    live_acceptances: list[dict[str, Any]] = []
     session = None
-    used_fallback = False
-    first_message_templates: List[Dict[str, Any]] = []
+    first_message_templates: list[dict[str, Any]] = []
 
     try:
         if mock_acceptances is not None:
@@ -3927,7 +4224,7 @@ def acceptance_check(args: argparse.Namespace) -> Dict[str, Any]:
             live_acceptances = mock_acceptances.get("acceptances", mock_acceptances)
             result["checked_sources"].append("connections_mock")
         else:
-            from linkedin_helper import LinkedInSession  # noqa: WPS433
+            from linkedin_helper import LinkedInSession
 
             session = LinkedInSession()
             connect_result = session.connect(skip_rate_check=True)
@@ -3936,7 +4233,9 @@ def acceptance_check(args: argparse.Namespace) -> Dict[str, Any]:
                     {
                         "ok": False,
                         "status": "blocked_preflight",
-                        "blockers": [connect_result.get("block_reason", "LinkedIn preflight failed")],
+                        "blockers": [
+                            connect_result.get("block_reason", "LinkedIn preflight failed")
+                        ],
                         "preflight": connect_result,
                     }
                 )
@@ -3985,8 +4284,8 @@ def acceptance_check(args: argparse.Namespace) -> Dict[str, Any]:
                 pass
 
     # --- Process candidates (works for both subtractive and mock paths) ---
-    candidates: List[Dict[str, Any]] = []
-    seen_in_run: Set[str] = set()
+    candidates: list[dict[str, Any]] = []
+    seen_in_run: set[str] = set()
     for item in live_acceptances or []:
         candidate = dict(item)
         if "source" not in candidate:
@@ -4018,7 +4317,8 @@ def acceptance_check(args: argparse.Namespace) -> Dict[str, Any]:
 
         match_payload = {
             "prospect_id": prospect.get("id"),
-            "outreach_log_row_number": prospect.get("_outreach_log_row_number") or prospect.get("_row_number"),
+            "outreach_log_row_number": prospect.get("_outreach_log_row_number")
+            or prospect.get("_row_number"),
             "company": prospect.get("company"),
             "contact_name": prospect.get("contact_name"),
             "linkedin": prospect.get("contact_linkedin"),
@@ -4031,7 +4331,9 @@ def acceptance_check(args: argparse.Namespace) -> Dict[str, Any]:
                 log_row = int(prospect.get("_outreach_log_row_number") or prospect["_row_number"])
                 existing_notes = str(prospect.get("notes", "")).strip()
                 acceptance_note = f"accepted_source={acceptance.get('source', '')}"
-                connected_notes = f"{existing_notes} | {acceptance_note}" if existing_notes else acceptance_note
+                connected_notes = (
+                    f"{existing_notes} | {acceptance_note}" if existing_notes else acceptance_note
+                )
                 log_update = mark_outreach_log_connected(
                     log_row,
                     notes=connected_notes,
@@ -4053,10 +4355,14 @@ def acceptance_check(args: argparse.Namespace) -> Dict[str, Any]:
                 )
                 result["status"] = "blocked_acceptance_sync"
                 break
-            state.setdefault("seen_acceptances", {})[fingerprint] = now.isoformat(timespec="seconds")
+            state.setdefault("seen_acceptances", {})[fingerprint] = now.isoformat(
+                timespec="seconds"
+            )
 
         if not first_message_templates:
-            first_message_templates = load_templates(category="FM", credentials_path=creds, sheet_url=args.obf_url)
+            first_message_templates = load_templates(
+                category="FM", credentials_path=creds, sheet_url=args.obf_url
+            )
         draft = _render_first_message_draft(
             prospect,
             first_message_templates,
@@ -4072,7 +4378,9 @@ def acceptance_check(args: argparse.Namespace) -> Dict[str, Any]:
             {
                 "last_checked_at": now.isoformat(timespec="seconds"),
                 "next_check_not_before": cadence["next_check_not_before"],
-                "last_status": "accepted_found" if result["matched_acceptances"] else "no_acceptances",
+                "last_status": "accepted_found"
+                if result["matched_acceptances"]
+                else "no_acceptances",
             }
         )
         _save_acceptance_state(state, state_path)
@@ -4089,13 +4397,13 @@ def acceptance_check(args: argparse.Namespace) -> Dict[str, Any]:
     return result
 
 
-def prepare_8_30_session(args: argparse.Namespace) -> Dict[str, Any]:
+def prepare_8_30_session(args: argparse.Namespace) -> dict[str, Any]:
     creds = str(Path(args.creds).expanduser())
     date_value = sheet_date(args.date)
     mock_daily = _read_json(getattr(args, "mock_daily_json", None))
     mock_queue = _read_json(getattr(args, "mock_queue_json", None))
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "ok": True,
         "date": date_value,
         "ready": False,
@@ -4104,7 +4412,9 @@ def prepare_8_30_session(args: argparse.Namespace) -> Dict[str, Any]:
     }
 
     if _is_obf_weekend(date_value):
-        result.update({"status": "skipped_weekend", "skip_reason": _weekend_hold_message(date_value)})
+        result.update(
+            {"status": "skipped_weekend", "skip_reason": _weekend_hold_message(date_value)}
+        )
         result["summary_message"] = _make_prepare_summary_message(result)
         return result
 
@@ -4217,7 +4527,7 @@ def prepare_8_30_session(args: argparse.Namespace) -> Dict[str, Any]:
             worker_config=getattr(args, "worker_config", None),
         )
         assignments = lane_auto_assignment.get("assignments") or []
-        assigned_counts: Dict[str, int] = {}
+        assigned_counts: dict[str, int] = {}
         for assignment in assignments:
             lane = str(assignment.get("primary_lane") or "").strip()
             if lane:
@@ -4326,11 +4636,36 @@ def prepare_8_30_session(args: argparse.Namespace) -> Dict[str, Any]:
     ]
 
     generator_calls = [
-        ("batch_sizes", lambda: generate_batch_sizes_from_sheet(creds, args.obf_url, date_value, write=not args.no_write)),
-        ("activity_timing", lambda: generate_activity_timing_from_sheet(creds, args.obf_url, date_value, write=not args.no_write)),
-        ("delay_seconds", lambda: generate_delay_seconds_from_sheet(creds, args.obf_url, date_value, write=not args.no_write)),
-        ("lead_diversions", lambda: generate_lead_diversions_from_sheet(creds, args.obf_url, date_value, write=not args.no_write)),
-        ("lead_diversion_seconds", lambda: generate_lead_diversion_seconds_from_sheet(creds, args.obf_url, date_value, write=not args.no_write)),
+        (
+            "batch_sizes",
+            lambda: generate_batch_sizes_from_sheet(
+                creds, args.obf_url, date_value, write=not args.no_write
+            ),
+        ),
+        (
+            "activity_timing",
+            lambda: generate_activity_timing_from_sheet(
+                creds, args.obf_url, date_value, write=not args.no_write
+            ),
+        ),
+        (
+            "delay_seconds",
+            lambda: generate_delay_seconds_from_sheet(
+                creds, args.obf_url, date_value, write=not args.no_write
+            ),
+        ),
+        (
+            "lead_diversions",
+            lambda: generate_lead_diversions_from_sheet(
+                creds, args.obf_url, date_value, write=not args.no_write
+            ),
+        ),
+        (
+            "lead_diversion_seconds",
+            lambda: generate_lead_diversion_seconds_from_sheet(
+                creds, args.obf_url, date_value, write=not args.no_write
+            ),
+        ),
     ]
 
     try:
@@ -4342,15 +4677,15 @@ def prepare_8_30_session(args: argparse.Namespace) -> Dict[str, Any]:
             sequence_tab=OUTREACH_SEQUENCE_TAB,
         )
     except Exception as exc:
-        result.update({"ok": False, "status": "blocked_sequence_generation", "blockers": [str(exc)]})
+        result.update(
+            {"ok": False, "status": "blocked_sequence_generation", "blockers": [str(exc)]}
+        )
         result["summary_message"] = _make_prepare_summary_message(result)
         return result
 
     prepared_queue = queue[:remaining]
     try:
-        worker_plan = _assign_outreach_workers(
-            prepared_queue, getattr(args, "worker_config", None)
-        )
+        worker_plan = _assign_outreach_workers(prepared_queue, getattr(args, "worker_config", None))
     except Exception as exc:
         result.update({"ok": False, "status": "blocked_lane_assignment", "blockers": [str(exc)]})
         result["summary_message"] = _make_prepare_summary_message(result)
@@ -4390,14 +4725,14 @@ def prepare_8_30_session(args: argparse.Namespace) -> Dict[str, Any]:
     return result
 
 
-def run(args: argparse.Namespace) -> Dict[str, Any]:
+def run(args: argparse.Namespace) -> dict[str, Any]:
     creds = str(Path(args.creds).expanduser())
     date_value = sheet_date(args.date)
     mock_daily = _read_json(args.mock_daily_json)
     mock_queue = _read_json(args.mock_queue_json)
     mock_quotas = _read_json(args.mock_quotas_json)
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "ok": True,
         "dry_run": args.dry_run,
         "date": date_value,
@@ -4460,7 +4795,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
 
     if _is_obf_weekend(date_value):
         result["skipped"].append({"reason": "weekend_hold"})
-        result.update({"status": "skipped_weekend", "skip_reason": _weekend_hold_message(date_value)})
+        result.update(
+            {"status": "skipped_weekend", "skip_reason": _weekend_hold_message(date_value)}
+        )
         result["summary_message"] = _make_summary_message(result)
         return result
 
@@ -4471,7 +4808,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         result["summary_message"] = _make_summary_message(result)
         return result
 
-    prepared_bundle: Optional[Dict[str, Any]] = None
+    prepared_bundle: dict[str, Any] | None = None
     if getattr(args, "require_prepared_session", False):
         try:
             prepared_bundle = _load_prepared_session(
@@ -4554,8 +4891,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         result["summary_message"] = _make_summary_message(result)
         return result
 
-    queue: List[Dict[str, Any]]
-    runtime_plan: List[Dict[str, Any]]
+    queue: list[dict[str, Any]]
+    runtime_plan: list[dict[str, Any]]
     if prepared_bundle is not None:
         queue = prepared_bundle["queue"]
         runtime_plan = prepared_bundle["runtime_plan"]
@@ -4576,20 +4913,34 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         worker_id = str(getattr(args, "worker_id", "") or "").strip()
         if worker_id:
             paired = list(zip(queue, runtime_plan))
-            queue = [prospect for prospect, _plan in paired if str(prospect.get("worker_id") or "") == worker_id]
-            runtime_plan = [plan for prospect, plan in paired if str(prospect.get("worker_id") or "") == worker_id]
+            queue = [
+                prospect
+                for prospect, _plan in paired
+                if str(prospect.get("worker_id") or "") == worker_id
+            ]
+            runtime_plan = [
+                plan
+                for prospect, plan in paired
+                if str(prospect.get("worker_id") or "") == worker_id
+            ]
             if not queue:
-                result.update({
-                    "ok": False,
-                    "status": "blocked_lane_queue",
-                    "blockers": [f"Prepared session has no prospects assigned to worker '{worker_id}'."],
-                })
+                result.update(
+                    {
+                        "ok": False,
+                        "status": "blocked_lane_queue",
+                        "blockers": [
+                            f"Prepared session has no prospects assigned to worker '{worker_id}'."
+                        ],
+                    }
+                )
                 result["summary_message"] = _make_summary_message(result)
                 return result
             result["worker_id"] = worker_id
     else:
         send_target_preview = min(remaining, quota_capacity, args.max_sends)
-        sequence = load_or_generate_sequence(date_value, send_target_preview, regenerate=args.regenerate_sequence)
+        sequence = load_or_generate_sequence(
+            date_value, send_target_preview, regenerate=args.regenerate_sequence
+        )
         result["sequence"] = sequence
         try:
             runtime_plan = _load_runtime_plan_from_sequence_sheet(
@@ -4613,9 +4964,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     send_target = min(remaining, quota_capacity, args.max_sends, len(queue))
     selected = queue[:send_target]
     selected_plan = runtime_plan[:send_target]
-    deduped: List[Dict[str, Any]] = []
-    deduped_plan: List[Dict[str, Any]] = []
-    seen_profile_urls: Set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    deduped_plan: list[dict[str, Any]] = []
+    seen_profile_urls: set[str] = set()
     duplicate_skips = 0
     journal_confirmed_skips = 0
     for index, prospect in enumerate(selected):
@@ -4667,7 +5018,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                     "blockers": ["No unique prepared prospects available in Prospects"],
                 }
             )
-        _reconcile_result_from_journal(result, date_value, starting_progress=starting_progress, target=target)
+        _reconcile_result_from_journal(
+            result, date_value, starting_progress=starting_progress, target=target
+        )
         result["summary_message"] = _make_summary_message(result)
         return result
 
@@ -4688,10 +5041,12 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         result["summary_message"] = _make_summary_message(result)
         return result
 
-    from linkedin_helper import LinkedInSession  # noqa: WPS433
+    from linkedin_helper import LinkedInSession
 
     session = LinkedInSession()
-    connect_result = session.connect(skip_rate_check=getattr(args, "skip_acceptance_rate_check", False))
+    connect_result = session.connect(
+        skip_rate_check=getattr(args, "skip_acceptance_rate_check", False)
+    )
     if not connect_result.get("ok"):
         result.update(
             {
@@ -4811,7 +5166,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                     _emit_outreach_progress(
                         result,
                         date_value=date_value,
-                        stage="lead_loop_progress" if lead_action != "break" else "lead_loop_blocked",
+                        stage="lead_loop_progress"
+                        if lead_action != "break"
+                        else "lead_loop_blocked",
                         processed=processed,
                         selected_count=len(selected),
                         prospect=prospect,
@@ -4824,12 +5181,14 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                 timing = _normalize_activity_timing(plan_item.get("activity_log_timing"))
                 profile_url = prospect.get("contact_linkedin", "")
                 if not profile_url:
-                    result["skipped"].append({"prospect_id": prospect.get("id"), "reason": "missing_linkedin_url"})
+                    result["skipped"].append(
+                        {"prospect_id": prospect.get("id"), "reason": "missing_linkedin_url"}
+                    )
                     continue
 
                 activity = {}
                 activity_summary = ""
-                activity_fields: Dict[str, Any] = {}
+                activity_fields: dict[str, Any] = {}
                 profile_data = None
                 if timing == "before_conn":
                     try:
@@ -4889,7 +5248,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                                 credentials_path=creds,
                                 sheet_url=args.obf_url,
                             )
-                            activity_field_name, activity_field_value = next(iter(activity_fields.items()))
+                            activity_field_name, activity_field_value = next(
+                                iter(activity_fields.items())
+                            )
                             result.setdefault("activity_updates", []).append(
                                 {
                                     "updated": True,
@@ -4934,7 +5295,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
 
                 note = None
                 if not args.no_notes:
-                    template = pick_connection_template(prospect, templates=templates, credentials_path=creds)
+                    template = pick_connection_template(
+                        prospect, templates=templates, credentials_path=creds
+                    )
                     if template:
                         note = render_template(template, build_template_variables(prospect))
 
@@ -4960,7 +5323,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                         )
                 except Exception as exc:
                     failure_key = _normalize_failure_key(exc)
-                    result.setdefault("warnings", []).append(f"send_connection exception: {failure_key}")
+                    result.setdefault("warnings", []).append(
+                        f"send_connection exception: {failure_key}"
+                    )
                     result.setdefault("browser_failures", []).append(
                         {
                             "prospect_id": prospect.get("id"),
@@ -4998,11 +5363,14 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                 retry_attempts = 0
                 while (
                     not send_result.get("success")
-                    and _normalize_failure_key(send_result.get("error", "")) in RETRYABLE_CONNECT_ERRORS
+                    and _normalize_failure_key(send_result.get("error", ""))
+                    in RETRYABLE_CONNECT_ERRORS
                     and retry_attempts < NO_CONNECT_BUTTON_RETRIES
                 ):
                     retry_attempts += 1
-                    retry_wait = random.randint(NO_CONNECT_BUTTON_RETRY_MIN_SEC, NO_CONNECT_BUTTON_RETRY_MAX_SEC)
+                    retry_wait = random.randint(
+                        NO_CONNECT_BUTTON_RETRY_MIN_SEC, NO_CONNECT_BUTTON_RETRY_MAX_SEC
+                    )
                     time.sleep(retry_wait)
                     result.setdefault("warnings", []).append(
                         f"retry_no_connect_button attempt={retry_attempts} prospect={prospect.get('id')}"
@@ -5132,7 +5500,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                                 credentials_path=creds,
                                 sheet_url=args.obf_url,
                             )
-                            activity_field_name, activity_field_value = next(iter(activity_fields.items()))
+                            activity_field_name, activity_field_value = next(
+                                iter(activity_fields.items())
+                            )
                             result.setdefault("activity_updates", []).append(
                                 {
                                     "updated": True,
@@ -5190,9 +5560,17 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
 
                 log_notes = activity_summary
                 if timing == "before_conn":
-                    log_notes = f"activity_timing=instant; {activity_summary}" if activity_summary else "activity_timing=instant"
+                    log_notes = (
+                        f"activity_timing=instant; {activity_summary}"
+                        if activity_summary
+                        else "activity_timing=instant"
+                    )
                 elif timing == "after_conn":
-                    log_notes = f"activity_timing=post_conn; {activity_summary}" if activity_summary else "activity_timing=post_conn"
+                    log_notes = (
+                        f"activity_timing=post_conn; {activity_summary}"
+                        if activity_summary
+                        else "activity_timing=post_conn"
+                    )
                 prospect_fields = build_connection_sent_fields(
                     prospect=prospect,
                     touch_method="LinkedIn",
@@ -5200,7 +5578,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                 outreach_log_row = build_outreach_log_row(
                     prospect_id=str(prospect.get("id", "")).strip(),
                     company=str(prospect.get("company", "")).strip(),
-                    person_engaged=str(prospect.get("engaged_person", "Person 1")).strip() or "Person 1",
+                    person_engaged=str(prospect.get("engaged_person", "Person 1")).strip()
+                    or "Person 1",
                     contact_name=str(prospect.get("contact_name", "")).strip(),
                     action="Connection Request",
                     touch_method="LinkedIn",
@@ -5210,7 +5589,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                 row_number = int(conn_req_row["_row_number"])
                 new_progress = starting_progress + result["successful_sends"]
                 progress_value = str(target) if new_progress >= target else str(new_progress)
-                progress_notes = f"8:30 LinkedIn outreach sent {result['successful_sends']}/{target}"
+                progress_notes = (
+                    f"8:30 LinkedIn outreach sent {result['successful_sends']}/{target}"
+                )
                 daily_progress_fields = {
                     "Status": "Done" if new_progress >= target else "Partial",
                     "Current Progress": progress_value,
@@ -5456,7 +5837,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     finally:
         session.disconnect()
 
-    _reconcile_result_from_journal(result, date_value, starting_progress=starting_progress, target=target)
+    _reconcile_result_from_journal(
+        result, date_value, starting_progress=starting_progress, target=target
+    )
     if not result.get("status"):
         result["status"] = "completed" if result["successful_sends"] >= remaining else "partial"
     result["summary_message"] = _make_summary_message(result)
@@ -5552,7 +5935,11 @@ def main() -> int:
     p_run.add_argument("--skip-acceptance-rate-check", action="store_true")
     p_run.add_argument("--prepared-path")
     p_run.add_argument("--worker-id", help="Run only this immutable prepared account lane.")
-    p_run.add_argument("--verify-connection-modal", action="store_true", help="Open and dismiss each prepared connection modal without sending or writing reporting.")
+    p_run.add_argument(
+        "--verify-connection-modal",
+        action="store_true",
+        help="Open and dismiss each prepared connection modal without sending or writing reporting.",
+    )
     p_run.add_argument("--mock-daily-json")
     p_run.add_argument("--mock-queue-json")
     p_run.add_argument("--mock-quotas-json")
@@ -5640,7 +6027,10 @@ def main() -> int:
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return 0 if result.get("ok", True) else 1
     except Exception as exc:
-        print(json.dumps({"ok": False, "status": "fatal_exception", "error": str(exc)}, indent=2), file=sys.stderr)
+        print(
+            json.dumps({"ok": False, "status": "fatal_exception", "error": str(exc)}, indent=2),
+            file=sys.stderr,
+        )
         return 1
 
 
