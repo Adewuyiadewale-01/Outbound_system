@@ -101,4 +101,13 @@ config/  state/  tests/  docs/
 | 2026-09-21 | `ORCHESTRATION` renamed in workflow #6 | keeps rename risk inside one PR |
 ````
 
+## 8. Path Resolution Standard
+
+All path resolution follows one pattern, anchored to the repo root:
+
+Python: ROOT = Path(__file__).resolve().parents[N] where N is theactual depth from root — verified per file, never assumed.
+Shell/.command: REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)" thencd "$REPO_ROOT" before any relative reference.
+No absolute paths outside .env. No paths relative to the currentworking directory. Entry points may be invoked from anywhere.
+Rationale: the codebase historically mixed four path idioms; three ofthem broke silently during the first restructure pass.
+
 ---

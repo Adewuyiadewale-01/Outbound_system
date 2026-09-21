@@ -147,7 +147,6 @@ from outreach_helper import (  # noqa: E402
     render_template,
 )
 from sheets_helper import (  # noqa: E402
-    complete_daily_row,
     daily_approval_state,
     format_sheet_date,
     get_client,
@@ -155,10 +154,13 @@ from sheets_helper import (  # noqa: E402
     get_worksheet,
     is_checked_value,
     open_sheet,
-    partial_daily_row,
     safe_number,
     sheet_values_equal,
     update_row,
+    complete_daily_row,
+    partial_daily_row,
+    complete_daily_row, 
+    partial_daily_row,
 )
 
 
@@ -2909,7 +2911,7 @@ def _load_quotas(mock_quotas: dict[str, Any] | None, dry_run: bool) -> dict[str,
             "conn_req_week_limit": WEEKLY_CONN_REQ_LIMIT,
             "profile_views_today": 0,
         }
-    from linkedin_helper import LinkedInSession
+    from linkedin_helper import LinkedInSession  # noqa: WPS433
 
     return LinkedInSession().get_quotas()
 
@@ -4224,7 +4226,7 @@ def acceptance_check(args: argparse.Namespace) -> dict[str, Any]:
             live_acceptances = mock_acceptances.get("acceptances", mock_acceptances)
             result["checked_sources"].append("connections_mock")
         else:
-            from linkedin_helper import LinkedInSession
+            from linkedin_helper import LinkedInSession  # noqa: WPS433
 
             session = LinkedInSession()
             connect_result = session.connect(skip_rate_check=True)
@@ -5041,7 +5043,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         result["summary_message"] = _make_summary_message(result)
         return result
 
-    from linkedin_helper import LinkedInSession
+    from linkedin_helper import LinkedInSession  # noqa: WPS433
 
     session = LinkedInSession()
     connect_result = session.connect(

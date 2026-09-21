@@ -7,8 +7,9 @@
 #   2. Chrome CDP on localhost:18800               (browser control)
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LOG="$SCRIPT_DIR/state/acceptance_monitoring/last_run.log"
-DONE="$SCRIPT_DIR/state/acceptance_monitoring/last_run.done"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+LOG="$REPO_ROOT/state/acceptance_monitoring/last_run.log"
+DONE="$REPO_ROOT/state/acceptance_monitoring/last_run.done"
 TODAY=$(date +"%m/%d/%Y")
 
 mkdir -p "$(dirname "$LOG")"
@@ -42,8 +43,9 @@ fi
 {
   echo "=== Acceptance-check run: $(date) ==="
   echo "=== Date: $TODAY ==="
-  cd "$SCRIPT_DIR"
-  python3 helpers/linkedin_outreach_session.py acceptance-check --date "$TODAY" 2>&1
+  cd "$REPO_ROOT"
+  # TODO(workflow-2): retarget when outreach/OBF is carved into outbound/outreach/ (scripts/ entry point)
+python3 helpers/linkedin_outreach_session.py acceptance-check --date "$TODAY" 2>&1
   EXIT_CODE=$?
   echo "=== EXIT CODE: $EXIT_CODE ==="
   echo "=== Run complete ==="

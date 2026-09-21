@@ -1,6 +1,7 @@
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
 
 CDP_URL="http://localhost:18800/json/version"
 if ! curl -s --max-time 5 "$CDP_URL" > /dev/null 2>&1; then
@@ -107,4 +108,4 @@ if missing:
 cdp.disconnect()
 print()
 print('=== DONE ===')
-" 2>&1 | tee "$SCRIPT_DIR/state/acceptance_monitoring/matching_diagnostic.log"
+" 2>&1 | tee "$REPO_ROOT/state/acceptance_monitoring/matching_diagnostic.log"
