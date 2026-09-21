@@ -35,6 +35,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from runtime_environment import load_repo_env
 from outbound.shared.state import daily_rng, read_json, write_json
+from outbound.engagement.parsing import canonical_profile_url, parse_relative_age_hours, parse_follower_count, classify_location
 
 load_repo_env()
 
@@ -316,44 +317,6 @@ def save_config(requested: dict[str, Any]) -> dict[str, Any]:
     return current
 
 
-def canonical_profile_url(value: str) -> str:
-    match = re.search(r"(?:https?://(?:www\.)?linkedin\.com)?(/in/[^/?#]+)", str(value or ""), re.I)
-    return f"https://www.linkedin.com{match.group(1).rstrip('/')}/" if match else ""
-
-
-def parse_relative_age_hours(value: str) -> float | None:
-    text = re.sub(r"[·•]", "", str(value or "").strip().lower())
-    if text in {"now", "just now"}:
-        return 0.0
-    if text == "today":
-        return 12.0
-    if text == "yesterday":
-        return 24.0
-    match = re.search(r"(\d+)\s*(m|min|h|hr|d|day|w|week)", text)
-    if not match:
-        return None
-    amount = int(match.group(1))
-    unit = match.group(2)
-    return (
-        amount / 60
-        if unit in {"m", "min"}
-        else amount
-        if unit in {"h", "hr"}
-        else amount * 24
-        if unit in {"d", "day"}
-        else amount * 168
-    )
-
-
-def parse_follower_count(value: str) -> int | None:
-    text = str(value or "").lower().replace(",", "").strip()
-    match = re.search(r"([\d.]+)\s*([km]?)\s+followers?", text)
-    if not match:
-        return None
-    multiplier = 1000 if match.group(2) == "k" else 1_000_000 if match.group(2) == "m" else 1
-    return round(float(match.group(1)) * multiplier)
-
-
 def validate_profile_gate(gate: dict[str, Any]) -> None:
     """Reject global LinkedIn UI labels before they can affect ranking."""
     name = str(gate.get("name") or "").strip()
@@ -371,43 +334,6 @@ def validate_profile_gate(gate: dict[str, Any]) -> None:
         raise RuntimeError("profile_gate_missing_followers")
     if follower_source not in {"header", "activity"}:
         raise RuntimeError("profile_gate_unbounded_follower_source")
-
-
-def classify_location(raw_location: str) -> dict[str, Any]:
-    data = read_json(GEO_PATH, {})
-    normalized = re.sub(r"[^a-z0-9]+", " ", str(raw_location or "").lower()).strip()
-    code = ""
-    method = "unknown"
-    for alias, candidate in data.get("subdivision_aliases", {}).items():
-        if re.search(rf"\b{re.escape(alias)}\b", normalized):
-            code, method = candidate, "subdivision_alias"
-            break
-    if not code:
-        for candidate, details in data.get("countries", {}).items():
-            if any(
-                re.search(rf"\b{re.escape(name)}\b", normalized)
-                for name in details.get("names", [])
-            ):
-                code, method = candidate, "country_name"
-                break
-    details = data.get("countries", {}).get(code, {})
-    region = details.get("region", "Unknown")
-    if code in data.get("last_resort_countries", []):
-        tier = 3
-    elif region in data.get("preferred_regions", []):
-        tier = 1
-    elif code:
-        tier = 2
-    else:
-        tier = 4
-    return {
-        "raw_location": raw_location,
-        "normalized_country": (details.get("names") or [""])[0].title(),
-        "country_code": code,
-        "region": region,
-        "geography_tier": tier,
-        "classification_method": method,
-    }
 
 
 def choose_like_target(day: str, profile_url: str, config: dict[str, Any]) -> int:
