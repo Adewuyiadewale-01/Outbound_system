@@ -9,15 +9,4 @@ This project handles browser sessions, lead data, Google Sheets, and optional we
 5. Run `npm test`, `npm audit`, and `npm --prefix ORCHESTRATION/monitor_app audit` before pushing. The nested research workflow currently has an unresolved upstream `xlsx` advisory; do not deploy that workflow with unreviewed dependency risk.
 6. Do not expose `ORCHESTRATION/monitor_app/local_server.py` beyond loopback. It intentionally has no authentication because it is a local process-control API.
 
-## First repository setup
 
-This directory was not initialized as a Git repository during the audit. When you are ready, create the repository and inspect the first staged set before committing:
-
-```bash
-git init
-git add .
-git status --short
-git diff --cached --stat
-```
-
-Only create a remote and push after the staged set is clean.
