@@ -29,10 +29,12 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "helpers"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from runtime_environment import load_repo_env
+from outbound.shared.state import daily_rng, read_json, write_json
 
 load_repo_env()
 
@@ -162,25 +164,6 @@ CDP_ACCOUNTS = {
 
 def now() -> datetime:
     return datetime.now(TZ)
-
-
-def read_json(path: Path, fallback: Any) -> Any:
-    try:
-        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else fallback
-    except (OSError, json.JSONDecodeError):
-        return fallback
-
-
-def write_json(path: Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        mode="w", dir=path.parent, delete=False, encoding="utf-8"
-    ) as handle:
-        temp = Path(handle.name)
-        handle.write(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
-        handle.flush()
-        os.fsync(handle.fileno())
-    temp.replace(path)
 
 
 def append_history(value: dict[str, Any]) -> None:
@@ -425,11 +408,6 @@ def classify_location(raw_location: str) -> dict[str, Any]:
         "geography_tier": tier,
         "classification_method": method,
     }
-
-
-def daily_rng(day: str, salt: str) -> random.Random:
-    digest = hashlib.sha256(f"post-engagement:{day}:{salt}".encode()).hexdigest()
-    return random.Random(int(digest[:16], 16))
 
 
 def choose_like_target(day: str, profile_url: str, config: dict[str, Any]) -> int:
