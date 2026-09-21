@@ -1,7 +1,8 @@
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
-OUTPUT="$SCRIPT_DIR/sent_invitations_export.csv"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+OUTPUT="$REPO_ROOT/output/sent_invitations_export.csv"
 
 CDP_URL="http://localhost:18800/json/version"
 if ! curl -s --max-time 5 "$CDP_URL" > /dev/null 2>&1; then

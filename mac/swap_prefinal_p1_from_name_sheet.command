@@ -1,7 +1,8 @@
 #!/bin/zsh
 set -e
 
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo "Running Pre-final P1 swap check..."
 echo
