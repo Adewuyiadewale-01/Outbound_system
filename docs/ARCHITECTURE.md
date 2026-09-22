@@ -64,6 +64,8 @@ scripts/                   thin CLI entry points only
 mac/                       .command launchers + chrome scripts
 apps_script/               from scripts/mobile_lead_app/
 config/  state/  tests/  docs/
+
+1.  — Package layout invariant. outbound/'s top level contains exactly two kinds of entry: workflow packages (engagement/, outreach/, ...) and shared/. No loose modules at the package root. New workflows arrive as subfolders; code graduates into shared/ only when two or more workflows consume it — one consumer means it stays in its workflow, because premature sharing is how junk drawers are born.
 ```
 
 ## 5. Migration Rules
