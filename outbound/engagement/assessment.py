@@ -71,5 +71,4 @@ def recommendation_for(candidate: dict[str, Any], config: dict[str, Any]) -> dic
     }
 
 
-
 ACTIVITY_ASSESSMENT_VERSION = 1

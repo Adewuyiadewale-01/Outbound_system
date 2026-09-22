@@ -7,20 +7,14 @@ post_engagement during the engagement carve (architecture §5.1).
 
 from __future__ import annotations
 
-import fcntl
-import functools
 import hashlib
-import inspect
 import json
 import os
 import random
 import tempfile
-import time
-from contextlib import contextmanager
-from contextvars import ContextVar
+from datetime import datetime
 from pathlib import Path
 from typing import Any
-from datetime import datetime
 from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo("Africa/Lagos")
@@ -37,7 +31,9 @@ def read_json(path: Path, fallback: Any) -> Any:
 
 def write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False, encoding="utf-8") as handle:
+    with tempfile.NamedTemporaryFile(
+        mode="w", dir=path.parent, delete=False, encoding="utf-8"
+    ) as handle:
         temp = Path(handle.name)
         handle.write(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
         handle.flush()
@@ -49,5 +45,6 @@ def daily_rng(day: str, salt: str) -> random.Random:
     digest = hashlib.sha256(f"post-engagement:{day}:{salt}".encode()).hexdigest()
     return random.Random(int(digest[:16], 16))
 
+
 def now() -> datetime:
-    return datetime.now(TZ)   # TZ = ZoneInfo("Africa/Lagos")
+    return datetime.now(TZ)  # TZ = ZoneInfo("Africa/Lagos")
