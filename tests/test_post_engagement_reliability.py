@@ -127,7 +127,9 @@ class ReliabilityTests(unittest.TestCase):
         calls = []
         with (
             patch.object(
-                runner_module, "wait_for_next_batch", side_effect=lambda _: calls.append("wait") or True
+                runner_module,
+                "wait_for_next_batch",
+                side_effect=lambda _: calls.append("wait") or True,
             ),
             patch.object(
                 runner_module,
@@ -182,7 +184,9 @@ class ReliabilityTests(unittest.TestCase):
         session = Mock()
         session.get_quotas.return_value = {"profile_views_today": 100, "profile_views_limit": 100}
         with (
-            patch.object(runner_module, "_connect_campaign_browser", return_value=(Mock(), Mock(), session)),
+            patch.object(
+                runner_module, "_connect_campaign_browser", return_value=(Mock(), Mock(), session)
+            ),
             patch.object(runner_module, "collect_sources"),
             patch.object(runner_module, "final_action_queue") as queue,
         ):
@@ -210,7 +214,9 @@ class ReliabilityTests(unittest.TestCase):
         session = Mock()
         session.send_connection_only.return_value = {"success": False, "status": "failed"}
         with (
-            patch.object(runner_module, "_connect_campaign_browser", return_value=(Mock(), Mock(), session)),
+            patch.object(
+                runner_module, "_connect_campaign_browser", return_value=(Mock(), Mock(), session)
+            ),
             patch.object(runner_module, "collect_sources"),
         ):
             result = pe.run_campaign_schedule(self.day, True)
