@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import Mock, patch
 
+from outbound.engagement import browser as browser_module
 from scripts import post_engagement as pe
 
 
@@ -12,7 +13,7 @@ class RecoveryTests(unittest.TestCase):
         cdp.evaluate.return_value = url
         with (
             patch("linkedin_helper._wait_for_linkedin_ready", return_value={"ready": True}),
-            patch.object(pe, "append_history"),
+            patch.object(browser_module, "append_history"),
         ):
             pe._navigate(cdp, url)
         self.assertTrue(cdp.post_engagement_navigation[-1]["ok"])
@@ -26,7 +27,7 @@ class RecoveryTests(unittest.TestCase):
         cdp.evaluate.side_effect = ["https://www.linkedin.com/feed/", None, url]
         with (
             patch("linkedin_helper._wait_for_linkedin_ready", return_value={"ready": True}),
-            patch.object(pe, "append_history"),
+            patch.object(browser_module, "append_history"),
         ):
             pe._navigate(cdp, url)
         self.assertEqual(cdp.post_engagement_navigation[0]["fallback"], "js_location")
@@ -39,7 +40,7 @@ class RecoveryTests(unittest.TestCase):
         with (
             patch("linkedin_helper._wait_for_linkedin_ready", return_value={"ready": True}),
             patch("linkedin_helper._wait_for_activity_feed_state", return_value={"ready": False}),
-            patch.object(pe, "append_history"),
+            patch.object(browser_module, "append_history"),
         ):
             with self.assertRaisesRegex(RuntimeError, "activity_feed_not_hydrated"):
                 pe._navigate(cdp, url)
@@ -65,10 +66,10 @@ class RecoveryTests(unittest.TestCase):
             "sources": [{"submitted_url": "https://www.linkedin.com/posts/example"}],
         }
         with (
-            patch.object(pe, "_navigate"),
-            patch.object(pe, "_evaluate_json", side_effect=responses),
-            patch.object(pe, "save_campaign"),
-            patch.object(pe.time, "sleep"),
+            patch.object(browser_module, "_navigate"),
+            patch.object(browser_module, "_evaluate_json", side_effect=responses),
+            patch.object(browser_module, "save_campaign"),
+            patch.object(browser_module.time, "sleep"),
         ):
             pe.collect_sources(Mock(), campaign, pe.DEFAULT_CONFIG)
         source = campaign["sources"][0]

@@ -4,8 +4,8 @@ from datetime import timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from outbound.engagement import campaign as campaign_module  # ← MOVED to top level
 from scripts import post_engagement as pe
-from outbound.engagement import campaign as campaign_module          # ← MOVED to top level
 
 
 class ReliabilityTests(unittest.TestCase):
@@ -13,7 +13,8 @@ class ReliabilityTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         root = Path(self.temp.name)
-        from outbound.engagement import campaign as campaign_module  # ← DELETE this line (now at top)
+        from outbound.engagement import browser as browser_module
+        from outbound.engagement import campaign as campaign_module
         from outbound.engagement import config as config_module
         from outbound.engagement import paths as paths_module
 
@@ -32,11 +33,11 @@ class ReliabilityTests(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
 
-        p = patch.object(pe, "STATE_DIR", root)
+        p = patch.object(browser_module, "STATE_DIR", root)
         p.start()
         self.addCleanup(p.stop)
 
-        p = patch.object(pe, "HISTORY_PATH", root / "history.jsonl")
+        p = patch.object(browser_module, "HISTORY_PATH", root / "history.jsonl")
         p.start()
         self.addCleanup(p.stop)
 
@@ -152,7 +153,9 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(c["current_batch_number"], 2)
 
     def test_legacy_unscoped_actions_block_instead_of_resetting_quota(self):
-        pe.write_json(campaign_module.LEDGER_PATH, {"events": [{"day": self.day, "action": "connect"}]})   # ← THE FIX: pe.LEDGER_PATH → campaign_module.LEDGER_PATH
+        pe.write_json(
+            campaign_module.LEDGER_PATH, {"events": [{"day": self.day, "action": "connect"}]}
+        )  # ← THE FIX: pe.LEDGER_PATH → campaign_module.LEDGER_PATH
         with self.assertRaisesRegex(RuntimeError, "account ownership"):
             pe.reconcile_campaign(self.campaign())
 
