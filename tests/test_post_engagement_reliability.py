@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from scripts import post_engagement as pe
+from outbound.engagement import campaign as campaign_module          # ← MOVED to top level
 
 
 class ReliabilityTests(unittest.TestCase):
@@ -12,19 +13,36 @@ class ReliabilityTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         root = Path(self.temp.name)
+        from outbound.engagement import campaign as campaign_module  # ← DELETE this line (now at top)
+        from outbound.engagement import config as config_module
+        from outbound.engagement import paths as paths_module
+
         for name, path in {
-            "STATE_DIR": root,
             "CAMPAIGNS_DIR": root / "campaigns",
             "RUNNER_LOCK_PATH": root / "runner.lock",
             "LEDGER_PATH": root / "ledger.json",
             "CONTROL_PATH": root / "control.json",
             "PENDING_ACTIONS_PATH": root / "pending.json",
-            "HISTORY_PATH": root / "history.jsonl",
-            "CONFIG_PATH": root / "config.json",
         }.items():
-            p = patch.object(pe, name, path)
+            p = patch.object(campaign_module, name, path)
             p.start()
             self.addCleanup(p.stop)
+
+        p = patch.object(paths_module, "STATE_DIR", root)
+        p.start()
+        self.addCleanup(p.stop)
+
+        p = patch.object(pe, "STATE_DIR", root)
+        p.start()
+        self.addCleanup(p.stop)
+
+        p = patch.object(pe, "HISTORY_PATH", root / "history.jsonl")
+        p.start()
+        self.addCleanup(p.stop)
+
+        p = patch.object(config_module, "CONFIG_PATH", root / "config.json")
+        p.start()
+        self.addCleanup(p.stop)
         self.token = pe.ACTION_ACCOUNT.set("design")
         self.addCleanup(pe.ACTION_ACCOUNT.reset, self.token)
         self.day = "2026-09-08"
@@ -134,7 +152,7 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(c["current_batch_number"], 2)
 
     def test_legacy_unscoped_actions_block_instead_of_resetting_quota(self):
-        pe.write_json(pe.LEDGER_PATH, {"events": [{"day": self.day, "action": "connect"}]})
+        pe.write_json(campaign_module.LEDGER_PATH, {"events": [{"day": self.day, "action": "connect"}]})   # ← THE FIX: pe.LEDGER_PATH → campaign_module.LEDGER_PATH
         with self.assertRaisesRegex(RuntimeError, "account ownership"):
             pe.reconcile_campaign(self.campaign())
 
