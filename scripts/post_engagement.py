@@ -48,7 +48,7 @@ CONTROL_PATH = STATE_DIR / "control.json"
 ARCHIVE_DIR = STATE_DIR / "archive"
 LEDGER_PATH = STATE_DIR / "daily_action_ledger.json"
 PENDING_ACTIONS_PATH = STATE_DIR / "pending_final_actions.json"
-GEO_PATH = ROOT / "config" / "post_engagement_geography.json"
+# GEO_PATH = ROOT / "config" / "post_engagement_geography.json"
 TZ = ZoneInfo("Africa/Lagos")
 ACTION_ACCOUNT = ContextVar("post_engagement_account", default=None)
 RUNNER_LOCK_PATH = STATE_DIR / "runner.lock"

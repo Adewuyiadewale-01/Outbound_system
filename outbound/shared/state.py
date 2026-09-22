@@ -20,6 +20,10 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+TZ = ZoneInfo("Africa/Lagos")
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -44,3 +48,6 @@ def write_json(path: Path, value: Any) -> None:
 def daily_rng(day: str, salt: str) -> random.Random:
     digest = hashlib.sha256(f"post-engagement:{day}:{salt}".encode()).hexdigest()
     return random.Random(int(digest[:16], 16))
+
+def now() -> datetime:
+    return datetime.now(TZ)   # TZ = ZoneInfo("Africa/Lagos")
