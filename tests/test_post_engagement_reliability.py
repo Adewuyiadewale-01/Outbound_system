@@ -4,6 +4,8 @@ from datetime import timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from outbound.engagement import campaign as campaign_module
+from outbound.engagement import runner as runner_module
 from scripts import post_engagement as pe
 
 
@@ -12,19 +14,36 @@ class ReliabilityTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         root = Path(self.temp.name)
+        from outbound.engagement import browser as browser_module
+        from outbound.engagement import config as config_module
+        from outbound.engagement import paths as paths_module
+
         for name, path in {
-            "STATE_DIR": root,
             "CAMPAIGNS_DIR": root / "campaigns",
             "RUNNER_LOCK_PATH": root / "runner.lock",
             "LEDGER_PATH": root / "ledger.json",
             "CONTROL_PATH": root / "control.json",
             "PENDING_ACTIONS_PATH": root / "pending.json",
-            "HISTORY_PATH": root / "history.jsonl",
-            "CONFIG_PATH": root / "config.json",
         }.items():
-            p = patch.object(pe, name, path)
+            p = patch.object(campaign_module, name, path)
             p.start()
             self.addCleanup(p.stop)
+
+        p = patch.object(paths_module, "STATE_DIR", root)
+        p.start()
+        self.addCleanup(p.stop)
+
+        p = patch.object(browser_module, "STATE_DIR", root)
+        p.start()
+        self.addCleanup(p.stop)
+
+        p = patch.object(browser_module, "HISTORY_PATH", root / "history.jsonl")
+        p.start()
+        self.addCleanup(p.stop)
+
+        p = patch.object(config_module, "CONFIG_PATH", root / "config.json")
+        p.start()
+        self.addCleanup(p.stop)
         self.token = pe.ACTION_ACCOUNT.set("design")
         self.addCleanup(pe.ACTION_ACCOUNT.reset, self.token)
         self.day = "2026-09-08"
@@ -96,7 +115,7 @@ class ReliabilityTests(unittest.TestCase):
     def test_uncertain_action_stops_before_browser_connection(self):
         c = self.campaign()
         pe.begin_action(c, c["candidates"][0], "connect")
-        with patch.object(pe, "_connect_campaign_browser") as connect:
+        with patch.object(runner_module, "_connect_campaign_browser") as connect:
             result = pe.run_campaign_schedule(self.day, True)
             self.assertEqual(result["status"], "needs_reconciliation")
             connect.assert_not_called()
@@ -108,10 +127,12 @@ class ReliabilityTests(unittest.TestCase):
         calls = []
         with (
             patch.object(
-                pe, "wait_for_next_batch", side_effect=lambda _: calls.append("wait") or True
+                runner_module,
+                "wait_for_next_batch",
+                side_effect=lambda _: calls.append("wait") or True,
             ),
             patch.object(
-                pe,
+                runner_module,
                 "run_campaign",
                 side_effect=lambda *_: calls.append("run") or {"status": "completed"},
             ),
@@ -134,7 +155,9 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(c["current_batch_number"], 2)
 
     def test_legacy_unscoped_actions_block_instead_of_resetting_quota(self):
-        pe.write_json(pe.LEDGER_PATH, {"events": [{"day": self.day, "action": "connect"}]})
+        pe.write_json(
+            campaign_module.LEDGER_PATH, {"events": [{"day": self.day, "action": "connect"}]}
+        )
         with self.assertRaisesRegex(RuntimeError, "account ownership"):
             pe.reconcile_campaign(self.campaign())
 
@@ -161,9 +184,11 @@ class ReliabilityTests(unittest.TestCase):
         session = Mock()
         session.get_quotas.return_value = {"profile_views_today": 100, "profile_views_limit": 100}
         with (
-            patch.object(pe, "_connect_campaign_browser", return_value=(Mock(), Mock(), session)),
-            patch.object(pe, "collect_sources"),
-            patch.object(pe, "final_action_queue") as queue,
+            patch.object(
+                runner_module, "_connect_campaign_browser", return_value=(Mock(), Mock(), session)
+            ),
+            patch.object(runner_module, "collect_sources"),
+            patch.object(runner_module, "final_action_queue") as queue,
         ):
             result = pe.run_campaign_schedule(self.day, True)
         self.assertEqual(result["status"], "paused_profile_view_limit")
@@ -189,8 +214,10 @@ class ReliabilityTests(unittest.TestCase):
         session = Mock()
         session.send_connection_only.return_value = {"success": False, "status": "failed"}
         with (
-            patch.object(pe, "_connect_campaign_browser", return_value=(Mock(), Mock(), session)),
-            patch.object(pe, "collect_sources"),
+            patch.object(
+                runner_module, "_connect_campaign_browser", return_value=(Mock(), Mock(), session)
+            ),
+            patch.object(runner_module, "collect_sources"),
         ):
             result = pe.run_campaign_schedule(self.day, True)
         self.assertEqual(result["status"], "needs_reconciliation")

@@ -76,6 +76,7 @@ config/  state/  tests/  docs/
    a moved entry point keeps its path or the watcher updates in the same PR.
 4. **Tests migrate with their workflow.**
 5. **Every PR is independently green.** ruff + full test suite + CI before merge.
+6.  **Launcher ownership:** each workflow PR owns every launcher that invokes its workflow. Moving or splitting a workflow means updating its launchers in the same PR — invocation target, and any flags — with each launcher syntax-verified (bash -n) and behavior-verified before that workflow's PR merges.
 
 ## 6. Extraction Order
 
