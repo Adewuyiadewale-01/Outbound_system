@@ -101,7 +101,7 @@ def ensure_obf_diversions(campaign: dict[str, Any], config: dict[str, Any]) -> N
 
 def run_obf_diversion(session: Any, candidate: dict[str, Any]) -> dict[str, Any]:
     """Execute the same diversion primitives OBF uses, without changing outcome."""
-    from linkedin_outreach_session import _run_diversion
+    from outbound.shared.diversion import _run_diversion
 
     activity = {
         "recent_items": [
