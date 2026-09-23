@@ -363,7 +363,7 @@ def _load_queue(
 
 
 def prepare_8_30_session(args: argparse.Namespace) -> dict[str, Any]:
-    from linkedin_outreach_session import _make_prepare_summary_message
+    from outbound.outreach.cli import _make_prepare_summary_message
 
     creds = str(Path(args.creds).expanduser())
     date_value = sheet_date(args.date)
@@ -693,7 +693,7 @@ def prepare_8_30_session(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
-    from linkedin_outreach_session import _make_summary_message
+    from outbound.outreach.cli import _make_summary_message
 
     creds = str(Path(args.creds).expanduser())
     date_value = sheet_date(args.date)
