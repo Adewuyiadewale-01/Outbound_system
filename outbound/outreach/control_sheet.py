@@ -392,7 +392,7 @@ def _update_outreach_control_progress(
 
 def configure_outreach_control(args: argparse.Namespace) -> dict[str, Any]:
     """Update the small set of daily OBF controls exposed by the local dashboard."""
-    from linkedin_outreach_session import _verify_sheet_url_identity
+    from outbound.outreach.runner import _verify_sheet_url_identity
 
     creds = str(Path(args.creds).expanduser())
     date_value = sheet_date(args.date)

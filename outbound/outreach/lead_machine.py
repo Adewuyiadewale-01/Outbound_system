@@ -78,7 +78,7 @@ def _process_outreach_lead_state_machine(
     target: int,
 ) -> str:
     """Run one prospect through inspect -> decide -> act -> report -> divert."""
-    from linkedin_outreach_session import _recover_confirmed_send_sheet_sync
+    from outbound.outreach.runner import _recover_confirmed_send_sheet_sync
 
     timing = _normalize_activity_timing(plan_item.get("activity_log_timing"))
     profile_url = prospect.get("contact_linkedin", "")

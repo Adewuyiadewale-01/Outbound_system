@@ -175,11 +175,8 @@ def _render_first_message_draft(
 
 
 def acceptance_check(args: argparse.Namespace) -> dict[str, Any]:
-    from linkedin_outreach_session import (
-        _make_acceptance_summary_message,
-        _read_json,
-        _verify_sheet_url_identity,
-    )
+    from outbound.outreach.cli import _make_acceptance_summary_message
+    from outbound.outreach.runner import _read_json, _verify_sheet_url_identity
 
     creds = str(Path(args.creds).expanduser())
     date_value = sheet_date(args.date)
