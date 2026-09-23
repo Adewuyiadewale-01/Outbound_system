@@ -160,6 +160,11 @@ from sheets_helper import (  # noqa: E402
     update_row,
 )
 
+from outbound.shared.dates import (  # noqa: F401
+    _parse_date,
+    sequence_date_key,
+    sheet_date,
+)
 from outbound.shared.sheetutils import (  # noqa: F401
     _a1_cell,
     _batch_update_cells,
@@ -173,18 +178,6 @@ from outbound.shared.sheetutils import (  # noqa: F401
     _parse_int,
     _parse_iso_datetime,
 )
-
-
-def _parse_date(value: str) -> date:
-    value = str(value).strip()
-    if not value:
-        return date.today()
-    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y"):
-        try:
-            return datetime.strptime(value, fmt).date()
-        except ValueError:
-            continue
-    raise ValueError(f"Unsupported date format: {value}")
 
 
 def _extract_sheet_id(sheet_url: str) -> str:
@@ -203,11 +196,6 @@ def _verify_sheet_url_identity(actual_url: str, expected_url: str, label: str) -
         )
 
 
-def sheet_date(value: str | None) -> str:
-    parsed = _parse_date(value) if value else date.today()
-    return f"{parsed.month}/{parsed.day}/{parsed.year}"
-
-
 def _is_obf_weekend(date_value: str) -> bool:
     """Return whether an OBF date is Saturday or Sunday.
 
@@ -219,10 +207,6 @@ def _is_obf_weekend(date_value: str) -> bool:
 
 def _weekend_hold_message(date_value: str) -> str:
     return f"OBF is held on weekends ({date_value}); no preparation or outreach is allowed."
-
-
-def sequence_date_key(value: str) -> str:
-    return _parse_date(value).isoformat()
 
 
 def sequence_path(date_value: str) -> Path:
