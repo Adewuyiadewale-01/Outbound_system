@@ -28,6 +28,10 @@ from outbound.engagement.parsing import (
     parse_relative_age_hours,
 )
 from outbound.engagement.paths import HIGH_SIGNAL_PATH, HISTORY_PATH, STATE_DIR
+from outbound.shared.diversion import (
+    generate_lead_diversion_plan,
+    generate_lead_diversion_seconds_plan,
+)
 from outbound.shared.state import now, read_json, write_json
 
 
@@ -73,10 +77,6 @@ def ensure_obf_diversions(campaign: dict[str, Any], config: dict[str, Any]) -> N
     missing = [candidate for candidate in candidates if not candidate.get("obf_diversion")]
     if not missing:
         return
-    from linkedin_outreach_session import (
-        generate_lead_diversion_plan,
-        generate_lead_diversion_seconds_plan,
-    )
 
     slots = [int(candidate["diversion_slot"]) for candidate in candidates]
     kinds = {
@@ -101,7 +101,7 @@ def ensure_obf_diversions(campaign: dict[str, Any], config: dict[str, Any]) -> N
 
 def run_obf_diversion(session: Any, candidate: dict[str, Any]) -> dict[str, Any]:
     """Execute the same diversion primitives OBF uses, without changing outcome."""
-    from linkedin_outreach_session import _run_diversion
+    from outbound.shared.diversion import _run_diversion
 
     activity = {
         "recent_items": [
