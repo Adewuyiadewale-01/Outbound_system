@@ -10,7 +10,6 @@ The runner keeps the cron agent out of low-level decision-making:
 
 import argparse
 import json
-import os
 import random
 import re
 import sys
@@ -27,107 +26,6 @@ load_repo_env()
 HELPERS_DIR = Path(__file__).resolve().parent
 ROOT_DIR = HELPERS_DIR.parent
 sys.path.insert(0, str(ROOT_DIR))
-STATE_DIR = ROOT_DIR / "state" / "outreach_sequences"
-JOURNAL_DIR = ROOT_DIR / "state" / "outreach_journal"
-ACCEPTANCE_STATE_DIR = ROOT_DIR / "state" / "acceptance_monitoring"
-ACCEPTANCE_STATE_FILE = ACCEPTANCE_STATE_DIR / "state.json"
-OUTREACH_WORKERS_CONFIG_PATH = ROOT_DIR / "config" / "outreach_workers.json"
-
-
-def _resolve_default_creds() -> str:
-    """Resolve credentials path, checking workspace symlink as fallback.
-
-    Checks (in order):
-    1. ~/.openclaw/credentials/google-sheets.json  (native Mac terminal)
-    2. <repo_root>/.openclaw/credentials/google-sheets.json  (sandbox via symlink)
-    """
-    native = Path("~/.openclaw/credentials/google-sheets.json").expanduser()
-    if native.exists():
-        return str(native)
-    workspace_fallback = ROOT_DIR / ".openclaw" / "credentials" / "google-sheets.json"
-    if workspace_fallback.exists():
-        return str(workspace_fallback)
-    # Return native path as default — will produce a clear error if missing
-    return str(native)
-
-
-DEFAULT_CREDS = _resolve_default_creds()
-# Operational sheet URLs are intentionally injected at runtime. See .env.example.
-TASK_MANAGER_URL = os.environ.get("TASK_MANAGER_URL", "")
-OBF_SHEET_URL = os.environ.get("OBF_SHEET_URL", "")
-OUTREACH_SEQUENCE_TAB = "Outreach Sequence"
-OUTREACH_CONTROL_TAB = "Outreach Control"
-OUTREACH_CONTROL_HEADERS = [
-    "Date",
-    "Base Target",
-    "Rollover",
-    "Effective Target",
-    "Current Progress",
-    "Status",
-    "Approved",
-    "Prospects Start Row",
-    "Notes",
-]
-OUTREACH_CONTROL_PROSPECTS_START_ROW = "Prospects Start Row"
-OUTREACH_CONTROL_APPROVED_STATUSES = {"approved", "in progress", "partial"}
-OUTREACH_CONTROL_TERMINAL_STATUSES = {"done"}
-
-DEFAULT_TARGET = 30
-DEFAULT_LANE_TARGETS = {"Design": 15, "Automation": 15}
-DEFAULT_LANE_SPLIT_MARKER = "Autonomous lane split: balanced Design / Automation."
-QUEUE_BUFFER_LIMIT = 30
-DAILY_CONN_REQ_LIMIT = 30
-WEEKLY_CONN_REQ_LIMIT = 150
-HARD_STOP_ERRORS = {
-    "captcha",
-    "restriction",
-    "email_verify",
-    "robot_check",
-    "login",
-    "daily_conn_req_limit",
-    "weekly_conn_req_limit",
-    "daily_profile_view_limit",
-}
-NON_FATAL_SEND_ERRORS = {
-    "already_connected",
-    "already_pending",
-    "email_required_to_connect",
-    "no_connect_button",
-    "profile_unavailable",
-    "unknown",
-}
-EMAIL_REQUIRED_TO_CONNECT = "email_required_to_connect"
-OUTREACH_STATUS_REQUIRES_EMAIL = "Requires email"
-MAX_SAME_SEND_ERROR_STREAK = 2
-MAX_CONSECUTIVE_SEND_FAILURES = 3
-MAX_SAME_BROWSER_ERROR_STREAK = 3
-MAX_BROWSER_RECOVERY_ATTEMPTS = 2
-CDP_HEALTH_EVAL_TIMEOUT_SEC = 5
-FAILURE_BACKOFF_MIN_SEC = 20
-FAILURE_BACKOFF_MAX_SEC = 45
-NO_CONNECT_BUTTON_RETRIES = 3
-NO_CONNECT_BUTTON_RETRY_MIN_SEC = 15
-NO_CONNECT_BUTTON_RETRY_MAX_SEC = 35
-PROFILE_UNKNOWN_RETRIES = 1
-PROFILE_UNKNOWN_RETRY_MIN_SEC = 2
-PROFILE_UNKNOWN_RETRY_MAX_SEC = 5
-ACTIVITY_READ_TIMEOUT_SEC = 30
-RETRYABLE_CONNECT_ERRORS = {
-    "activity_load_timeout",
-    "connect_page_not_ready",
-    "no_connect_button",
-    "connect_button_not_clickable",
-    "profile_load_timeout",
-    "send_modal_not_ready",
-}
-PROFILE_UI_GUARD_ERRORS = {
-    "profile_load_timeout",
-    "more_menu_unreadable",
-    "connect_page_not_ready",
-    "connect_button_not_clickable",
-    "send_modal_not_ready",
-    "send_without_note_not_ready",
-}
 
 sys.path.insert(0, str(HELPERS_DIR))
 
@@ -160,6 +58,51 @@ from sheets_helper import (  # noqa: E402
     update_row,
 )
 
+from outbound.outreach.paths import (  # noqa: F401
+    ACCEPTANCE_STATE_DIR,
+    ACCEPTANCE_STATE_FILE,
+    DEFAULT_CREDS,
+    JOURNAL_DIR,
+    OBF_SHEET_URL,
+    OUTREACH_WORKERS_CONFIG_PATH,
+    STATE_DIR,
+    TASK_MANAGER_URL,
+    _resolve_default_creds,
+)
+from outbound.outreach.policy import (  # noqa: F401
+    ACTIVITY_READ_TIMEOUT_SEC,
+    CDP_HEALTH_EVAL_TIMEOUT_SEC,
+    DAILY_CONN_REQ_LIMIT,
+    DEFAULT_LANE_SPLIT_MARKER,
+    DEFAULT_LANE_TARGETS,
+    DEFAULT_TARGET,
+    EMAIL_REQUIRED_TO_CONNECT,
+    FAILURE_BACKOFF_MAX_SEC,
+    FAILURE_BACKOFF_MIN_SEC,
+    HARD_STOP_ERRORS,
+    MAX_BROWSER_RECOVERY_ATTEMPTS,
+    MAX_CONSECUTIVE_SEND_FAILURES,
+    MAX_SAME_BROWSER_ERROR_STREAK,
+    MAX_SAME_SEND_ERROR_STREAK,
+    NO_CONNECT_BUTTON_RETRIES,
+    NO_CONNECT_BUTTON_RETRY_MAX_SEC,
+    NO_CONNECT_BUTTON_RETRY_MIN_SEC,
+    NON_FATAL_SEND_ERRORS,
+    OUTREACH_CONTROL_APPROVED_STATUSES,
+    OUTREACH_CONTROL_HEADERS,
+    OUTREACH_CONTROL_PROSPECTS_START_ROW,
+    OUTREACH_CONTROL_TAB,
+    OUTREACH_CONTROL_TERMINAL_STATUSES,
+    OUTREACH_SEQUENCE_TAB,
+    OUTREACH_STATUS_REQUIRES_EMAIL,
+    PROFILE_UI_GUARD_ERRORS,
+    PROFILE_UNKNOWN_RETRIES,
+    PROFILE_UNKNOWN_RETRY_MAX_SEC,
+    PROFILE_UNKNOWN_RETRY_MIN_SEC,
+    QUEUE_BUFFER_LIMIT,
+    RETRYABLE_CONNECT_ERRORS,
+    WEEKLY_CONN_REQ_LIMIT,
+)
 from outbound.shared.dates import (  # noqa: F401
     _parse_date,
     sequence_date_key,
