@@ -448,12 +448,16 @@ def collect_sources(cdp: Any, campaign: dict[str, Any], config: dict[str, Any]) 
             save_campaign(campaign)
             continue
         expected = int(result.get("expected") or 0)
+        collection_cap = int(config.get("source_collection_cap", 200))
+        effective_target = min(expected, collection_cap) if expected else collection_cap
         found: dict[str, dict[str, Any]] = {}
         stagnant = 0
         passes = 0
+        retry_rounds = 0
+        max_retry_rounds = 3
         stop_reason = "pass_limit"
         collection_error = ""
-        while passes < 160 and stagnant < 5:
+        while passes < 160:
             passes += 1
             snapshot = _evaluate_json(cdp, SOURCE_REACTOR_SNAPSHOT_JS, timeout=12)
             if not snapshot.get("success"):
@@ -467,9 +471,20 @@ def collect_sources(cdp: Any, campaign: dict[str, Any], config: dict[str, Any]) 
                     found[url] = {"url": url, "name": profile.get("name", "")}
             stagnant = stagnant + 1 if len(found) == before else 0
             expected = expected or int(snapshot.get("expected") or 0)
-            if expected and len(found) >= expected:
-                stop_reason = "exhausted"
+            effective_target = min(expected, collection_cap) if expected else collection_cap
+            if len(found) >= effective_target:
+                stop_reason = "cap_reached" if expected > collection_cap else "exhausted"
                 break
+            # Stagnation handling: pause and retry instead of giving up
+            if stagnant >= 5:
+                retry_rounds += 1
+                if retry_rounds >= max_retry_rounds:
+                    stop_reason = "stagnant"
+                    break
+                # Back off for 15-25 seconds, then resume scrolling
+                time.sleep(random.uniform(15, 25))
+                stagnant = 0
+                continue
             rect = snapshot.get("scroller") or {}
             # The modal shell can report a valid dialog for a few hundred ms
             # before LinkedIn mounts its virtualized scroll container. Do not
@@ -481,7 +496,9 @@ def collect_sources(cdp: Any, campaign: dict[str, Any], config: dict[str, Any]) 
             y = float(rect.get("top", 0)) + float(rect.get("height", 0)) / 2
             try:
                 cdp.send(
-                    "Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y}, timeout=8
+                    "Input.dispatchMouseEvent",
+                    {"type": "mouseMoved", "x": x, "y": y},
+                    timeout=8,
                 )
                 cdp.send(
                     "Input.dispatchMouseEvent",
@@ -499,21 +516,25 @@ def collect_sources(cdp: Any, campaign: dict[str, Any], config: dict[str, Any]) 
                 stop_reason = "scroll_error"
                 break
             time.sleep(min(3, 0.7 + stagnant * 0.5))
-        if stagnant >= 5:
+        if stagnant >= 5 and stop_reason == "pass_limit":
             stop_reason = "stagnant"
+        coverage = len(found) / effective_target if effective_target else 0
         source.update(
             stop_reason=stop_reason,
             extraction_error=collection_error,
             passes=passes,
             stagnant_passes=stagnant,
+            retry_rounds=retry_rounds,
         )
         result.update(
             profiles=list(found.values()),
             profiles_collected=len(found),
-            coverage=(len(found) / expected if expected else 0),
+            coverage=coverage,
             expected=expected,
+            effective_target=effective_target,
             passes=passes,
             stagnant_passes=stagnant,
+            retry_rounds=retry_rounds,
         )
         try:
             _evaluate_json(
@@ -547,33 +568,34 @@ def collect_sources(cdp: Any, campaign: dict[str, Any], config: dict[str, Any]) 
             )
             save_campaign(campaign)
             continue
+        coverage = round(float(result.get("coverage", 0)), 4)
+        is_collected = coverage >= float(config["reactor_min_coverage"])
         source.update(
             resolved_url=result.get("resolved_url", ""),
             source_timestamp=result.get("source_timestamp", ""),
             source_age_hours=source_age,
             reaction_count=result.get("expected", 0),
             profiles_collected=result.get("profiles_collected", 0),
-            coverage=round(float(result.get("coverage", 0)), 4),
-            status="collected"
-            if float(result.get("coverage", 0)) >= float(config["reactor_min_coverage"])
-            else "partial",
+            coverage=coverage,
+            status="collected" if is_collected else "rejected_partial",
         )
-        for profile in result.get("profiles", []):
-            url = canonical_profile_url(profile.get("url", ""))
-            if not url or url in known:
-                continue
-            known.add(url)
-            campaign["candidates"].append(
-                {
-                    "profile_url": url,
-                    "name": profile.get("name", ""),
-                    "source_post": source.get("resolved_url") or source["submitted_url"],
-                    "status": "discovered",
-                    "attempts": 0,
-                    "likes_assigned": choose_like_target(campaign["day"], url, config),
-                    "likes_completed": 0,
-                }
-            )
+        if is_collected:
+            for profile in result.get("profiles", []):
+                url = canonical_profile_url(profile.get("url", ""))
+                if not url or url in known:
+                    continue
+                known.add(url)
+                campaign["candidates"].append(
+                    {
+                        "profile_url": url,
+                        "name": profile.get("name", ""),
+                        "source_post": source.get("resolved_url") or source["submitted_url"],
+                        "status": "discovered",
+                        "attempts": 0,
+                        "likes_assigned": choose_like_target(campaign["day"], url, config),
+                        "likes_completed": 0,
+                    }
+                )
         save_campaign(campaign)
 
 
@@ -625,8 +647,12 @@ def inspect_candidate(
     gate = _evaluate_json(cdp, PROFILE_GATE_JS)
     validate_profile_gate(gate)
     followers = parse_follower_count(gate.get("follower_text", ""))
+    resolved_profile_url = (
+        canonical_profile_url(gate.get("page_url") or "") or candidate["profile_url"]
+    )
     candidate.update(
         gate,
+        profile_url=resolved_profile_url,
         follower_count=followers,
         profile_parser_version=PROFILE_PARSER_VERSION,
         profile_assessed_at=now().isoformat(),

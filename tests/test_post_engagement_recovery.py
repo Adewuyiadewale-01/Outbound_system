@@ -57,7 +57,7 @@ class RecoveryTests(unittest.TestCase):
 
         responses = (
             [{"success": True, "expected": 100}, snapshot(90), snapshot(97)]
-            + [snapshot(97)] * 5
+            + [snapshot(97)] * 15
             + [True]
         )
         campaign = {
@@ -75,6 +75,7 @@ class RecoveryTests(unittest.TestCase):
         source = campaign["sources"][0]
         self.assertEqual(source["profiles_collected"], 97)
         self.assertEqual(source["stop_reason"], "stagnant")
+        self.assertEqual(source["retry_rounds"], 3)
         self.assertEqual(source["stagnant_passes"], 5)
         self.assertEqual(source["status"], "collected")
 

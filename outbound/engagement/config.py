@@ -25,6 +25,7 @@ DEFAULT_CONFIG = {
     "post_threshold": 3,
     "follower_connection_limit": 5000,
     "reactor_min_coverage": 0.9,
+    "source_collection_cap": 200,
     "source_collection_max_attempts": 3,
     "max_attempts": 4,
     "source_max_age_days": 5,
