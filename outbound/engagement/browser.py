@@ -669,17 +669,30 @@ def inspect_candidate(
             execution_event(campaign, candidate, action="Opening activity", method="DOM", reason="")
         navigation = _open_profile_activity_from_profile(cdp)
         destination = (
-            _wait_for_activity_destination(
-                cdp, candidate["profile_url"].rstrip("/"), "posts", timeout=8
-            )
+            _wait_for_activity_destination(cdp, candidate["profile_url"].rstrip("/"), "posts")
             if navigation.get("clicked")
             else {}
         )
         feed = _wait_for_activity_feed_state(cdp, timeout=15) if destination.get("arrived") else {}
-        if not destination.get("arrived") or not feed.get("ready"):
+        if destination.get("arrived") and feed.get("ready"):
+            candidate["posts_navigation"] = {"via": "selector_based", "feed_readiness": feed}
+            cdp.post_engagement_navigation = [{"feed_readiness": feed}]
+        elif not destination.get("arrived"):
+            # Late-arrival insurance: the click may have landed after the
+            # destination wait expired. Check the actual page state before
+            # falling back to direct URL navigation.
+            feed = _wait_for_activity_feed_state(cdp, timeout=5)
+            if feed.get("ready"):
+                candidate["posts_navigation"] = {
+                    "via": "selector_based_late_arrival",
+                    "destination": destination,
+                    "feed_readiness": feed,
+                }
+                cdp.post_engagement_navigation = [{"feed_readiness": feed, "late_arrival": True}]
+            else:
+                raise RuntimeError("Activity click did not reach a ready posts feed")
+        else:
             raise RuntimeError("Activity click did not reach a ready posts feed")
-        candidate["posts_navigation"] = {"via": "selector_based", "feed_readiness": feed}
-        cdp.post_engagement_navigation = [{"feed_readiness": feed}]
     except (RuntimeError, TimeoutError) as error:
         if campaign is not None:
             execution_event(

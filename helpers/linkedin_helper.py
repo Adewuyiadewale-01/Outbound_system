@@ -2643,13 +2643,24 @@ def _wait_for_activity_destination(
     cdp: CDPConnection,
     profile_base: str,
     tab_key: str,
-    timeout: float = 8.0,
+    timeout: float = 16.0,
     poll_interval: float = 0.35,
 ) -> dict[str, Any]:
-    """Wait until async navigation reaches the requested activity tab or a hard invalid page."""
+    """Wait until async navigation reaches the requested activity tab or a hard invalid page.
+
+    LinkedIn's SPA router passes through a transitional /preload/ URL while
+    fetching the activity feed. That phase is navigation-in-progress, not a
+    failed arrival — it neither matches the destination nor counts against
+    the timeout budget. Only non-transit time consumes the deadline.
+    """
     started = time.time()
     last_url = ""
-    while time.time() - started < max(0.5, timeout):
+    transit_seconds = 0.0
+
+    def effective_elapsed() -> float:
+        return time.time() - started - transit_seconds
+
+    while True:
         invalid = _activity_invalid_result(cdp)
         if invalid:
             return {
@@ -2657,6 +2668,7 @@ def _wait_for_activity_destination(
                 "invalid": invalid,
                 "url": invalid.get("url", ""),
                 "elapsed_sec": round(time.time() - started, 2),
+                "transit_sec": round(transit_seconds, 2),
             }
         try:
             last_url = str(cdp.evaluate("window.location.href", timeout=5) or "")
@@ -2667,20 +2679,32 @@ def _wait_for_activity_destination(
                 "error": str(exc),
                 "url": last_url,
                 "elapsed_sec": round(time.time() - started, 2),
+                "transit_sec": round(transit_seconds, 2),
             }
         if _activity_destination_matches(last_url, profile_base, tab_key):
             return {
                 "arrived": True,
                 "url": last_url,
                 "elapsed_sec": round(time.time() - started, 2),
+                "transit_sec": round(transit_seconds, 2),
             }
-        time.sleep(min(max(0.05, poll_interval), max(0.05, timeout - (time.time() - started))))
-    return {
-        "arrived": False,
-        "reason": "activity_destination_not_reached",
-        "url": last_url,
-        "elapsed_sec": round(time.time() - started, 2),
-    }
+        if "/preload/" in last_url:
+            # Navigation in progress: the click is being honored, the SPA
+            # router just hasn't swapped the URL yet. Wait without burning
+            # the arrival budget.
+            time.sleep(poll_interval)
+            transit_seconds += poll_interval
+            continue
+        if effective_elapsed() >= max(0.5, timeout):
+            return {
+                "arrived": False,
+                "reason": "activity_destination_not_reached",
+                "url": last_url,
+                "elapsed_sec": round(time.time() - started, 2),
+                "transit_sec": round(transit_seconds, 2),
+            }
+        remaining = max(0.05, timeout - effective_elapsed())
+        time.sleep(min(max(0.05, poll_interval), remaining))
 
 
 def _activity_invalid_result(cdp: CDPConnection) -> dict[str, Any] | None:
