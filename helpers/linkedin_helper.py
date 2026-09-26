@@ -2639,6 +2639,20 @@ def _activity_destination_matches(current_url: str, profile_base: str, tab_key: 
     return path == expected
 
 
+def _page_still_loading(cdp: CDPConnection) -> bool:
+    """True when the page reports active loading or in-flight resource fetches."""
+    try:
+        raw = cdp.evaluate(
+            "JSON.stringify({rs: document.readyState, "
+            "pending: performance.getEntriesByType('resource').filter(r => !r.responseEnd).length})",
+            timeout=5,
+        )
+        state = json.loads(raw) if raw else {}
+        return state.get("rs") == "loading" or int(state.get("pending", 0) or 0) > 2
+    except Exception:
+        return False
+
+
 def _wait_for_activity_destination(
     cdp: CDPConnection,
     profile_base: str,
@@ -2692,6 +2706,13 @@ def _wait_for_activity_destination(
             # Navigation in progress: the click is being honored, the SPA
             # router just hasn't swapped the URL yet. Wait without burning
             # the arrival budget.
+            time.sleep(poll_interval)
+            transit_seconds += poll_interval
+            continue
+        if _page_still_loading(cdp):
+            # Circumstantial grace: the page reports active loading or pending
+            # network fetches. A fixed budget is unfair to slow networks —
+            # wait without counting, same as transit.
             time.sleep(poll_interval)
             transit_seconds += poll_interval
             continue

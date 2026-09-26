@@ -635,6 +635,34 @@ def review_recent_activity(cdp: Any, simulator: Any) -> dict[str, int]:
     return {"before": before, "furthest": int(furthest.get("scrollTop", 0) or 0)}
 
 
+def _human_scroll_to_activity_link(cdp: Any) -> None:
+    """Scroll gradually to the 'Show all posts' link like a human reader.
+
+    Real users generate scroll events with pauses on their way to a link
+    2000+ px down the page; a single programmatic jump is a bot signature.
+    Gradual scrolling also triggers the profile's lazy-loaded sections.
+    """
+    scroll_js = r"""(() => {
+        const link = document.querySelector('a[aria-label="Show all posts"], a[href*="/recent-activity/"]');
+        if (!link) return JSON.stringify({found: false});
+        const rect = link.getBoundingClientRect();
+        return JSON.stringify({found: true, targetY: Math.round(window.scrollY + rect.top - 200)});
+    })()"""
+    try:
+        target = json.loads(cdp.evaluate(scroll_js, timeout=5))
+    except Exception:
+        target = {"found": False}
+    if not target.get("found"):
+        return
+    current = 0
+    goal = int(target.get("targetY", 0))
+    while current < goal:
+        step = random.randint(300, 600)
+        current = min(current + step, goal)
+        cdp.evaluate(f"window.scrollTo(0, {current})", timeout=5)
+        time.sleep(random.uniform(0.4, 1.1))
+
+
 def inspect_candidate(
     cdp: Any, simulator: Any, candidate: dict[str, Any], config: dict[str, Any]
 ) -> None:
@@ -667,16 +695,62 @@ def inspect_candidate(
     try:
         if campaign is not None:
             execution_event(campaign, candidate, action="Opening activity", method="DOM", reason="")
+        # Human-paced profile engagement, fully instrumented: dwell like a
+        # reader, scroll gradually to the activity link (never click 2000px
+        # down without scrolling), click, then re-navigate after arrival to
+        # force top-frame rendering (LinkedIn's SPA click renders the feed
+        # inside a preload frame; the top frame stays a shell).
+        t_phase = time.time()
+        time.sleep(random.uniform(3.0, 10.0))
+        dwell_sec = round(time.time() - t_phase, 1)
+
+        t_phase = time.time()
+        _human_scroll_to_activity_link(cdp)
+        scroll_sec = round(time.time() - t_phase, 1)
+
+        t_phase = time.time()
         navigation = _open_profile_activity_from_profile(cdp)
+        click_sec = round(time.time() - t_phase, 1)
+
+        t_phase = time.time()
         destination = (
             _wait_for_activity_destination(cdp, candidate["profile_url"].rstrip("/"), "posts")
             if navigation.get("clicked")
             else {}
         )
+        transit_sec = round(time.time() - t_phase, 1)
+        candidate["navigation_timings"] = {
+            "profile_dwell_sec": dwell_sec,
+            "scroll_to_link_sec": scroll_sec,
+            "click_sec": click_sec,
+            "spa_transit_sec": transit_sec,
+            "destination_transit_reported": destination.get("transit_sec"),
+        }
+        if destination.get("arrived"):
+            t_phase = time.time()
+            time.sleep(random.uniform(2.0, 7.0))
+            _navigate(cdp, destination["url"])
+            candidate["navigation_timings"]["renavigate_sec"] = round(time.time() - t_phase, 1)
+
+        t_phase = time.time()
         feed = _wait_for_activity_feed_state(cdp, timeout=15) if destination.get("arrived") else {}
+        if destination.get("arrived"):
+            candidate["navigation_timings"]["feed_check_sec"] = round(time.time() - t_phase, 1)
+
         if destination.get("arrived") and feed.get("ready"):
-            candidate["posts_navigation"] = {"via": "selector_based", "feed_readiness": feed}
-            cdp.post_engagement_navigation = [{"feed_readiness": feed}]
+            candidate["posts_navigation"] = {
+                "via": "selector_based_renavigation",
+                "feed_readiness": feed,
+            }
+            candidate["navigation_timings"]["total_navigation_sec"] = round(
+                sum(
+                    v
+                    for v in candidate["navigation_timings"].values()
+                    if isinstance(v, (int, float))
+                ),
+                1,
+            )
+            cdp.post_engagement_navigation = [{"feed_readiness": feed, "renavigated": True}]
         elif not destination.get("arrived"):
             # Late-arrival insurance: the click may have landed after the
             # destination wait expired. Check the actual page state before
@@ -703,7 +777,13 @@ def inspect_candidate(
                 reason=str(error),
             )
         _navigate(cdp, candidate["profile_url"].rstrip("/") + "/recent-activity/all/")
-        candidate["posts_navigation"] = {"via": "direct_url_fallback", "reason": str(error)}
+        candidate["posts_navigation"] = {
+            "via": "direct_url_fallback",
+            "reason": str(error),
+            "destination": locals().get("destination"),
+            "navigation": locals().get("navigation"),
+            "feed": locals().get("feed"),
+        }
     candidate["activity_review"] = review_recent_activity(cdp, simulator)
     posts = _evaluate_json(cdp, POST_CARDS_JS)
     if not posts:
