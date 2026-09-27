@@ -5,7 +5,6 @@ import argparse
 import json
 import os
 import random
-import re
 import sys
 import time
 from collections.abc import Callable, Sequence
@@ -25,7 +24,6 @@ for _path in (str(HELPERS), str(ROOT), str(SCRIPTS)):
 # --- activity_check carve: shim re-exports (appended per slice) ---
 from linkedin_helper import (  # noqa: E402
     LinkedInSession,
-    canonicalize_linkedin_profile_url,
     relative_days_from_time_text,
 )
 from linkedin_outreach_session import (  # noqa: E402
@@ -78,6 +76,18 @@ from outbound.activity_check.config import (  # noqa: F401
     SKIP_ACTIVITY_REASONS,
     STATE_DIR,
 )
+from outbound.activity_check.text import (  # noqa: F401
+    _parse_positive_int,
+    canonical_linkedin_profile_url,
+    clean_text,
+    is_linkedin_profile_url,
+    navigation_type_key,
+    normalize_activity_value,
+    normalize_navigation_type,
+    normalize_url,
+    normalized_profile_key,
+    target_key,
+)
 
 load_repo_env()
 
@@ -86,17 +96,6 @@ load_repo_env()
 # CDP is reachable, but the app never hydrates. That is a per-profile/page load
 # problem, not a reason to kill the whole activity lane.
 PENDING_404_STATUS = "retry_pending_404"
-
-
-def clean_text(value: Any) -> str:
-    return re.sub(r"\s+", " ", str(value or "").strip())
-
-
-def _parse_positive_int(value: Any, default: int = 0) -> int:
-    try:
-        return max(0, int(value))
-    except (TypeError, ValueError):
-        return default
 
 
 def next_activity_retry_record(
@@ -173,32 +172,6 @@ def persist_terminal_activity_issue(
         clean_text(batch.get("status")) or "activity_in_progress",
         activity_issues=issues,
     )
-
-
-def normalize_url(value: Any) -> str:
-    raw = clean_text(value).replace(" ", "")
-    if not raw:
-        return ""
-    if raw.startswith("//"):
-        raw = "https:" + raw
-    if raw.startswith("www."):
-        raw = "https://" + raw
-    if raw.startswith("linkedin.com"):
-        raw = "https://www." + raw
-    return raw
-
-
-def is_linkedin_profile_url(value: Any) -> bool:
-    return bool(canonical_linkedin_profile_url(value))
-
-
-def normalized_profile_key(value: Any) -> str:
-    return canonical_linkedin_profile_url(value).lower()
-
-
-def canonical_linkedin_profile_url(value: Any) -> str:
-    """Use one neutral LinkedIn profile URL at prep and execution boundaries."""
-    return canonicalize_linkedin_profile_url(value)
 
 
 def activity_session_path(date_value: str) -> Path:
@@ -411,31 +384,6 @@ def set_person(row: dict[str, Any], prefix: str, person: dict[str, str]) -> None
     row[f"{prefix} LinkedIn"] = normalize_url(person.get("linkedin"))
     row[f"{prefix} Email"] = clean_text(person.get("email"))
     row[f"{prefix} Activity"] = normalize_activity_value(person.get("activity", ""))
-
-
-def normalize_activity_value(value: Any) -> str:
-    text = clean_text(value)
-    return text if text in ACTIVITY_VALUES else ""
-
-
-def normalize_navigation_type(value: Any) -> str:
-    text = clean_text(value).lower().replace("_", " ").replace("-", " ")
-    if text in {"selector based", "selector", "click through", "clickthrough"}:
-        return "Selector-based"
-    if text in {"direct url", "direct", "url"}:
-        return "Direct Url"
-    return "Direct Url"
-
-
-def navigation_type_key(value: Any) -> str:
-    return (
-        "selector_based" if normalize_navigation_type(value) == "Selector-based" else "direct_url"
-    )
-
-
-def target_key(row: dict[str, Any], prefix: str) -> str:
-    lead_id = clean_text(row.get("ID")) or f"row:{row.get('_row_number')}"
-    return f"{lead_id}:{prefix}"
 
 
 def extract_targets(
