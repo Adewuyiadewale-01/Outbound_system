@@ -323,7 +323,9 @@ def _connect_campaign_browser(
 
 def _navigate(cdp: Any, url: str, settle: float | None = None) -> None:
     """Use the shared readiness checks; deadlines are ceilings, not sleeps."""
-    from linkedin_helper import _wait_for_activity_feed_state, _wait_for_linkedin_ready
+    from linkedin_helper import _wait_for_activity_feed_state
+
+    from outbound.shared.browser.readiness import _wait_for_linkedin_ready
 
     activity = "/recent-activity/" in url
     selector = (
