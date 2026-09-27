@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""
-Lead executive research workflow.
+"""Compatibility entry point for the lead executive research workflow.
 
-Reads grouped company/employee rows from a Google Sheet, creates a structured
-local JSON run file, searches for top executives without paid APIs, reconciles
-LinkedIn URLs against existing employee rows, and writes finalized P1/P2 rows
-to a Prospects-style destination tab.
+All logic lives under outbound/leads/* (the leads carve — see docs/CARVE-LEADS.md).
+This file preserves the historical invocation surface — path, CLI, and module
+import — for its consumers (sibling scripts, tests, and the activity_check bridge).
+
+    python3 scripts/lead_exec_research.py --help
 """
 
 import sys
