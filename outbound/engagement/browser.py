@@ -298,10 +298,9 @@ POST_CARDS_JS = r"""
 def _connect_campaign_browser(
     campaign: dict[str, Any], config: dict[str, Any], execute: bool
 ) -> Any:
-    from linkedin_helper import LinkedInSession
-
     from outbound.shared.browser.stealth import inject_stealth
     from outbound.shared.human.simulator import HumanSimulator
+    from outbound.shared.session.manager import LinkedInSession
 
     endpoint = CDP_ACCOUNTS[config["cdp_account"]]
     os.environ["LINKEDIN_CDP_HOST"] = endpoint["host"]

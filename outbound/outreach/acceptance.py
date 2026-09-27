@@ -251,7 +251,7 @@ def acceptance_check(args: argparse.Namespace) -> dict[str, Any]:
             live_acceptances = mock_acceptances.get("acceptances", mock_acceptances)
             result["checked_sources"].append("connections_mock")
         else:
-            from linkedin_helper import LinkedInSession
+            from outbound.shared.session.manager import LinkedInSession
 
             session = LinkedInSession()
             connect_result = session.connect(skip_rate_check=True)

@@ -330,7 +330,7 @@ def _load_quotas(mock_quotas: dict[str, Any] | None, dry_run: bool) -> dict[str,
             "conn_req_week_limit": WEEKLY_CONN_REQ_LIMIT,
             "profile_views_today": 0,
         }
-    from linkedin_helper import LinkedInSession
+    from outbound.shared.session.manager import LinkedInSession
 
     return LinkedInSession().get_quotas()
 
@@ -1010,7 +1010,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         result["summary_message"] = _make_summary_message(result)
         return result
 
-    from linkedin_helper import LinkedInSession
+    from outbound.shared.session.manager import LinkedInSession
 
     session = LinkedInSession()
     connect_result = session.connect(
