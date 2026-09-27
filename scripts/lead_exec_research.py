@@ -40,7 +40,7 @@ from lead_research_archive import (  # noqa: E402
     has_reusable_research,
     hydrate_computation_lead,
 )
-from prefinal_queue import enqueue_batch, record_prefinal_publish, rows_fingerprint  # noqa: E402
+from prefinal_queue import rows_fingerprint  # noqa: E402
 from runtime_environment import load_repo_env  # noqa: E402
 from sheets_helper import (  # noqa: E402
     format_sheet_date,
@@ -90,6 +90,18 @@ from outbound.leads.config import (  # noqa: F401
     SOURCE_COLUMNS,
     STATE_DIR,
 )
+from outbound.leads.destination import (  # noqa: F401
+    build_destination_row,
+    build_destination_row_from_computation,
+    choose_people,
+    computation_rows_for_write,
+    filter_ready_prefinal_rows,
+    prefinal_row_readiness,
+    select_computation_people,
+    verify_destination_rows,
+    write_computation_rows,
+    write_destination_rows,
+)
 from outbound.leads.extract import (  # noqa: F401
     employee_role_score,
     extract_exec_candidates,
@@ -109,6 +121,26 @@ from outbound.leads.grouping import (  # noqa: F401
     group_source_rows,
     looks_like_company_row,
     looks_like_employee_row,
+)
+from outbound.leads.runs import (  # noqa: F401
+    apply_review_slice,
+    approval_gate_enabled,
+    archive_index_path,
+    computation_fingerprint,
+    destination_sheet_url,
+    ensure_dirs,
+    latest_computation_file,
+    latest_computation_file_for_fingerprint,
+    latest_review_run_file,
+    latest_run_file,
+    latest_search_result_file,
+    lead_id_fingerprint,
+    load_run,
+    now_run_id,
+    parse_review_slice,
+    resolve_ignore_review_approval,
+    save_run,
+    source_sheet_url,
 )
 from outbound.leads.search import (  # noqa: F401
     SearchClient,
@@ -146,164 +178,6 @@ from outbound.leads.text import (  # noqa: F401
 )
 
 load_repo_env()
-
-
-def now_run_id() -> str:
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
-
-
-def ensure_dirs() -> None:
-    RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
-    COMPUTATIONS_DIR.mkdir(parents=True, exist_ok=True)
-    PROMPTS_DIR.mkdir(parents=True, exist_ok=True)
-    SEARCH_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    SEARCH_TASKS_DIR.mkdir(parents=True, exist_ok=True)
-    BRIDGES_DIR.mkdir(parents=True, exist_ok=True)
-    RESEARCH_ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def approval_gate_enabled() -> bool:
-    """Read the shared Lead Prep setting without making processing depend on the UI."""
-    try:
-        payload = json.loads(LEAD_PREP_CONFIG_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
-    return bool(payload.get("approval_gate_enabled", False))
-
-
-def resolve_ignore_review_approval(args: argparse.Namespace) -> bool:
-    """Respect an explicit CLI choice, otherwise use the dashboard configuration."""
-    requested = getattr(args, "ignore_review_approval", None)
-    if requested is not None:
-        return bool(requested)
-    return not approval_gate_enabled()
-
-
-def choose_people(finalized_execs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    with_urls = [item for item in finalized_execs if item.get("linkedin")]
-    without_urls = [item for item in finalized_execs if not item.get("linkedin")]
-    ordered = sorted(with_urls, key=lambda item: item.get("confidence", 0), reverse=True)
-    ordered.extend(sorted(without_urls, key=lambda item: item.get("confidence", 0), reverse=True))
-    return ordered[:3]
-
-
-def build_destination_row(group: dict[str, Any]) -> dict[str, Any]:
-    selected = choose_people(group.get("finalized_execs", []))
-    row = {
-        "ID": group.get("id", ""),
-        "Company": group.get("company", {}).get("name", ""),
-        "Website": group.get("company", {}).get("website", ""),
-        "Company LinkedIn": group.get("company", {}).get("linkedin", ""),
-        "Emp Count": group.get("company", {}).get("employee_count")
-        or len(group.get("employees_from_sheet", [])),
-        "Source Tab": group.get("company", {}).get("class") or group.get("source_tab", ""),
-        "Primary Lane": group.get("primary_lane", ""),
-        "Use": group.get("review_use", ""),
-    }
-    for idx, person in enumerate(selected, start=1):
-        row[f"P{idx} Name"] = person.get("name", "")
-        row[f"P{idx} Title"] = person.get("role", "")
-        row[f"P{idx} LinkedIn"] = person.get("linkedin", "")
-        row[f"P{idx} Email"] = person.get("email", "")
-    return row
-
-
-def build_destination_row_from_computation(lead: dict[str, Any]) -> dict[str, Any]:
-    stored_executives = lead.get("executives", [])
-    executives = (
-        stored_executives[:3]
-        if any(
-            executive.get("research_source") == "manual_dashboard"
-            for executive in stored_executives
-        )
-        else select_computation_people(stored_executives)
-    )
-    row = {
-        "ID": lead.get("lead_id", ""),
-        "Company": lead.get("company", ""),
-        "Website": lead.get("website", ""),
-        "Company LinkedIn": lead.get("company_linkedin", ""),
-        "Emp Count": lead.get("emp_count", ""),
-        "Source Tab": lead.get("source_tab", ""),
-        "Primary Lane": lead.get("primary_lane", ""),
-        "Use": lead.get("use", ""),
-    }
-    for idx, executive in enumerate(executives, start=1):
-        row[f"P{idx} Name"] = executive.get("name", "")
-        row[f"P{idx} Title"] = executive.get("title", "")
-        row[f"P{idx} LinkedIn"] = executive.get("linkedin_url", "")
-        row[f"P{idx} Email"] = executive.get("email", "")
-    return row
-
-
-def select_computation_people(executives: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    indexed = list(enumerate(executives))
-    indexed.sort(
-        key=lambda item: (
-            0 if is_linkedin_profile_url(item[1].get("linkedin_url", "")) else 1,
-            -seniority_score(item[1]),
-            item[0],
-        )
-    )
-    return [item for _, item in indexed[:3]]
-
-
-def prefinal_row_readiness(row: dict[str, Any], require_p2: bool = False) -> tuple[bool, list[str]]:
-    reasons = []
-    for column in ("ID", "Company", "Website"):
-        if not clean_text(row.get(column)):
-            reasons.append(f"missing_{normalize_key(column).replace(' ', '_')}")
-    if not clean_text(row.get("P1 Name")):
-        reasons.append("missing_p1_name")
-    if not clean_text(row.get("P1 LinkedIn")):
-        reasons.append("missing_p1_linkedin")
-    elif not is_linkedin_profile_url(row.get("P1 LinkedIn", "")):
-        reasons.append("invalid_p1_linkedin")
-    if require_p2:
-        if not clean_text(row.get("P2 Name")):
-            reasons.append("missing_p2_name")
-        if not clean_text(row.get("P2 LinkedIn")):
-            reasons.append("missing_p2_linkedin")
-        elif not is_linkedin_profile_url(row.get("P2 LinkedIn", "")):
-            reasons.append("invalid_p2_linkedin")
-    return not reasons, reasons
-
-
-def filter_ready_prefinal_rows(
-    rows: list[dict[str, Any]],
-    require_p2: bool = False,
-    include_unresolved: bool = False,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    ready = []
-    skipped = []
-    for row in rows:
-        ok, reasons = prefinal_row_readiness(row, require_p2=require_p2)
-        if ok or include_unresolved:
-            ready.append(row)
-        else:
-            skipped.append(
-                {
-                    "lead_id": clean_text(row.get("ID")),
-                    "company": clean_text(row.get("Company")),
-                    "reasons": reasons,
-                }
-            )
-    return ready, skipped
-
-
-def computation_rows_for_write(
-    computation: dict[str, Any], args: argparse.Namespace
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    leads = computation.get("leads", [])
-    if args.write_limit:
-        leads = leads[: args.write_limit]
-    rows = [build_destination_row_from_computation(lead) for lead in leads]
-    return filter_ready_prefinal_rows(
-        rows,
-        require_p2=args.require_p2,
-        include_unresolved=args.include_unresolved,
-    )
 
 
 def archive_computation_state(
@@ -403,122 +277,6 @@ def consume_reused_archive_entries(
     computation.setdefault("post_review_reconciliation", {})["archive_entries_consumed"] = consumed
     save_run(computation, computation_file)
     return consumed
-
-
-def verify_destination_rows(
-    credentials_path: Path,
-    sheet_url: str,
-    destination_tab: str,
-    rows: list[dict[str, Any]],
-    start_row: int,
-) -> bool:
-    if not rows:
-        return True
-    client = get_client(str(credentials_path))
-    worksheet = get_worksheet(open_sheet(client, sheet_url), destination_tab)
-    headers = worksheet.row_values(1)
-    end_row = start_row + len(rows) - 1
-    values = worksheet.get(f"A{start_row}:{gspread.utils.rowcol_to_a1(end_row, len(headers))}")
-    observed = []
-    for value_row in values:
-        padded = value_row + [""] * (len(headers) - len(value_row))
-        observed.append({header: padded[index] for index, header in enumerate(headers)})
-    return len(observed) == len(rows) and rows_fingerprint(observed) == rows_fingerprint(rows)
-
-
-def write_computation_rows(
-    computation: dict[str, Any],
-    args: argparse.Namespace,
-    computation_file: Path | None = None,
-) -> tuple[int, list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
-    if computation.get("publication_mode") == "archive_only":
-        raise ValueError(
-            "This computation came from an all-leads/unreviewed selection and is archive-only. "
-            "Run archive-computation instead of publishing it to Pre-final."
-        )
-    rows, skipped = computation_rows_for_write(computation, args)
-    queue_batch: dict[str, Any] = {}
-    if args.destination_tab != DEFAULT_DESTINATION_TAB or not rows:
-        rows_written = write_destination_rows(
-            Path(args.credentials),
-            destination_sheet_url(args),
-            args.destination_tab,
-            rows,
-            start_row=args.write_start_row,
-        )
-        return rows_written, rows, skipped, queue_batch
-
-    # This is the durable boundary: persist the exact validated rows before the
-    # Pre-final overwrite, so later activity work never depends on the live tab.
-    queue_batch = enqueue_batch(rows, str(computation_file or ""))
-    if queue_batch.get("status") == "prospects_bridged":
-        raise ValueError(
-            f"Queue batch {queue_batch['fingerprint']} is already completed; refusing to republish it."
-        )
-    try:
-        rows_written = write_destination_rows(
-            Path(args.credentials),
-            destination_sheet_url(args),
-            args.destination_tab,
-            rows,
-            start_row=args.write_start_row,
-        )
-        verified = verify_destination_rows(
-            Path(args.credentials),
-            destination_sheet_url(args),
-            args.destination_tab,
-            rows,
-            args.write_start_row,
-        )
-        if not verified:
-            record_prefinal_publish(
-                queue_batch["fingerprint"],
-                start_row=args.write_start_row,
-                verified=False,
-                error="readback_fingerprint_mismatch",
-            )
-            raise RuntimeError("Pre-final write readback did not match the queued batch")
-        queue_batch = record_prefinal_publish(
-            queue_batch["fingerprint"], start_row=args.write_start_row, verified=True
-        )
-    except Exception as exc:
-        record_prefinal_publish(
-            queue_batch["fingerprint"],
-            start_row=args.write_start_row,
-            verified=False,
-            error=str(exc),
-        )
-        raise
-    return rows_written, rows, skipped, queue_batch
-
-
-def write_destination_rows(
-    credentials_path: Path,
-    sheet_url: str,
-    destination_tab: str,
-    rows: list[dict[str, Any]],
-    start_row: int = 2,
-) -> int:
-    if not rows:
-        return 0
-    client = get_client(str(credentials_path))
-    spreadsheet = open_sheet(client, sheet_url)
-    worksheet = get_worksheet(spreadsheet, destination_tab)
-    headers = worksheet.row_values(1)
-    require_columns(headers, DESTINATION_COLUMNS, destination_tab)
-    missing_optional = [column for column in OPTIONAL_DESTINATION_COLUMNS if column not in headers]
-    if missing_optional:
-        raise ValueError(
-            f"{destination_tab} is missing required manually-created columns for this workflow: "
-            f"{', '.join(missing_optional)}"
-        )
-    payload = [[row.get(header, "") for header in headers] for row in rows]
-    start_cell = gspread.utils.rowcol_to_a1(start_row, 1)
-    end_cell = gspread.utils.rowcol_to_a1(start_row + len(payload) - 1, len(headers))
-    worksheet.update(
-        range_name=f"{start_cell}:{end_cell}", values=payload, value_input_option="USER_ENTERED"
-    )
-    return len(payload)
 
 
 def parse_bridge_date(value: str) -> datetime:
@@ -1200,104 +958,6 @@ def update_review_statuses(
         worksheet.batch_update(updates, value_input_option="USER_ENTERED")
 
 
-def latest_run_file() -> Path | None:
-    if not RUNS_DIR.exists():
-        return None
-    candidates = sorted(
-        RUNS_DIR.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True
-    )
-    return candidates[0] if candidates else None
-
-
-def latest_review_run_file() -> Path | None:
-    if not RUNS_DIR.exists():
-        return None
-    candidates = sorted(
-        RUNS_DIR.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True
-    )
-    for path in candidates:
-        try:
-            run = load_run(path)
-        except Exception:
-            continue
-        if run.get("status") in {"awaiting_review", "approved_for_processing"} and run.get(
-            "review", {}
-        ).get("rows_written", 0):
-            return path
-    return None
-
-
-def latest_computation_file() -> Path | None:
-    if not COMPUTATIONS_DIR.exists():
-        return None
-    candidates = sorted(
-        COMPUTATIONS_DIR.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True
-    )
-    return candidates[0] if candidates else None
-
-
-def lead_id_fingerprint(lead_ids: Sequence[str]) -> str:
-    normalized = sorted(clean_text(lead_id) for lead_id in lead_ids if clean_text(lead_id))
-    return hashlib.sha256("\n".join(normalized).encode("utf-8")).hexdigest()[:16]
-
-
-def parse_review_slice(value: Any) -> dict[str, int] | None:
-    raw = clean_text(value).lower()
-    if not raw or raw in {"all", "none"}:
-        return None
-    if "/" not in raw:
-        raise ValueError("--review-slice must use N/M format, for example 1/3.")
-    index_raw, total_raw = raw.split("/", 1)
-    try:
-        index = int(index_raw)
-        total = int(total_raw)
-    except ValueError as exc:
-        raise ValueError("--review-slice must use numeric N/M format.") from exc
-    if total < 1 or index < 1 or index > total:
-        raise ValueError("--review-slice requires 1 <= N <= M.")
-    return {"index": index, "total": total}
-
-
-def apply_review_slice(rows: list[dict[str, Any]], value: Any) -> list[dict[str, Any]]:
-    parsed = parse_review_slice(value)
-    if not parsed:
-        return rows
-    index = parsed["index"] - 1
-    total = parsed["total"]
-    return [row for offset, row in enumerate(rows) if offset % total == index]
-
-
-def computation_fingerprint(computation: dict[str, Any]) -> str:
-    if clean_text(computation.get("approved_fingerprint")):
-        return clean_text(computation.get("approved_fingerprint"))
-    return lead_id_fingerprint([lead.get("lead_id", "") for lead in computation.get("leads", [])])
-
-
-def latest_computation_file_for_fingerprint(fingerprint: str) -> Path | None:
-    if not fingerprint or not COMPUTATIONS_DIR.exists():
-        return None
-    candidates = sorted(
-        COMPUTATIONS_DIR.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True
-    )
-    for path in candidates:
-        try:
-            computation = load_run(path)
-        except Exception:
-            continue
-        if computation_fingerprint(computation) == fingerprint:
-            return path
-    return None
-
-
-def latest_search_result_file() -> Path | None:
-    if not SEARCH_RESULTS_DIR.exists():
-        return None
-    candidates = sorted(
-        SEARCH_RESULTS_DIR.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True
-    )
-    return candidates[0] if candidates else None
-
-
 def approved_gate_status(args: argparse.Namespace) -> dict[str, Any]:
     import automation_gate  # Local script import keeps gate logic in one place.
 
@@ -1666,28 +1326,6 @@ def preflight(args: argparse.Namespace) -> dict[str, Any]:
         "source_groups": len(groups),
         "first_group": groups[0] if groups else None,
     }
-
-
-def save_run(run: dict[str, Any], path: Path) -> None:
-    ensure_dirs()
-    path.write_text(json.dumps(run, indent=2, ensure_ascii=False) + "\n")
-
-
-def load_run(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text())
-
-
-def source_sheet_url(args: argparse.Namespace) -> str:
-    return args.source_sheet_url or args.sheet_url
-
-
-def destination_sheet_url(args: argparse.Namespace) -> str:
-    return args.destination_sheet_url or args.sheet_url
-
-
-def archive_index_path(args: argparse.Namespace) -> Path:
-    configured = clean_text(getattr(args, "archive_index", ""))
-    return Path(configured) if configured else DEFAULT_RESEARCH_ARCHIVE_INDEX
 
 
 def annotate_overlap_scan(
