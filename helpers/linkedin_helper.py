@@ -23,7 +23,6 @@ Usage as CLI:
 
 import argparse
 import json
-import math
 import os
 import random
 import re
@@ -31,6 +30,7 @@ import sys
 import threading
 import time
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote, unquote, urlparse
 
@@ -44,6 +44,16 @@ try:
 except Exception:  # pragma: no cover - keep LinkedIn-only helpers usable
     count_outreach_log_connection_requests = None
     count_pipeline_connected_leads = None
+
+# --- linkedin_helper carve: package bootstrap (docs/CARVE-LINKEDIN-HELPER-PLAN.md) ---
+_HELPERS_DIR = Path(__file__).resolve().parent
+_ROOT_DIR = _HELPERS_DIR.parent
+for _p in (str(_ROOT_DIR), str(_HELPERS_DIR)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+# --- linkedin_helper carve: shim re-exports (appended per slice) ---
+from outbound.shared.human.delays import human_delay, typing_delay  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -96,23 +106,6 @@ ACTIVITY_DISALLOWED_PATH_RE = re.compile(
 # ---------------------------------------------------------------------------
 # Delay utilities — all timing is randomized, never repeating patterns
 # ---------------------------------------------------------------------------
-
-
-def human_delay(min_s: float, max_s: float, distribution: str = "uniform") -> float:
-    """Sleep for a randomized duration. Returns the actual delay used."""
-    if distribution == "gaussian":
-        mean = (min_s + max_s) / 2
-        std = (max_s - min_s) / 6  # 99.7% within range
-        delay = max(min_s, min(max_s, random.gauss(mean, std)))
-    elif distribution == "log_normal":
-        # Skews toward shorter delays with occasional longer ones
-        mean = math.log((min_s + max_s) / 2)
-        std = 0.5
-        delay = max(min_s, min(max_s, random.lognormvariate(mean, std)))
-    else:  # uniform
-        delay = random.uniform(min_s, max_s)
-    time.sleep(delay)
-    return delay
 
 
 def relative_days_from_time_text(time_text: str) -> int | None:
@@ -173,15 +166,6 @@ def classify_activity_windows(activities: list[dict[str, Any]]) -> dict[str, int
         "parseable": parseable,
         "unparsed": unparsed,
     }
-
-
-def typing_delay():
-    """Delay between keystrokes for natural typing."""
-    # Occasional longer pauses (thinking mid-word)
-    if random.random() < 0.08:
-        time.sleep(random.uniform(0.3, 0.8))
-    else:
-        time.sleep(random.uniform(0.05, 0.20))
 
 
 # ---------------------------------------------------------------------------
