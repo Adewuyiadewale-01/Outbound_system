@@ -52,6 +52,10 @@ for _p in (str(_ROOT_DIR), str(_HELPERS_DIR)):
 # --- linkedin_helper carve: shim re-exports (appended per slice) ---
 from outbound.shared.browser.connection import CDP_HOST, CDP_PORT, CDPConnection  # noqa: F401
 from outbound.shared.browser.stealth import STEALTH_SCRIPTS, inject_stealth  # noqa: F401
+from outbound.shared.browser.visibility import (  # noqa: F401
+    get_visible_elements,
+    is_element_visible,
+)
 from outbound.shared.human.delays import human_delay, typing_delay  # noqa: F401
 from outbound.shared.quota import (  # noqa: F401
     ACCEPTANCE_RATE_CRITICAL,
@@ -491,62 +495,6 @@ class HumanSimulator:
 # ---------------------------------------------------------------------------
 # Element visibility checker (honeypot guard)
 # ---------------------------------------------------------------------------
-
-
-def is_element_visible(cdp: CDPConnection, selector: str) -> bool:
-    """Check if an element is genuinely visible (not a honeypot)."""
-    result = cdp.evaluate(f"""
-        (() => {{
-            const el = document.querySelector({json.dumps(selector)});
-            if (!el) return false;
-            const style = getComputedStyle(el);
-            const rect = el.getBoundingClientRect();
-            return (
-                style.display !== 'none' &&
-                style.visibility !== 'hidden' &&
-                style.opacity !== '0' &&
-                rect.width > 0 &&
-                rect.height > 0 &&
-                rect.top < window.innerHeight &&
-                rect.bottom > 0
-            );
-        }})()
-    """)
-    return bool(result)
-
-
-def get_visible_elements(cdp: CDPConnection, selector: str) -> list[dict]:
-    """Get all visible elements matching selector with their positions."""
-    result = cdp.evaluate(f"""
-        (() => {{
-            const els = document.querySelectorAll({json.dumps(selector)});
-            const visible = [];
-            els.forEach((el, i) => {{
-                const style = getComputedStyle(el);
-                const rect = el.getBoundingClientRect();
-                if (
-                    style.display !== 'none' &&
-                    style.visibility !== 'hidden' &&
-                    style.opacity !== '0' &&
-                    rect.width > 0 &&
-                    rect.height > 0 &&
-                    rect.top < window.innerHeight + 200 &&
-                    rect.bottom > -200
-                ) {{
-                    visible.push({{
-                        index: i,
-                        x: rect.left + rect.width / 2,
-                        y: rect.top + rect.height / 2,
-                        width: rect.width,
-                        height: rect.height,
-                        text: el.innerText ? el.innerText.substring(0, 200) : '',
-                    }});
-                }}
-            }});
-            return JSON.stringify(visible);
-        }})()
-    """)
-    return json.loads(result) if result else []
 
 
 # ---------------------------------------------------------------------------
