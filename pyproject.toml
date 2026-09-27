@@ -20,4 +20,4 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["helpers", "scripts"]
+known-first-party = ["helpers", "scripts", "outbound"]
