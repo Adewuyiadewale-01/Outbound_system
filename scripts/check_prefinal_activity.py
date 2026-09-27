@@ -98,6 +98,7 @@ from outbound.activity_check.state import (  # noqa: F401
     prepare_session_state,
     save_session_state,
 )
+from outbound.activity_check.targets import extract_targets  # noqa: F401
 from outbound.activity_check.text import (  # noqa: F401
     _parse_positive_int,
     canonical_linkedin_profile_url,
@@ -118,50 +119,6 @@ load_repo_env()
 # CDP is reachable, but the app never hydrates. That is a per-profile/page load
 # problem, not a reason to kill the whole activity lane.
 PENDING_404_STATUS = "retry_pending_404"
-
-
-def extract_targets(
-    rows: list[dict[str, Any]],
-    recorded_activity: dict[str, Any] | None = None,
-    recorded_issues: dict[str, Any] | None = None,
-) -> list[dict[str, Any]]:
-    recorded_activity = recorded_activity or {}
-    recorded_issues = recorded_issues or {}
-    targets: list[dict[str, Any]] = []
-    for row in rows:
-        if not clean_text(row.get("ID")) and not clean_text(row.get("Company")):
-            continue
-        for prefix in ("P1", "P2"):
-            person = person_from_row(row, prefix)
-            original_profile_url = clean_text(person.get("linkedin"))
-            profile_url = canonical_linkedin_profile_url(original_profile_url)
-            if not profile_url:
-                continue
-            # Once a durable queue decision exists, this profile is no longer
-            # eligible for another Activity Check preparation.
-            if normalize_activity_value(
-                (recorded_activity.get(target_key(row, prefix)) or {}).get("activity_value", "")
-            ):
-                continue
-            issue = recorded_issues.get(target_key(row, prefix)) or {}
-            if (
-                issue.get("terminal")
-                and canonical_linkedin_profile_url(issue.get("profile_url")) == profile_url
-            ):
-                continue
-            targets.append(
-                {
-                    "key": target_key(row, prefix),
-                    "lead_id": clean_text(row.get("ID")),
-                    "row_number": row.get("_row_number"),
-                    "company": clean_text(row.get("Company")),
-                    "prefix": prefix,
-                    "profile_url": profile_url,
-                    "original_profile_url": original_profile_url,
-                    "profile_url_normalized": profile_url != original_profile_url.rstrip("/"),
-                }
-            )
-    return targets
 
 
 def is_aggregate_activity_container(activity: dict[str, Any]) -> bool:
