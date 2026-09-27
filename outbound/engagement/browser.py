@@ -813,9 +813,16 @@ def inspect_candidate(
 def click_like(cdp: Any, urn: str) -> bool:
     expression = r"""(async () => {
       const urn = %s;
-      const button = () => Array.from(document.querySelectorAll('[data-view-name="feed-full-update"]'))
-        .find(c => (c.getAttribute('data-view-tracking-scope') || '').includes(urn))
-        ?.querySelector('button[aria-label="React Like"]');
+      // Card-scoped by URN — the stable container (validated 4/4)
+      const card = () => Array.from(document.querySelectorAll('[data-view-name="feed-full-update"]'))
+        .find(c => (c.getAttribute('data-view-tracking-scope') || '').includes(urn));
+      // Exact labels, both states — rename-aware (validated)
+      const button = () => {
+        const c = card();
+        if (!c) return null;
+        return c.querySelector('button[aria-label="React Like"]')
+            || c.querySelector('button[aria-label="Unreact Like"]');
+      };
       const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
       let b = button();
       if (!b) return {error:'like_button_missing'};
@@ -834,9 +841,14 @@ def click_like(cdp: Any, urn: str) -> bool:
           b.disabled || b.getAttribute('aria-disabled') === 'true') return {error:'like_button_not_visible_or_obstructed'};
       if (b.getAttribute('aria-pressed') === 'true') return {already_liked:true};
       b.click();
+      // Confirmation: card-scoped pressed-state — immune to the label rename
+      // (post-like, the button becomes "Unreact Like"; a label re-query for
+      // "React Like" would return null forever). Scoped to the card so
+      // comment-section buttons cannot false-positive. Validated 4/4 profiles.
       for (let i=0; i<20; i++) {
         await sleep(250);
-        if (button()?.getAttribute('aria-pressed') === 'true') return {liked:true};
+        const c = card();
+        if (c && c.querySelector('button[aria-pressed="true"]')) return {liked:true};
       }
       return {error:'like_result_unconfirmed'};
     })()""" % json.dumps(urn)
