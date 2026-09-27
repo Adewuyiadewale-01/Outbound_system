@@ -52,7 +52,7 @@ outbound/                  THE Python package (all importable logic)
   shared/                    sheets, environment, browser sessions
   engagement/                post engagement workflow
   outreach/                  OBF session workflow (the "monster")
-  activity/                  activity check workflow
+  activity_check/            activity check workflow
   leads/                     review → research → archive pipeline
   withdrawals/               withdrawal workflow
 orchestrator/              scheduling & monitoring backend
