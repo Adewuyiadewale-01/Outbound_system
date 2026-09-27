@@ -9,8 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from lead_research_archive import ResearchArchive, has_reusable_research
-
+from outbound.leads.archive import ResearchArchive, has_reusable_research
 from outbound.leads.reviewtab import remove_review_group_for_run
 from outbound.leads.runs import archive_index_path, load_run, save_run, source_sheet_url
 from outbound.leads.text import clean_text

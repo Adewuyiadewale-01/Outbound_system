@@ -12,9 +12,9 @@ from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
-from lead_research_archive import ResearchArchive
 from prefinal_queue import rows_fingerprint
 
+from outbound.leads.archive import ResearchArchive
 from outbound.leads.bridge import bridge_prefinal_to_prospects
 from outbound.leads.computation import (
     archive_computation_state,
