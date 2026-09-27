@@ -298,7 +298,9 @@ POST_CARDS_JS = r"""
 def _connect_campaign_browser(
     campaign: dict[str, Any], config: dict[str, Any], execute: bool
 ) -> Any:
-    from linkedin_helper import HumanSimulator, LinkedInSession, inject_stealth
+    from outbound.shared.browser.stealth import inject_stealth
+    from outbound.shared.human.simulator import HumanSimulator
+    from outbound.shared.session.manager import LinkedInSession
 
     endpoint = CDP_ACCOUNTS[config["cdp_account"]]
     os.environ["LINKEDIN_CDP_HOST"] = endpoint["host"]
@@ -321,7 +323,8 @@ def _connect_campaign_browser(
 
 def _navigate(cdp: Any, url: str, settle: float | None = None) -> None:
     """Use the shared readiness checks; deadlines are ceilings, not sleeps."""
-    from linkedin_helper import _wait_for_activity_feed_state, _wait_for_linkedin_ready
+    from outbound.shared.activity.feed_state import _wait_for_activity_feed_state
+    from outbound.shared.browser.readiness import _wait_for_linkedin_ready
 
     activity = "/recent-activity/" in url
     selector = (
@@ -686,11 +689,11 @@ def inspect_candidate(
         profile_assessed_at=now().isoformat(),
         **classify_location(gate.get("location", "")),
     )
-    from linkedin_helper import (
-        _open_profile_activity_from_profile,
+    from outbound.shared.activity.feed_state import (
         _wait_for_activity_destination,
         _wait_for_activity_feed_state,
     )
+    from outbound.shared.activity.navigation import _open_profile_activity_from_profile
 
     try:
         if campaign is not None:

@@ -12,7 +12,10 @@ class RecoveryTests(unittest.TestCase):
         cdp.navigate.side_effect = TimeoutError("command timeout")
         cdp.evaluate.return_value = url
         with (
-            patch("linkedin_helper._wait_for_linkedin_ready", return_value={"ready": True}),
+            patch(
+                "outbound.shared.browser.readiness._wait_for_linkedin_ready",
+                return_value={"ready": True},
+            ),
             patch.object(browser_module, "append_history"),
         ):
             pe._navigate(cdp, url)
@@ -26,7 +29,10 @@ class RecoveryTests(unittest.TestCase):
         cdp.navigate.side_effect = TimeoutError("command timeout")
         cdp.evaluate.side_effect = ["https://www.linkedin.com/feed/", None, url]
         with (
-            patch("linkedin_helper._wait_for_linkedin_ready", return_value={"ready": True}),
+            patch(
+                "outbound.shared.browser.readiness._wait_for_linkedin_ready",
+                return_value={"ready": True},
+            ),
             patch.object(browser_module, "append_history"),
         ):
             pe._navigate(cdp, url)
@@ -38,8 +44,14 @@ class RecoveryTests(unittest.TestCase):
         cdp.navigate.return_value = {}
         cdp.evaluate.return_value = url
         with (
-            patch("linkedin_helper._wait_for_linkedin_ready", return_value={"ready": True}),
-            patch("linkedin_helper._wait_for_activity_feed_state", return_value={"ready": False}),
+            patch(
+                "outbound.shared.browser.readiness._wait_for_linkedin_ready",
+                return_value={"ready": True},
+            ),
+            patch(
+                "outbound.shared.activity.feed_state._wait_for_activity_feed_state",
+                return_value={"ready": False},
+            ),
             patch.object(browser_module, "append_history"),
         ):
             with self.assertRaisesRegex(RuntimeError, "activity_feed_not_hydrated"):

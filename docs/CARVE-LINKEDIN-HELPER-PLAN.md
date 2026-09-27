@@ -237,3 +237,41 @@ Each session **starts with the drift check** (§5.7): `git -C ~/codex-outreach-a
 | Scope creep into `outreach_helper`/`sheets_helper`/`runtime_environment` | Explicitly out of scope; the monster's `outreach_helper` try/except moves with `preflight_check` only |
 
 **Open decision for review:** whether S20–S21 (acceptance) should instead land under a future `outbound/acceptance/` workflow package rather than `outbound/shared/acceptance/`. The two-consumer rule says shared (outreach + activity-check + withdrawals all consume acceptance checking); workflows don't exist yet for the latter two. Recommendation: shared now, re-evaluate at the activity-check/withdrawals carves.
+
+---
+
+## Appendix — Execution Notes (2026-09-27, completed)
+
+**Result:** `helpers/linkedin_helper.py` 6,780 → 172 lines (compatibility shim). Logic lives under
+`outbound/shared/{browser,danger,human,activity,profile,send,acceptance,feed,actions,session}/`,
+`quota.py`, and `cli.py`.
+
+**Deviations from the slice table (all recorded, none structural):**
+
+1. **Two symbols the table missed** — added mid-carve:
+   - `_scroll_activity_with_lazy_patience` (moved with S13, `activity/readers.py`).
+   - `like_post`, `follow_engagement_trail`, `scan_reaction_list` (new slice **S23c**, `actions/engagement.py`).
+2. **Test-patch migration** also required at **S18**, not only S19: `test_connect_click_waits_for_the_real_modal_before_failing`
+   invokes `_click_connect_button` directly, so its `_wait_for_connect_modal` patch had to move to
+   `outbound.shared.send.modal`. S19 then migrated the `verify_no_note_send_ui` patches to `send/engine`.
+3. **Shim self-bootstrap** added at S1 (as planned): inserts `ROOT` + `HELPERS_DIR` so the subprocess CLI and the
+   tests' `sys.path` handling both resolve `outbound.*` and `outreach_helper`.
+4. **`session/preflight.py`** carries its own `helpers/` bootstrap so the optional `outreach_helper` import survives
+   direct (non-shim) imports — preserving the acceptance-rate gate's behaviour.
+5. **S7 ordering** uses `TYPE_CHECKING` for the `"HumanSimulator"` forward reference (simulator lands at S8).
+6. **Draft PR opened early** (instead of at S29) so CI runs on every slice push — the workflow only triggers on PRs to `main`.
+
+**Final receipts:**
+
+```
+grep -c "^def \|^class " helpers/linkedin_helper.py   → 0
+wc -l helpers/linkedin_helper.py                      → 172
+census names importable through the shim              → 19/19
+code references to linkedin_helper under outbound/    → 0
+full suite                                            → 112 passed
+CLI through the shim (python3 helpers/linkedin_helper.py quotas) → OK
+```
+
+**Note on receipt 4:** the *code* reference count is zero; the only remaining `linkedin_helper` occurrences under
+`outbound/` are provenance lines in module docstrings ("Extracted verbatim from helpers/linkedin_helper.py…").
+Reword them if a literal-zero grep is required.
