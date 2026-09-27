@@ -262,7 +262,7 @@ def run_campaign(day: str | None, execute: bool) -> dict[str, Any]:
                     break
                 inspect_candidate(cdp, sim, candidate, config)
                 campaign["target_id"] = cdp.target_id
-                from linkedin_helper import increment_counter
+                from outbound.shared.quota import increment_counter
 
                 increment_counter(session.state, "profile_views")
                 if not candidate["engagement_eligible"]:

@@ -29,7 +29,7 @@ import re
 import sys
 import threading
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, unquote, urlparse
@@ -54,6 +54,30 @@ for _p in (str(_ROOT_DIR), str(_HELPERS_DIR)):
 
 # --- linkedin_helper carve: shim re-exports (appended per slice) ---
 from outbound.shared.human.delays import human_delay, typing_delay  # noqa: F401
+from outbound.shared.quota import (  # noqa: F401
+    ACCEPTANCE_RATE_CRITICAL,
+    ACCEPTANCE_RATE_WARN,
+    DIAGNOSTIC_DIR,
+    MAX_ACTIONS_PER_MINUTE,
+    MAX_CONN_REQ_PER_DAY,
+    MAX_CONN_REQ_PER_WEEK,
+    MAX_MESSAGES_PER_DAY,
+    MAX_PROFILE_VIEWS_PER_DAY,
+    MAX_WITHDRAWALS_PER_DAY,
+    STATE_DIR,
+    STATE_FILE,
+    WARMUP_SCHEDULE,
+    _ensure_diagnostic_dir,
+    _ensure_state_dir,
+    _safe_slug,
+    get_counter,
+    get_today_key,
+    get_week_key,
+    get_weekly_counter,
+    increment_counter,
+    load_state,
+    save_state,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -63,24 +87,12 @@ CDP_HOST = "localhost"
 CDP_PORT = 18800
 
 # State file for daily quotas, session history, last scroll sequence, etc.
-STATE_DIR = os.path.join(os.path.dirname(__file__), "..", "state")
-STATE_FILE = os.path.join(STATE_DIR, "linkedin_state.json")
-DIAGNOSTIC_DIR = os.path.join(STATE_DIR, "linkedin_debug")
 
 # Hard limits (non-overridable)
-MAX_CONN_REQ_PER_DAY = 30
-MAX_CONN_REQ_PER_WEEK = 150
-MAX_PROFILE_VIEWS_PER_DAY = 100
-MAX_MESSAGES_PER_DAY = 50
-MAX_WITHDRAWALS_PER_DAY = 5
-MAX_ACTIONS_PER_MINUTE = 4
 
 # Warmup schedule: week_number -> max daily conn_req
-WARMUP_SCHEDULE = {1: 20, 2: 25}  # week 3+ defaults to MAX_CONN_REQ_PER_DAY
 
 # Acceptance rate thresholds
-ACCEPTANCE_RATE_WARN = 0.20
-ACCEPTANCE_RATE_CRITICAL = 0.15
 ACTIVITY_TAB_ORDER = [
     ("all", "all"),
     ("comments", "Comments"),
@@ -171,75 +183,6 @@ def classify_activity_windows(activities: list[dict[str, Any]]) -> dict[str, int
 # ---------------------------------------------------------------------------
 # State persistence — tracks quotas, session history, scroll sequences
 # ---------------------------------------------------------------------------
-
-
-def _ensure_state_dir():
-    os.makedirs(STATE_DIR, exist_ok=True)
-
-
-def _ensure_diagnostic_dir():
-    os.makedirs(DIAGNOSTIC_DIR, exist_ok=True)
-
-
-def _safe_slug(value: str) -> str:
-    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", str(value or "").strip())
-    return cleaned.strip("-") or "unknown"
-
-
-def load_state() -> dict[str, Any]:
-    """Load persistent state from disk."""
-    _ensure_state_dir()
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE) as f:
-            return json.load(f)
-    return {}
-
-
-def save_state(state: dict[str, Any]):
-    """Save persistent state to disk."""
-    _ensure_state_dir()
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=2)
-
-
-def get_today_key() -> str:
-    return date.today().isoformat()
-
-
-def get_week_key() -> str:
-    """ISO week key like '2026-W11'."""
-    d = date.today()
-    return f"{d.isocalendar()[0]}-W{d.isocalendar()[1]:02d}"
-
-
-def increment_counter(state: dict, category: str, amount: int = 1) -> int:
-    """Increment a daily counter. Returns new value."""
-    today = get_today_key()
-    if "counters" not in state:
-        state["counters"] = {}
-    if today not in state["counters"]:
-        state["counters"][today] = {}
-    current = state["counters"][today].get(category, 0)
-    state["counters"][today][category] = current + amount
-    save_state(state)
-    return current + amount
-
-
-def get_counter(state: dict, category: str) -> int:
-    """Get today's count for a category."""
-    today = get_today_key()
-    return state.get("counters", {}).get(today, {}).get(category, 0)
-
-
-def get_weekly_counter(state: dict, category: str) -> int:
-    """Sum this week's count for a category (Mon-Sun)."""
-    today = date.today()
-    monday = today - timedelta(days=today.weekday())
-    total = 0
-    for i in range(7):
-        day = (monday + timedelta(days=i)).isoformat()
-        total += state.get("counters", {}).get(day, {}).get(category, 0)
-    return total
 
 
 # ---------------------------------------------------------------------------
