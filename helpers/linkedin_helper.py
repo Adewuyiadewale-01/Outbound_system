@@ -50,6 +50,13 @@ for _p in (str(_ROOT_DIR), str(_HELPERS_DIR)):
         sys.path.insert(0, _p)
 
 # --- linkedin_helper carve: shim re-exports (appended per slice) ---
+from outbound.shared.activity.tab_policy import (  # noqa: F401
+    ACTIVITY_ALLOWED_TAB_KEYS,
+    ACTIVITY_DISALLOWED_PATH_RE,
+    ACTIVITY_RANKING_TAB_ORDER,
+    ACTIVITY_SELECTOR_RANKING_TAB_ORDER,
+    ACTIVITY_TAB_ORDER,
+)
 from outbound.shared.browser.connection import CDP_HOST, CDP_PORT, CDPConnection  # noqa: F401
 from outbound.shared.browser.readiness import (  # noqa: F401
     _navigate_with_readiness,
@@ -106,26 +113,6 @@ from outbound.shared.quota import (  # noqa: F401
 # Warmup schedule: week_number -> max daily conn_req
 
 # Acceptance rate thresholds
-ACTIVITY_TAB_ORDER = [
-    ("all", "all"),
-    ("comments", "Comments"),
-    ("reactions", "Reactions"),
-]
-ACTIVITY_RANKING_TAB_ORDER = [
-    ("posts", "Posts"),
-    ("reactions", "Reactions"),
-    ("comments", "Comments"),
-]
-ACTIVITY_SELECTOR_RANKING_TAB_ORDER = [
-    ("posts", "Posts"),
-    ("reactions", "Reactions"),
-    ("comments", "Comments"),
-]
-ACTIVITY_ALLOWED_TAB_KEYS = {"all", "posts", "comments", "reactions"}
-ACTIVITY_DISALLOWED_PATH_RE = re.compile(
-    r"/recent-activity/(articles|videos|images|documents)/?",
-    re.IGNORECASE,
-)
 
 
 # ---------------------------------------------------------------------------
