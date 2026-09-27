@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Standalone Pre-final activity checker with staged Final and Prospects bridges."""
+"""Compatibility entry point for the Pre-final activity checker.
+
+All logic lives under outbound/activity_check/* (the activity_check carve — see
+docs/CARVE-ACTIVITY-CHECK.md). This file preserves the historical invocation
+surface — path, CLI, and module import — for its consumers.
+
+    python3 scripts/check_prefinal_activity.py [--prepare-only|--activity-only|--finalize-only]
+    python3 scripts/check_prefinal_activity.py --self-test
+"""
 
 import sys
 from pathlib import Path
@@ -134,11 +142,6 @@ from outbound.activity_check.text import (  # noqa: F401
 )
 
 load_repo_env()
-
-
-# A LinkedIn route can occasionally land on a visually blank shell: URL is loaded,
-# CDP is reachable, but the app never hydrates. That is a per-profile/page load
-# problem, not a reason to kill the whole activity lane.
 
 
 if __name__ == "__main__":
