@@ -54,9 +54,9 @@ Columns: **S#** · **destination** · **symbols moved** · **internal deps (must
 | S7 | `browser/readiness.py` | _wait_for_page_ready, _wait_for_linkedin_ready, _navigate_with_readiness, _safe_scroll_or_js | connection, delays, danger | `engagement/browser.py:324` (split: keep feed-state name at S12) | ⚠️ **TEST MIGRATION**: patch targets for `_wait_for_linkedin_ready` move to the reading site |
 | S8 | `human/simulator.py` | HumanSimulator | connection, delays | `engagement/browser.py:301` → HumanSimulator from simulator | |
 | S9 | `activity/tab_policy.py` | ACTIVITY_* constants | stdlib | — | |
-| S10 | `activity/url_utils.py` | canonicalize_linkedin_profile_url, _activity_profile_slug, _activity_destination_matches, _activity_url_for_tab, _current_activity_url_is_disallowed, _page_still_loading | tab_policy | — | canonicalize is a census name |
+| S10 | `activity/url_utils.py` | canonicalize_linkedin_profile_url, _activity_profile_slug, _activity_destination_matches, _activity_url_for_tab, _current_activity_url_is_disallowed | tab_policy | — | canonicalize is a census name |
 | S11 | `activity/navigation.py` | _open_activity_tab, _open_profile_activity_from_profile, _try_open_... | connection, delays, tab_policy | `engagement/browser.py:689` (partial) | |
-| S12 | `activity/feed_state.py` | _activity_scroll_snapshot, _wait_for_activity_feed_state, _activity_invalid_result, _wait_for_activity_destination | connection, danger, url_utils | `browser.py:324` + `:689` → feed-state names | ⚠️ **TEST MIGRATION**: `_wait_for_activity_feed_state` patch targets |
+| S12 | `activity/feed_state.py` | _activity_scroll_snapshot, _wait_for_activity_feed_state, _activity_invalid_result, _wait_for_activity_destination, _page_still_loading | connection, danger, url_utils | `browser.py:324` + `:689` → feed-state names | ⚠️ **TEST MIGRATION**: `_wait_for_activity_feed_state` patch targets |
 | S13 | `activity/readers.py` | _extract_visible_activity_entries, read_activity_tab, read_activity_tabs_detail, classify_activity_windows, relative_days_from_time_text | navigation, feed_state, url_utils, readiness, human, delays | — | **Hardest slice** (462-line function moves whole). relative_days is a census name |
 | S14 | `profile/diagnostics.py` | _safe_debug_slug, _write_profile_mapper_dump | stdlib | — | ⚠️ **PATH REWRITE**: debug dir → `parents[3]`; before/after receipt |
 | S15 | `profile/mapper.py` | inspect_profile_action_state, _open_more_and_find_connect, _open_more_and_click_connect, browse_profile_briefly, view_profile, PROFILE_* selectors | connection, readiness, danger, human, profile/diagnostics | — | inspect_profile_action_state is a census name |
@@ -118,9 +118,11 @@ for _p in (str(_ROOT_DIR), str(_HELPERS_DIR)):
 from outbound.shared.browser.connection import (  # noqa: F401
     CDPConnection,
 )
+from outbound.shared.activity.feed_state import (  # noqa: F401
+    _page_still_loading, _wait_for_activity_destination, _wait_for_activity_feed_state,
+)
 from outbound.shared.browser.readiness import (  # noqa: F401
-    _navigate_with_readiness, _wait_for_activity_destination,
-    _wait_for_activity_feed_state, _wait_for_linkedin_ready,
+    _navigate_with_readiness, _wait_for_linkedin_ready,
 )
 from outbound.shared.browser.stealth import inject_stealth  # noqa: F401
 from outbound.shared.human.delays import human_delay  # noqa: F401
@@ -142,6 +144,8 @@ from outbound.shared.send.modal import (  # noqa: F401
     _wait_for_connect_modal,
 )
 from outbound.shared.session.manager import LinkedInSession  # noqa: F401
+from outbound.shared.acceptance.sent_scraper import scrape_sent_invitations  # noqa: F401
+from outbound.shared.acceptance.normalization import _normalize_linkedin_profile_url  # noqa: F401
 from outbound.shared.quota import increment_counter  # noqa: F401
 
 if __name__ == "__main__":
@@ -149,7 +153,7 @@ if __name__ == "__main__":
     main()
 ```
 
-The 21 census names (14 imported + 7 patch/attr) are all present. `main` is not re-exported (only the guard imports it) — matching the census. `# noqa: F401` armor on every block.
+The census is the **union of all consumers** (see §3 addendum): 14 names imported by `*.py`, 5 further patch/attr targets, and 2 names imported only by the `mac/*.command` launchers (`scrape_sent_invitations`, `_normalize_linkedin_profile_url`) — **21 distinct names**. The authoritative list is the shim file itself (it re-exports the whole moved surface, a superset of the census). `main` is not re-exported (only the `__main__` guard imports it). `# noqa: F401` armor on every block.
 
 ---
 
@@ -275,3 +279,19 @@ CLI through the shim (python3 helpers/linkedin_helper.py quotas) → OK
 **Note on receipt 4:** the *code* reference count is zero; the only remaining `linkedin_helper` occurrences under
 `outbound/` are provenance lines in module docstrings ("Extracted verbatim from helpers/linkedin_helper.py…").
 Reword them if a literal-zero grep is required.
+
+
+## Appendix B — Phase C review responses (audit 2026-09-27)
+
+An external review of the shim spec (this doc's §4) surfaced defects. Verified against the repo and resolved:
+
+| # | Claim | Verdict | Resolution |
+|---|---|---|---|
+| 1 | Census missed the `mac/*.command` launchers (`scrape_sent_invitations`, `_normalize_linkedin_profile_url`); S29 gate would pass while breaking them | **Doc defect — NOT functional.** Verified: the shipped shim re-exports *all* moved symbols (a superset of any census), and all 7 names the launchers use import cleanly | §3 census addendum + §4 sample corrected; launcher verification recorded |
+| 2 | §4 sample imported `_wait_for_activity_destination`/`_wait_for_activity_feed_state` from `browser.readiness` (they live in `activity/feed_state.py`) | **Doc defect — NOT functional.** Shipped shim imports both from `activity.feed_state` | §4 sample paths corrected |
+| 3 | `_page_still_loading` routed to `activity/url_utils` (CDP-taking fn among pure URL helpers); should be `activity/feed_state` | **Valid cohesion point.** Code relocated to `activity/feed_state.py`; imports in `readers.py`/shim retargeted. Note: `url_utils` already contained a CDP-taking function (`_current_activity_url_is_disallowed`), so the "pure module" charter was always approximate — caller locality is the real justification | Done (`refactor: relocate _page_still_loading…`) |
+| 4 | "17 subcommands" in the Phase A portrait | Valid (it is 18) | Corrected in `docs/CARVE-LINKEDIN-HELPER.md` |
+| 5 | S7 migration row over-specifies `test_linkedin_no_send` for `_wait_for_linkedin_ready` | Acknowledged (harmless; the suite-driven rule self-corrected — the actual migration landed at S18) | Appendix A already records the real sequence |
+| 6 | Drift claim ("exactly one drift") unverifiable externally (old repo private) | Acknowledged — local check stands | — |
+
+**Census addendum (union of consumers):** 14 `*.py` imports + 5 distinct patch/attr targets + 2 launcher-only names = **21 distinct names**. This census gap came from scoping the Phase A scan to `--include="*.py"`; the launcher scan is now part of the census method.
