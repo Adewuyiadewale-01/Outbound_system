@@ -23,13 +23,13 @@ function resolveProjectDir() {
   const packagedSiblingRoot = path.resolve(process.resourcesPath, '..', '..', '..', '..');
   const candidates = [
     process.env.OUTREACH_AUTOMATION_ROOT,
-    app.isPackaged ? packagedSiblingRoot : path.resolve(__dirname, '..', '..'),
+    app.isPackaged ? packagedSiblingRoot : path.resolve(__dirname, '..', '..', '..'),
     path.join(os.homedir(), 'codex-outreach-automation')
   ];
   const resolved = candidates.find(isProjectRoot);
   if (resolved) return resolved;
   // Preserve a useful diagnostic path rather than silently reading the app bundle.
-  return path.resolve(process.env.OUTREACH_AUTOMATION_ROOT || (app.isPackaged ? packagedSiblingRoot : path.join(__dirname, '..', '..')));
+  return path.resolve(process.env.OUTREACH_AUTOMATION_ROOT || (app.isPackaged ? packagedSiblingRoot : path.join(__dirname, '..', '..', '..')));
 }
 
 const PROJECT_DIR = resolveProjectDir();

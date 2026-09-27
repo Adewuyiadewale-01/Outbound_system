@@ -20,7 +20,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 APP_DIR = Path(__file__).resolve().parent
-PROJECT_DIR = APP_DIR.parents[2]
+PROJECT_DIR = APP_DIR.parents[3]
 STATE_DIR = PROJECT_DIR / "state"
 SCRIPTS_DIR = PROJECT_DIR / "scripts"
 HELPERS_DIR = PROJECT_DIR / "helpers"
@@ -2558,7 +2558,7 @@ def invoke(channel: str, requested: dict[str, Any]) -> Any:
 
 class DashboardHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, directory=str(PROJECT_DIR / "frontend"), **kwargs)
+        super().__init__(*args, directory=str(APP_DIR.parent / "frontend"), **kwargs)
 
     def _send_json(self, payload: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
         encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
