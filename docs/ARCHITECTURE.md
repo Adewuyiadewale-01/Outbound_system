@@ -80,7 +80,16 @@ config/  state/  tests/  docs/
 5. **Every PR is independently green.** ruff + full test suite + CI before merge.
 6.  **Launcher ownership:** each workflow PR owns every launcher that invokes its workflow. Moving or splitting a workflow means updating its launchers in the same PR — invocation target, and any flags — with each launcher syntax-verified (bash -n) and behavior-verified before that workflow's PR merges.
 
+7. **Drift protocol.** The old system is frozen from carve-start.
+   Production-side changes during a carve commit to the old repo with a
+   `drift:` prefix and are ported to the owning module before the next
+   slice. A drift check runs at every workflow's start and end.
+
 ## 6. Extraction Order
+
+> **Superseded (2026-09-27):** this sequence is no longer the plan of
+> record. Workflows are carved one at a time, in dependency-informed
+> order — see §9.1. The table remains as the candidate map.
 
 | # | Workflow | Source | Why this position |
 |---|---|---|---|
@@ -114,3 +123,45 @@ No absolute paths outside .env. No paths relative to the currentworking director
 Rationale: the codebase historically mixed four path idioms; three ofthem broke silently during the first restructure pass.
 
 ---
+
+
+## 9. Working Agreements
+
+Added 2026-09-27, reflecting practice through the engagement and outreach
+carves.
+
+### 9.1 Extraction order (supersedes the original §6 sequence)
+
+Workflows are carved one at a time, in dependency-informed order, rather
+than completing all folder moves first. Each workflow PR is independently
+green: carve → update callers → grep-verify zero stale references →
+lint + full suite → CI.
+
+The slice discipline within each carve: fresh map → boundary checks →
+extract → module gate (ruff) → delete bottom-to-top → reload editor →
+wire imports → def-count receipt → test → commit.
+
+Pure moves and behavior edits never share a commit.
+
+### 9.2 Fix protocol
+
+Behavioral bugs are root-caused with probes before fixing: instrument
+first (screenshots, event capture, console context checks), validate the
+proposed fix across multiple profiles/screens, then implement. Fixes ship
+with regression tests where the failure mode is testable.
+
+Behavioral changes branch and PR; mechanical fixes covered fully by the
+suite may push directly.
+
+### 9.3 Drift protocol
+
+Codified as §5.7: the old system is frozen from carve-start; production
+drift commits to the old repo with a `drift:` prefix and ports to the
+owning module before the next slice; drift checks run at every workflow's
+start and end.
+
+### 9.4 The next monster rule
+
+The largest remaining file is always the next carve candidate once the
+current workflow's consumers are stable — un-carved files grow with every
+fix session, so carving early compounds.
