@@ -13,6 +13,7 @@ from typing import Any
 from outbound.shared.activity.feed_state import (
     _activity_invalid_result,
     _activity_scroll_snapshot,
+    _page_still_loading,
     _wait_for_activity_destination,
     _wait_for_activity_feed_state,
 )
@@ -28,7 +29,6 @@ from outbound.shared.activity.tab_policy import (
 from outbound.shared.activity.url_utils import (
     _activity_url_for_tab,
     _current_activity_url_is_disallowed,
-    _page_still_loading,
     canonicalize_linkedin_profile_url,
 )
 from outbound.shared.browser.connection import CDPConnection

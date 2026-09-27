@@ -48,6 +48,7 @@ from outbound.shared.actions.withdrawal import withdraw_connection  # noqa: F401
 from outbound.shared.activity.feed_state import (  # noqa: F401
     _activity_invalid_result,
     _activity_scroll_snapshot,
+    _page_still_loading,
     _wait_for_activity_destination,
     _wait_for_activity_feed_state,
 )
@@ -76,7 +77,6 @@ from outbound.shared.activity.url_utils import (  # noqa: F401
     _activity_profile_slug,
     _activity_url_for_tab,
     _current_activity_url_is_disallowed,
-    _page_still_loading,
     canonicalize_linkedin_profile_url,
 )
 from outbound.shared.browser.connection import CDP_HOST, CDP_PORT, CDPConnection  # noqa: F401
