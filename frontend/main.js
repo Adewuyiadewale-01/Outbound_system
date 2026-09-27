@@ -16,7 +16,7 @@ function isProjectRoot(candidate) {
   return Boolean(candidate)
     && fs.existsSync(path.join(candidate, 'state'))
     && fs.existsSync(path.join(candidate, 'scripts'))
-    && fs.existsSync(path.join(candidate, 'ORCHESTRATION'));
+    && fs.existsSync(path.join(candidate, 'orchestrator'));
 }
 
 function resolveProjectDir() {
@@ -87,7 +87,7 @@ const LEAD_PREP_COMPUTATIONS_DIR = path.join(STATE_DIR, 'lead_exec_research', 'c
 const LEAD_REVIEW_CACHE_PATH = path.join(STATE_DIR, 'lead_exec_research', 'dashboard_cache.json');
 const LEAD_RESEARCH_PROGRESS_PATH = path.join(STATE_DIR, 'lead_exec_research', 'manual_research_progress.json');
 const ACTIVITY_SESSIONS_DIR = path.join(STATE_DIR, 'activity_sessions');
-const WATCHER_SCRIPT = path.join(PROJECT_DIR, 'ORCHESTRATION', 'watcher', 'orchestration_watcher.py');
+const WATCHER_SCRIPT = path.join(PROJECT_DIR, 'orchestrator', 'watcher', 'orchestration_watcher.py');
 const CHROME_CDP_HOST = '127.0.0.1';
 const CHROME_CDP_PORT = 18800;
 const CHROME_LAUNCH_SCRIPT = path.join(PROJECT_DIR, 'scripts', 'launch-chrome.sh');
@@ -1537,7 +1537,7 @@ ipcMain.handle('check-watcher-status', async () => {
 ipcMain.handle('toggle-watcher', async (event, enable) => {
   return new Promise((resolve) => {
     if (enable) {
-      const plistSrc = path.join(PROJECT_DIR, 'ORCHESTRATION', 'watcher', 'com.outreachautomation.orchestration-watcher.plist.template');
+      const plistSrc = path.join(PROJECT_DIR, 'orchestrator', 'watcher', 'com.outreachautomation.orchestration-watcher.plist.template');
       const plistTarget = path.join(os.homedir(), 'Library', 'LaunchAgents', 'com.outreachautomation.orchestration-watcher.plist');
       const cmd = `mkdir -p "${path.dirname(plistTarget)}" && sed "s|__PROJECT_ROOT__|${PROJECT_DIR}|g" "${plistSrc}" > "${plistTarget}" && launchctl unload "${plistTarget}" 2>/dev/null || true && launchctl load "${plistTarget}"`;
       exec(cmd, (error) => resolve(!error));

@@ -9,7 +9,7 @@
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>cd __PROJECT_ROOT__ &amp;&amp; python3 ORCHESTRATION/watcher/orchestration_watcher.py</string>
+    <string>cd __PROJECT_ROOT__ &amp;&amp; python3 orchestrator/watcher/orchestration_watcher.py</string>
   </array>
 
   <key>WorkingDirectory</key>
