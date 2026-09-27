@@ -10,9 +10,9 @@ from typing import Any
 
 import gspread
 from gspread.exceptions import WorksheetNotFound
-from lead_research_archive import MATCH_AVAILABLE, MATCH_CONFLICT, MATCH_CONSUMED, MATCH_FRESH
 from sheets_helper import get_client, get_worksheet, open_sheet
 
+from outbound.leads.archive import MATCH_AVAILABLE, MATCH_CONFLICT, MATCH_CONSUMED, MATCH_FRESH
 from outbound.leads.config import REVIEW_COLUMNS, REVIEW_OVERLAP_COLUMNS
 from outbound.leads.sheetsio import read_worksheet, require_columns
 from outbound.leads.text import clean_text

@@ -19,7 +19,9 @@ for _path in (str(HELPERS), str(ROOT), str(SCRIPTS)):
         sys.path.insert(0, _path)
 
 # --- leads carve: shim re-exports (appended per slice) ---
-from lead_research_archive import (  # noqa: F401
+from runtime_environment import load_repo_env  # noqa: E402
+
+from outbound.leads.archive import (  # noqa: F401
     MATCH_AVAILABLE,
     MATCH_CONFLICT,
     MATCH_CONSUMED,
@@ -28,8 +30,6 @@ from lead_research_archive import (  # noqa: F401
     has_reusable_research,
     hydrate_computation_lead,
 )
-from runtime_environment import load_repo_env  # noqa: E402
-
 from outbound.leads.bridge import (  # noqa: F401
     bridge_date_key,
     bridge_date_value,

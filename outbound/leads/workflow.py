@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from lead_research_archive import (
+from outbound.leads.archive import (
     MATCH_AVAILABLE,
     MATCH_CONFLICT,
     MATCH_CONSUMED,
@@ -19,7 +19,6 @@ from lead_research_archive import (
     ResearchArchive,
     hydrate_computation_lead,
 )
-
 from outbound.leads.config import (
     COMPUTATIONS_DIR,
     DESTINATION_COLUMNS,
