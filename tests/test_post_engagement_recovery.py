@@ -48,7 +48,10 @@ class RecoveryTests(unittest.TestCase):
                 "outbound.shared.browser.readiness._wait_for_linkedin_ready",
                 return_value={"ready": True},
             ),
-            patch("linkedin_helper._wait_for_activity_feed_state", return_value={"ready": False}),
+            patch(
+                "outbound.shared.activity.feed_state._wait_for_activity_feed_state",
+                return_value={"ready": False},
+            ),
             patch.object(browser_module, "append_history"),
         ):
             with self.assertRaisesRegex(RuntimeError, "activity_feed_not_hydrated"):
