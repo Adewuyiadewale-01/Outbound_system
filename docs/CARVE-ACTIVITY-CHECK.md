@@ -11,17 +11,19 @@
 |---|---|
 | Lines | **3,155** |
 | Top-level defs/classes | **73** (72 functions + `LiveActivityReader`) |
-| Entry | `scripts/check_prefinal_activity.py` — CLI (`python3 … [--prepare-only|--activity-only|--finalize-only|--worker-id …]`), plus a built-in `--self-test` harness |
+| Entry | `scripts/check_prefinal_activity.py` — CLI (34 `parse_args` flags, incl. `--prepare-only`, `--activity-only`, `--finalize-only`, `--worker-id`), plus a built-in `--self-test` harness |
 | Tests | `tests/test_activity_retry_cap.py` (2 tests) + the in-file `run_self_tests()` (asserts the pure analysis functions) |
 
-**Consumer census (the part the Phase A method must not miss — launchers + path-strings, not just imports):**
+**Consumer census — *all* non-`.py` invocation surfaces, not just imports.** The Phase A method must scan `.command`, `.html`, `.js`, `.sh`, `.mjs`, `.gs` and any other surface that names the script or its path (the linkedin_helper carve's launcher miss generalises here):
 
 | Consumer | Kind | Names / paths |
 |---|---|---|
 | `ORCHESTRATION/activity_check/{Activity,Run,Prepare,Test_Limit}.command` | subprocess by path | `python3 scripts/check_prefinal_activity.py [--activity-only\|--prepare-only\|--limit N]` |
 | `scripts/run_activity_lanes.py` | subprocess by path | `ACTIVITY_SCRIPT = ROOT/"scripts"/"check_prefinal_activity.py"` |
 | `ORCHESTRATION/watcher/orchestration_watcher.py` | subprocess by path + filename match | `[PYTHON, ROOT/"scripts"/"check_prefinal_activity.py", "--date", day]`; string checks on `"check_prefinal_activity.py"` |
-| `ORCHESTRATION/monitor_app/{dashboard.html,drawer.js,main.js}` | invoke by path + filename special-case | `data-script="scripts/check_prefinal_activity.py"`; `scriptPath.endsWith('scripts/check_prefinal_activity.py')` |
+| `ORCHESTRATION/monitor_app/dashboard.html` | invoke by path (3 trigger buttons) | `data-script="scripts/check_prefinal_activity.py"` (full run, `--prepare-only`, `--activity-only`) |
+| `ORCHESTRATION/monitor_app/drawer.html` | invoke by path (3 trigger buttons) | same three `data-script="scripts/check_prefinal_activity.py"` buttons; dispatched at `drawer.js:2723` (`btn.getAttribute('data-script')`) |
+| `ORCHESTRATION/monitor_app/drawer.js`, `main.js` | filename special-case | `scriptPath.endsWith('scripts/check_prefinal_activity.py')` |
 | `tests/test_activity_retry_cap.py` | **import** | `import check_prefinal_activity as activity` → uses `activity.next_activity_retry_record` |
 
 **The hard constraint (same shape as the `linkedin_helper` subprocess dep):** the file must remain at `scripts/check_prefinal_activity.py`, stay **runnable as a CLI**, and stay **importable as a module** exposing the names the test (and `--self-test`) use. The logic moves; the entry stays as a thin, importable, executable front door.
@@ -44,6 +46,8 @@
 
 ## 3. Region map (earned from the read)
 
+> Rows are **concern clusters, not contiguous partitions** — regions deliberately interleave (e.g. retry 151–226 sits inside the text span 140–260; danger 292–360 inside the session span 253–435). Read it as "these functions belong together", not as disjoint line ranges.
+
 | Lines | Concern | Symbols |
 |---|---|---|
 | 1–137 | Header, imports, config | tab/credential/state paths, `BASE_COLUMNS`…`FINAL_REQUIRED_COLUMNS`, `CATEGORY_PRIORITY`, `ACTIVITY_SCORE/VALUES`, `DIVERSION_OPTIONS`, `NAVIGATION_TYPE_OPTIONS`, danger/reason sets, `DEFAULT_MAX_TARGET_ATTEMPTS` |
@@ -60,9 +64,9 @@
 | 1330–1355 | Diversion | `apply_diversion` |
 | 1355–1513 | Final upsert + bridging | `write_final_batch_upsert_and_sort`, `row_activity_from_state`, `row_targets`, `target_has_activity_decision`, `ready_final_rows`, `final_source_row_count`, `bridge_ready_rows_to_final` |
 | 1513–1822 | Cross-script bridges + finalize | `bridge_final_to_prospects`, `queue_source_rows`, `no_queued_batch_result`, `resume_final_bridged_batch`, `finalize_prepared_session` |
-| 1822–2800 | **`run()` — the 978-line orchestrator** | queue load, prepare/lanes/finalize modes, retry caps, bridging, queue-status writes |
+| 1822–2800 | **`run()` — the 976-line orchestrator** | queue load, prepare/lanes/finalize modes, retry caps, bridging, queue-status writes |
 | 2800–2998 | Self-test harness | `fake_activity`, `run_self_tests` |
-| 2998–3155 | CLI | `parse_args` (28 flags), `main`, `__main__` guard |
+| 2998–3155 | CLI | `parse_args` (34 flags), `main`, `__main__` guard |
 
 ---
 
@@ -123,10 +127,10 @@ Order: leaves first → clusters → `run()` → CLI → entry finalization.
 | S10 | `sequence.py` | resolve_* + generated_* + distribute_* + ensure_activity_sequence | config, outreach-shim helpers, sheetutils | |
 | S11 | `diversion.py` | apply_diversion | shared.diversion, analysis | |
 | S12 | `finalize.py` | upsert/sort + ready rows + bridge_* + queue_source_rows + no_queued_batch_result + resume_final_bridged_batch + finalize_prepared_session | sheets, analysis, targets, config, **lead_exec_research** | |
-| S13 | `runner.py` | run() | everything | 978 lines, whole |
+| S13 | `runner.py` | run() | everything | 976 lines, whole |
 | S14 | `cli.py` | parse_args, main, run_self_tests, fake_activity | runner + all | |
 | S15 | entry finalization | — | — | `scripts/check_prefinal_activity.py` → thin entry (bootstrap + census re-exports + `SystemExit(main())`); receipts |
 
-**Per-slice receipts (frozen):** extract verbatim → ruff gate (0 F821/I001) → def-count (source = 0) → wire re-exports (`# noqa: F401`) → full suite (112) → commit. Plus this carve's extras: `--self-test` must pass at every slice boundary, and the four `ORCHESTRATION/activity_check/*.command` + watcher/lanes/monitor path invocations verified at S15.
+**Per-slice receipts (frozen):** extract verbatim → ruff gate (0 F821/I001) → def-count (source = 0) → wire re-exports (`# noqa: F401`) → full suite (112) → commit. Plus this carve's extras: `--self-test` must pass at every slice boundary, and at S15 verify the path invocations from the four `ORCHESTRATION/activity_check/*.command` launchers, the watcher, `run_activity_lanes.py`, and the monitor app — **including `dashboard.html` and `drawer.html`** (3 trigger buttons each) and the `drawer.js`/`main.js` filename special-cases.
 
 **Final receipts:** `scripts/check_prefinal_activity.py` ≤ ~120 lines; census names importable through it; `python3 scripts/check_prefinal_activity.py --self-test` OK; `python3 scripts/check_prefinal_activity.py --dry-run` reaches the no-op path; 112 tests green; zero code refs to the script from the new package (arrows down).
