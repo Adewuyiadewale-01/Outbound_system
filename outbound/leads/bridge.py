@@ -12,14 +12,6 @@ from pathlib import Path
 from typing import Any
 
 import gspread
-from sheets_helper import (
-    format_sheet_date,
-    get_client,
-    get_worksheet,
-    normalize_rows,
-    open_sheet,
-    sheet_values_equal,
-)
 
 from outbound.leads.config import (
     BRIDGES_DIR,
@@ -34,6 +26,14 @@ from outbound.leads.config import (
 from outbound.leads.runs import source_sheet_url
 from outbound.leads.sheetsio import read_worksheet, require_columns
 from outbound.leads.text import clean_text, is_linkedin_profile_url, normalize_key, normalize_url
+from outbound.shared.sheets import (
+    format_sheet_date,
+    get_client,
+    get_worksheet,
+    normalize_rows,
+    open_sheet,
+    sheet_values_equal,
+)
 
 
 def parse_bridge_date(value: str) -> datetime:

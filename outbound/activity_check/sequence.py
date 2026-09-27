@@ -9,12 +9,11 @@ import random
 from collections.abc import Sequence
 from typing import Any
 
-from sheets_helper import get_client, open_sheet
-
 from outbound.activity_check.config import DIVERSION_OPTIONS, NAVIGATION_TYPE_OPTIONS
 from outbound.activity_check.text import navigation_type_key
 from outbound.outreach.planning import _random_positive_partition
 from outbound.shared.dates import sequence_date_key
+from outbound.shared.sheets import get_client, open_sheet
 from outbound.shared.sheetutils import (
     _batch_update_cells,
     _find_first_index,

@@ -8,10 +8,9 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from sheets_helper import get_client, get_worksheet, normalize_rows, open_sheet
-
 from outbound.leads.config import SOURCE_ALIASES
 from outbound.leads.text import clean_text
+from outbound.shared.sheets import get_client, get_worksheet, normalize_rows, open_sheet
 
 
 def require_columns(headers: Sequence[str], required: Sequence[str], tab_name: str) -> None:

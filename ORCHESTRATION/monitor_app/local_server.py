@@ -336,7 +336,7 @@ def obf_credentials_path() -> str:
 def refresh_obf_source_snapshot() -> dict[str, Any]:
     """The only OBF path that reads Sheets; dashboard reads its saved snapshot."""
     source = read_obf_source_config()
-    from sheets_helper import read_tab
+    from outbound.shared.sheets import read_tab
 
     data = read_tab(obf_credentials_path(), OBF_SHEET_URL, source["prospects_tab"])
     from linkedin_outreach_session import _read_outreach_control
