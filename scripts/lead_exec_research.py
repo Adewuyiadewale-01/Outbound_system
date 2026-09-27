@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Any
 
 import gspread
-from gspread.exceptions import WorksheetNotFound
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPERS = ROOT / "helpers"
@@ -37,7 +36,6 @@ from lead_research_archive import (  # noqa: E402
     MATCH_CONSUMED,
     MATCH_FRESH,
     ResearchArchive,
-    has_reusable_research,
     hydrate_computation_lead,
 )
 from prefinal_queue import rows_fingerprint  # noqa: E402
@@ -51,6 +49,11 @@ from sheets_helper import (  # noqa: E402
     sheet_values_equal,
 )
 
+from outbound.leads.computation import (  # noqa: F401
+    archive_computation_state,
+    archive_unreviewed_computation,
+    consume_reused_archive_entries,
+)
 from outbound.leads.config import (  # noqa: F401
     BRIDGES_DIR,
     COMPUTATIONS_DIR,
@@ -122,6 +125,21 @@ from outbound.leads.grouping import (  # noqa: F401
     looks_like_company_row,
     looks_like_employee_row,
 )
+from outbound.leads.reviewtab import (  # noqa: F401
+    build_review_row,
+    checkbox_truthy,
+    ensure_review_tab,
+    existing_successful_review_group_row,
+    find_successful_review_group_row_for_today,
+    get_or_create_worksheet,
+    last_nonempty_review_row,
+    parse_review_group_date,
+    read_review_rows,
+    remove_review_group_for_run,
+    review_group_date_value,
+    update_review_statuses,
+    write_review_rows,
+)
 from outbound.leads.runs import (  # noqa: F401
     apply_review_slice,
     approval_gate_enabled,
@@ -178,105 +196,6 @@ from outbound.leads.text import (  # noqa: F401
 )
 
 load_repo_env()
-
-
-def archive_computation_state(
-    computation: dict[str, Any],
-    computation_file: Path,
-    args: argparse.Namespace,
-) -> dict[str, Any]:
-    archive = ResearchArchive(archive_index_path(args))
-    result = archive.archive_computation(
-        computation,
-        computation_file=str(computation_file),
-        reason=args.archive_reason,
-    )
-    computation.setdefault("archive_writes", []).append(
-        {
-            "created_at": datetime.now().isoformat(timespec="seconds"),
-            "archive_index": str(archive_index_path(args)),
-            "reason": args.archive_reason,
-            **result,
-        }
-    )
-    computation["status"] = "archived"
-    save_run(computation, computation_file)
-    return result
-
-
-def archive_unreviewed_computation(
-    computation: dict[str, Any],
-    computation_file: Path,
-    args: argparse.Namespace,
-) -> dict[str, Any]:
-    archive = ResearchArchive(archive_index_path(args))
-    uncovered = []
-    for lead in computation.get("leads", []):
-        if has_reusable_research(lead):
-            continue
-        entry_id = clean_text(lead.get("archive_entry_id"))
-        if entry_id and archive.get(entry_id):
-            continue
-        uncovered.append(
-            {
-                "lead_id": clean_text(lead.get("lead_id")),
-                "company": clean_text(lead.get("company")),
-                "status": clean_text(lead.get("status")),
-            }
-        )
-    if uncovered:
-        raise ValueError(
-            f"Refusing to remove the unreviewed group because {len(uncovered)} leads "
-            "do not yet have reusable research."
-        )
-    result = archive_computation_state(computation, computation_file, args)
-    run_file_value = clean_text(computation.get("source_run_file"))
-    if not run_file_value:
-        raise ValueError("Computation is missing source_run_file; cannot remove its review group.")
-    run_file = Path(run_file_value)
-    run = load_run(run_file)
-    removal = remove_review_group_for_run(
-        Path(args.credentials),
-        source_sheet_url(args),
-        args.review_tab,
-        run,
-    )
-    if not removal.get("removed"):
-        raise ValueError(f"Archive was saved but review group removal was blocked: {removal}")
-    run["status"] = "archived_unreviewed"
-    run["archive_result"] = result
-    run["review_group_removal"] = removal
-    save_run(run, run_file)
-    computation["status"] = "archived_unreviewed"
-    computation["review_group_removal"] = removal
-    save_run(computation, computation_file)
-    return {**result, "review_group_removal": removal}
-
-
-def consume_reused_archive_entries(
-    computation: dict[str, Any],
-    rows: list[dict[str, Any]],
-    computation_file: Path,
-    args: argparse.Namespace,
-) -> int:
-    written_ids = {clean_text(row.get("ID")) for row in rows if clean_text(row.get("ID"))}
-    entry_ids = [
-        clean_text(lead.get("archive_entry_id"))
-        for lead in computation.get("leads", [])
-        if clean_text(lead.get("lead_id")) in written_ids
-        and clean_text(lead.get("archive_entry_id"))
-    ]
-    if not entry_ids:
-        return 0
-    archive = ResearchArchive(archive_index_path(args))
-    consumed = archive.mark_consumed(
-        entry_ids,
-        computation_file=str(computation_file),
-        destination=args.destination_tab,
-    )
-    computation.setdefault("post_review_reconciliation", {})["archive_entries_consumed"] = consumed
-    save_run(computation, computation_file)
-    return consumed
 
 
 def parse_bridge_date(value: str) -> datetime:
@@ -630,332 +549,6 @@ def bridge_prefinal_to_prospects(args: argparse.Namespace) -> dict[str, Any]:
     if not args.dry_run:
         state_file.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n")
     return result
-
-
-def get_or_create_worksheet(spreadsheet, tab_name: str, rows: int = 1000, cols: int = 26):
-    try:
-        return spreadsheet.worksheet(tab_name)
-    except WorksheetNotFound:
-        return spreadsheet.add_worksheet(title=tab_name, rows=rows, cols=cols)
-
-
-def ensure_review_tab(credentials_path: Path, sheet_url: str, review_tab: str):
-    client = get_client(str(credentials_path))
-    spreadsheet = open_sheet(client, sheet_url)
-    worksheet = get_worksheet(spreadsheet, review_tab)
-    headers = worksheet.row_values(1)
-    require_columns(headers, REVIEW_COLUMNS, review_tab)
-    if "Research Source" in headers and "Overlap Status" not in headers:
-        column_index = headers.index("Research Source") + 1
-        worksheet.update_cell(1, column_index, "Overlap Status")
-        headers[column_index - 1] = "Overlap Status"
-    missing_overlap_columns = [column for column in REVIEW_OVERLAP_COLUMNS if column not in headers]
-    if missing_overlap_columns:
-        required_column_count = len(headers) + len(missing_overlap_columns)
-        if worksheet.col_count < required_column_count:
-            worksheet.add_cols(required_column_count - worksheet.col_count)
-        start_column = len(headers) + 1
-        end_column = start_column + len(missing_overlap_columns) - 1
-        worksheet.update(
-            range_name=(
-                f"{gspread.utils.rowcol_to_a1(1, start_column)}:"
-                f"{gspread.utils.rowcol_to_a1(1, end_column)}"
-            ),
-            values=[missing_overlap_columns],
-            value_input_option="USER_ENTERED",
-        )
-        headers.extend(missing_overlap_columns)
-    return worksheet
-
-
-def build_review_row(run: dict[str, Any], run_file: Path, lead: dict[str, Any]) -> dict[str, Any]:
-    employees = lead.get("employees_from_sheet", [])
-    archive_match = lead.get("archive_match", {})
-    overlap_status = {
-        MATCH_AVAILABLE: "Archive Match",
-        MATCH_CONFLICT: "Possible Match",
-        MATCH_CONSUMED: "Already Consumed",
-        MATCH_FRESH: "Fresh",
-    }.get(archive_match.get("status"), "Fresh")
-    return {
-        "Run ID": lead.get("id", ""),
-        "Primary Lane": lead.get("primary_lane", ""),
-        "Company Name": lead.get("company", {}).get("name", ""),
-        "Company Website": lead.get("company", {}).get("website", ""),
-        "Emp Count": lead.get("company", {}).get("employee_count") or len(employees),
-        "Approved": False,
-        "Use": "",
-        "Prep Wave": lead.get("prep_wave", "Base"),
-        "Overlap Status": overlap_status,
-        "Archive Entry ID": archive_match.get("archive_entry_id", ""),
-    }
-
-
-def review_group_date_value(now: datetime | None = None) -> str:
-    now = now or datetime.now()
-    return f"{now.month}/{now.day}/{now.year}"
-
-
-def parse_review_group_date(value: Any):
-    raw = clean_text(value)
-    if not raw:
-        return None
-    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y", "%d/%m/%Y"):
-        try:
-            return datetime.strptime(raw, fmt).date()
-        except ValueError:
-            continue
-    return None
-
-
-def last_nonempty_review_row(headers: list[str], values: list[list[Any]]) -> int:
-    content_columns = ["Date", "Run ID", "Company Name", "Company Website"]
-    indexes = [headers.index(column) for column in content_columns if column in headers]
-    last_row = 1
-    for row_number, row in enumerate(values, start=1):
-        padded = row + [""] * (len(headers) - len(row))
-        if any(clean_text(padded[index]) for index in indexes):
-            last_row = row_number
-    return last_row
-
-
-def existing_successful_review_group_row(
-    headers: list[str],
-    values: list[list[Any]],
-    target_date,
-) -> int | None:
-    date_idx = headers.index("Date")
-    run_id_idx = headers.index("Run ID")
-    group_row: int | None = None
-    saw_lead_in_group = False
-
-    for row_number, row in enumerate(values[1:], start=2):
-        padded = row + [""] * (len(headers) - len(row))
-        row_date = parse_review_group_date(padded[date_idx])
-        row_run_id = clean_text(padded[run_id_idx])
-        if row_date:
-            if group_row is not None and saw_lead_in_group:
-                return group_row
-            group_row = row_number if row_date == target_date else None
-            saw_lead_in_group = False
-            continue
-        if group_row is not None and row_run_id:
-            saw_lead_in_group = True
-
-    if group_row is not None and saw_lead_in_group:
-        return group_row
-    return None
-
-
-def find_successful_review_group_row_for_today(
-    credentials_path: Path,
-    sheet_url: str,
-    review_tab: str,
-) -> int | None:
-    worksheet = ensure_review_tab(credentials_path, sheet_url, review_tab)
-    headers = worksheet.row_values(1)
-    if "Date" not in headers or "Run ID" not in headers:
-        return None
-    return existing_successful_review_group_row(
-        headers, worksheet.get_all_values(), datetime.now().date()
-    )
-
-
-def write_review_rows(
-    credentials_path: Path,
-    sheet_url: str,
-    review_tab: str,
-    run: dict[str, Any],
-    run_file: Path,
-) -> int:
-    worksheet = ensure_review_tab(credentials_path, sheet_url, review_tab)
-    rows = [build_review_row(run, run_file, lead) for lead in run.get("leads", [])]
-    if not rows:
-        return 0
-    headers = worksheet.row_values(1)
-    if "Date" not in headers:
-        raise ValueError(f"{review_tab} is missing required Date column for daily group rows.")
-    if "Run ID" not in headers:
-        raise ValueError(f"{review_tab} is missing required Run ID column for daily group rows.")
-    payload = [[row.get(header, "") for header in headers] for row in rows]
-    group_date = review_group_date_value()
-    values = worksheet.get_all_values()
-    existing_group_row = existing_successful_review_group_row(
-        headers, values, datetime.now().date()
-    )
-    if existing_group_row is not None:
-        raise ValueError(
-            f"{review_tab} already has a successful review queue for {group_date} "
-            f"at group row {existing_group_row}. Refusing to prepare a second queue for the same day."
-        )
-    group_row = last_nonempty_review_row(headers, values) + 1
-    start_row = group_row + 1
-    end_row = start_row + len(payload) - 1
-    if worksheet.row_count < end_row:
-        raise ValueError(
-            f"{review_tab} has {worksheet.row_count} total rows, but writing the daily group at row "
-            f"{group_row} plus {len(payload)} leads needs through row {end_row}. "
-            "Add rows manually before running prepare-review."
-        )
-    worksheet.update(
-        range_name=gspread.utils.rowcol_to_a1(group_row, headers.index("Date") + 1),
-        values=[[group_date]],
-        value_input_option="USER_ENTERED",
-    )
-    worksheet.update(range_name=f"A{start_row}", values=payload, value_input_option="USER_ENTERED")
-    run["review_write"] = {
-        "group_row": group_row,
-        "start_row": start_row,
-        "end_row": end_row,
-        "date": group_date,
-    }
-    return len(payload)
-
-
-def read_review_rows(
-    credentials_path: Path, sheet_url: str, review_tab: str, run_id: str
-) -> list[dict[str, Any]]:
-    headers, rows = read_worksheet(credentials_path, sheet_url, review_tab)
-    require_columns(headers, REVIEW_COLUMNS, review_tab)
-    return [row for row in rows if clean_text(row.get("Run ID"))]
-
-
-def remove_review_group_for_run(
-    credentials_path: Path,
-    sheet_url: str,
-    review_tab: str,
-    run: dict[str, Any],
-) -> dict[str, Any]:
-    client = get_client(str(credentials_path))
-    spreadsheet = open_sheet(client, sheet_url)
-    worksheet = get_worksheet(spreadsheet, review_tab)
-    values = worksheet.get_all_values()
-    if not values:
-        return {"removed": False, "reason": "review_tab_empty"}
-    headers = values[0]
-    require_columns(headers, ["Date", "Run ID"], review_tab)
-    date_index = headers.index("Date")
-    run_id_index = headers.index("Run ID")
-    review_complete_index = (
-        headers.index("Design Review Complete") if "Design Review Complete" in headers else None
-    )
-    expected_ids = {
-        clean_text(lead.get("id")) for lead in run.get("leads", []) if clean_text(lead.get("id"))
-    }
-    target_date = parse_review_group_date(
-        run.get("review", {}).get("write", {}).get("date")
-        or run.get("review_write", {}).get("date")
-    )
-    groups = []
-    current = None
-    for row_number, row in enumerate(values[1:], start=2):
-        padded = row + [""] * (len(headers) - len(row))
-        parsed_date = parse_review_group_date(padded[date_index])
-        if parsed_date:
-            if current:
-                current["end_row"] = row_number - 1
-                groups.append(current)
-            current = {
-                "group_row": row_number,
-                "end_row": row_number,
-                "date": parsed_date,
-                "review_complete": (
-                    checkbox_truthy(padded[review_complete_index])
-                    if review_complete_index is not None
-                    else False
-                ),
-                "lead_ids": set(),
-            }
-            continue
-        if current and clean_text(padded[run_id_index]):
-            current["lead_ids"].add(clean_text(padded[run_id_index]))
-            current["end_row"] = row_number
-    if current:
-        groups.append(current)
-
-    candidates = [
-        group
-        for group in groups
-        if (target_date is None or group["date"] == target_date)
-        and expected_ids
-        and expected_ids.issubset(group["lead_ids"])
-    ]
-    if len(candidates) != 1:
-        return {
-            "removed": False,
-            "reason": "review_group_not_uniquely_resolved",
-            "candidate_count": len(candidates),
-            "target_date": target_date.isoformat() if target_date else "",
-        }
-    group = candidates[0]
-    if group["review_complete"]:
-        raise ValueError("Refusing to remove a review-complete date group as unreviewed.")
-    start_index = group["group_row"] - 1
-    end_index = group["end_row"]
-    spreadsheet.batch_update(
-        {
-            "requests": [
-                {
-                    "deleteDimension": {
-                        "range": {
-                            "sheetId": worksheet.id,
-                            "dimension": "ROWS",
-                            "startIndex": start_index,
-                            "endIndex": end_index,
-                        }
-                    }
-                }
-            ]
-        }
-    )
-    return {
-        "removed": True,
-        "group_row": group["group_row"],
-        "end_row": group["end_row"],
-        "rows_removed": end_index - start_index,
-        "date": group["date"].isoformat(),
-        "lead_count": len(group["lead_ids"]),
-    }
-
-
-def checkbox_truthy(value: Any) -> bool:
-    return str(value).strip().lower() in {"true", "yes", "y", "1", "checked"}
-
-
-def update_review_statuses(
-    credentials_path: Path,
-    sheet_url: str,
-    review_tab: str,
-    run_id: str,
-    status_by_id: dict[str, str],
-) -> None:
-    client = get_client(str(credentials_path))
-    spreadsheet = open_sheet(client, sheet_url)
-    worksheet = get_worksheet(spreadsheet, review_tab)
-    values = worksheet.get_all_values()
-    if not values:
-        return
-    headers = values[0]
-    if "Run ID" not in headers or "ID" not in headers or "Status" not in headers:
-        return
-    run_idx = headers.index("Run ID")
-    id_idx = headers.index("ID")
-    status_idx = headers.index("Status") + 1
-    updates = []
-    for row_number, row in enumerate(values[1:], start=2):
-        row += [""] * (len(headers) - len(row))
-        if clean_text(row[run_idx]) != run_id:
-            continue
-        lead_id = clean_text(row[id_idx])
-        if lead_id in status_by_id:
-            updates.append(
-                {
-                    "range": gspread.utils.rowcol_to_a1(row_number, status_idx),
-                    "values": [[status_by_id[lead_id]]],
-                }
-            )
-    if updates:
-        worksheet.batch_update(updates, value_input_option="USER_ENTERED")
 
 
 def approved_gate_status(args: argparse.Namespace) -> dict[str, Any]:
