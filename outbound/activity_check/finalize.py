@@ -187,7 +187,8 @@ def bridge_ready_rows_to_final(
 
 def bridge_final_to_prospects(args: argparse.Namespace, date_value: str) -> dict[str, Any]:
     """Reuse the idempotent Final -> Prospects bridge without spawning another process."""
-    from lead_exec_research import bridge_prefinal_to_prospects, ensure_dirs
+    from outbound.leads.bridge import bridge_prefinal_to_prospects
+    from outbound.leads.runs import ensure_dirs
 
     ensure_dirs()
     bridge_args = argparse.Namespace(
