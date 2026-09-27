@@ -9,6 +9,8 @@ sys.path.insert(0, str(ROOT / "helpers"))
 import linkedin_helper
 import linkedin_outreach_session
 
+from outbound.shared.send import modal as send_modal
+
 
 class NoSendModalTests(unittest.TestCase):
     def setUp(self):
@@ -99,9 +101,7 @@ class NoSendModalTests(unittest.TestCase):
     def test_connect_click_waits_for_the_real_modal_before_failing(self):
         cdp = Mock()
         with (
-            patch.object(
-                linkedin_helper, "_wait_for_connect_modal", side_effect=[False, True]
-            ) as wait,
+            patch.object(send_modal, "_wait_for_connect_modal", side_effect=[False, True]) as wait,
             patch.object(cdp, "evaluate", return_value=True),
         ):
             self.assertTrue(linkedin_helper._click_connect_button(cdp, self.sim, "connect_direct"))
