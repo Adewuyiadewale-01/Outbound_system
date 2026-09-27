@@ -4,7 +4,6 @@ Extracted verbatim from helpers/linkedin_helper.py during the linkedin_helper
 carve (see docs/CARVE-LINKEDIN-HELPER-PLAN.md, slice S10). Pure move.
 """
 
-import json
 import re
 from typing import Any
 from urllib.parse import quote, unquote, urlparse
@@ -72,17 +71,3 @@ def _activity_destination_matches(current_url: str, profile_base: str, tab_key: 
     path = re.split(r"[?#]", path, maxsplit=1)[0].rstrip("/")
     expected = f"/in/{slug}/recent-activity/{endpoint}"
     return path == expected
-
-
-def _page_still_loading(cdp: CDPConnection) -> bool:
-    """True when the page reports active loading or in-flight resource fetches."""
-    try:
-        raw = cdp.evaluate(
-            "JSON.stringify({rs: document.readyState, "
-            "pending: performance.getEntriesByType('resource').filter(r => !r.responseEnd).length})",
-            timeout=5,
-        )
-        state = json.loads(raw) if raw else {}
-        return state.get("rs") == "loading" or int(state.get("pending", 0) or 0) > 2
-    except Exception:
-        return False

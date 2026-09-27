@@ -8,12 +8,23 @@ import json
 import time
 from typing import Any
 
-from outbound.shared.activity.url_utils import (
-    _activity_destination_matches,
-    _page_still_loading,
-)
+from outbound.shared.activity.url_utils import _activity_destination_matches
 from outbound.shared.browser.connection import CDPConnection
 from outbound.shared.danger.detection import check_circuit_breakers, detect_page
+
+
+def _page_still_loading(cdp: CDPConnection) -> bool:
+    """True when the page reports active loading or in-flight resource fetches."""
+    try:
+        raw = cdp.evaluate(
+            "JSON.stringify({rs: document.readyState, "
+            "pending: performance.getEntriesByType('resource').filter(r => !r.responseEnd).length})",
+            timeout=5,
+        )
+        state = json.loads(raw) if raw else {}
+        return state.get("rs") == "loading" or int(state.get("pending", 0) or 0) > 2
+    except Exception:
+        return False
 
 
 def _wait_for_activity_destination(

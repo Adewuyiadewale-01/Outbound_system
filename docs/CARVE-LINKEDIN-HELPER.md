@@ -14,7 +14,7 @@
 | `grep -c "^def \|^class "` | ~150+ | **88** defs/classes |
 | Symbol map (defs/classes/constants) | — | **112** top-level symbols (88 defs/classes + 24 constants) |
 | Census (direct imports) | 16 importers | **16 importers, 14 distinct names** |
-| Shim surface incl. patch/attr access | — | **21 names** (14 imported + 7 patch/attr targets) |
+| Shim surface incl. patch/attr access | — | **21 distinct names** (14 `*.py` imports + 5 patch/attr + 2 launcher-only; see §3 addendum in the plan doc) |
 | Baseline tests | 112+ green | **112 passed** (local venv + CI on HEAD) |
 
 **The 14 imported names** (consumer counts): `LinkedInSession` ×11, `check_circuit_breakers` ×5, `HumanSimulator` ×2, `_navigate_with_readiness` ×2, `relative_days_from_time_text` ×2, and singles: `_open_profile_activity_from_profile`, `_wait_for_activity_destination`, `_wait_for_activity_feed_state`, `_wait_for_linkedin_ready`, `canonicalize_linkedin_profile_url`, `human_delay`, `increment_counter`, `inject_stealth`, `inspect_profile_action_state`.
@@ -56,7 +56,7 @@
 | 5945–6112 | Acceptance notifications | check_acceptance_notifications, _extract_acceptance_notifs_dom | |
 | 6115–6302 | Legacy orchestrator | run_session (129), _execute_interleave | Alive via CLI only |
 | 6304–6615 | Session class | LinkedInSession (312 lines, ~24 methods) | Thin delegation + rate-limit/danger gates |
-| 6623–6780 | CLI | main() (154 lines, 17 subcommands) | Pinned by subprocess dep |
+| 6623–6780 | CLI | main() (154 lines, 18 subcommands) | Pinned by subprocess dep |
 
 ## 3. Census & Session-Method Verification
 
@@ -77,7 +77,7 @@
 
 **Methods with zero external callers but kept alive by the CLI:** `send_connection`, `like`, `check_accepts`, `check_acceptance_notifs`, `withdraw`, `set_notifications` (no CLI subcommand — truly dead), `batch_session` (no CLI subcommand — truly dead), `cool_down` (session method; alive via CLI cool-down).
 
-**Conclusion: nothing is deletable via the shim.** The CLI subprocess dependency pins 17 subcommands and their backing methods. `scripts/withdraw_connections.py` imports functions directly (LinkedInSession, check_circuit_breakers, HumanSimulator, _navigate_with_readiness, inspect_profile_action_state, relative_days_from_time_text) — the function-level import surface, not just the class.
+**Conclusion: nothing is deletable via the shim.** The CLI subprocess dependency pins 18 subcommands and their backing methods. `scripts/withdraw_connections.py` imports functions directly (LinkedInSession, check_circuit_breakers, HumanSimulator, _navigate_with_readiness, inspect_profile_action_state, relative_days_from_time_text) — the function-level import surface, not just the class.
 
 ## 4. The Monkeypatch Surface (what keeps tests working)
 
