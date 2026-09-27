@@ -17,9 +17,12 @@ import gspread
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPERS = ROOT / "helpers"
-if str(HELPERS) not in sys.path:
-    sys.path.insert(0, str(HELPERS))
+SCRIPTS = ROOT / "scripts"
+for _path in (str(HELPERS), str(ROOT), str(SCRIPTS)):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
+# --- activity_check carve: shim re-exports (appended per slice) ---
 from linkedin_helper import (  # noqa: E402
     LinkedInSession,
     canonicalize_linkedin_profile_url,
@@ -47,94 +50,42 @@ from prefinal_queue import (  # noqa: E402
 from runtime_environment import load_repo_env  # noqa: E402
 from sheets_helper import get_client, normalize_rows, open_sheet, require_columns  # noqa: E402
 
+from outbound.activity_check.config import (  # noqa: F401
+    ACTIVITY_COLUMNS,
+    ACTIVITY_SCORE,
+    ACTIVITY_VALUES,
+    BASE_COLUMNS,
+    BLOCKING_DANGER_PATTERNS,
+    CATEGORY_PRIORITY,
+    DEFAULT_ACTIVITY_SEQUENCE_TAB,
+    DEFAULT_CREDS,
+    DEFAULT_FINAL_TAB,
+    DEFAULT_LEADS_SHEET_URL,
+    DEFAULT_MAX_TARGET_ATTEMPTS,
+    DEFAULT_PREFINAL_TAB,
+    DEFER_ACTIVITY_REASONS,
+    DIVERSION_OPTIONS,
+    FINAL_REQUIRED_COLUMNS,
+    HARD_READ_DANGERS,
+    HARD_READ_REASONS,
+    JOURNAL_DIR,
+    NAVIGATION_TYPE_OPTIONS,
+    OPENCLAW_CREDS,
+    P1_COLUMNS,
+    P2_COLUMNS,
+    PERSON_COLUMNS,
+    REPO_CREDS,
+    SKIP_ACTIVITY_REASONS,
+    STATE_DIR,
+)
+
 load_repo_env()
 
 
-DEFAULT_LEADS_SHEET_URL = os.environ.get("LEAD_RESEARCH_SHEET_URL", "")
-DEFAULT_PREFINAL_TAB = "Pre-final"
-DEFAULT_FINAL_TAB = "Final"
-DEFAULT_ACTIVITY_SEQUENCE_TAB = "Activity Sequence"
-REPO_CREDS = ROOT / "credentials" / "google-sheets.json"
-OPENCLAW_CREDS = Path.home() / ".openclaw" / "credentials" / "google-sheets.json"
-DEFAULT_CREDS = REPO_CREDS if REPO_CREDS.exists() else OPENCLAW_CREDS
-
-STATE_DIR = ROOT / "state" / "activity_sessions"
-JOURNAL_DIR = ROOT / "state" / "activity_journal"
-
-BASE_COLUMNS = [
-    "ID",
-    "Company",
-    "Website",
-    "Company LinkedIn",
-    "Emp Count",
-    "Source Tab",
-    "Primary Lane",
-    "Use",
-]
-PERSON_COLUMNS = ["Name", "Title", "LinkedIn", "Email"]
-P1_COLUMNS = [f"P1 {column}" for column in PERSON_COLUMNS]
-P2_COLUMNS = [f"P2 {column}" for column in PERSON_COLUMNS]
-ACTIVITY_COLUMNS = ["P1 Activity", "P2 Activity"]
-FINAL_REQUIRED_COLUMNS = (
-    BASE_COLUMNS
-    + P1_COLUMNS
-    + ACTIVITY_COLUMNS[:1]
-    + P2_COLUMNS
-    + ACTIVITY_COLUMNS[1:]
-    + ["Category"]
-)
-CATEGORY_PRIORITY = {"Hyper": 0, "High": 1, "Alpha-medium": 2, "Medium": 3, "Low": 4}
-ACTIVITY_SCORE = {"Very active": 2, "Active": 1, "Not active": 0, "": 0}
-ACTIVITY_VALUES = {"Very active", "Active", "Not active", ""}
-DIVERSION_OPTIONS = [
-    ("none", 35),
-    ("feed_scroll", 23),
-    ("engagement_trail", 14),
-    ("profile_drill", 10),
-    ("company_page_browse", 9),
-    ("recent_post_read", 9),
-]
-NAVIGATION_TYPE_OPTIONS = [
-    ("Direct Url", 55),
-    ("Selector-based", 45),
-]
-BLOCKING_DANGER_PATTERNS = (
-    "captcha",
-    "restriction",
-    "login",
-    "logged out",
-    "email_verify",
-    "email verify",
-    "email verification",
-    "robot_check",
-    "robot check",
-    "checkpoint",
-    "security challenge",
-    "danger detected",
-    "unknown_danger",
-    "chrome cdp not responding",
-    "cdp connection failed",
-)
-HARD_READ_DANGERS = {"activity_read_timeout"}
-HARD_READ_REASONS = {
-    "navigation_failed_or_timed_out",
-    "activity_page_not_ready",
-    "activity_feed_not_hydrated",
-    "activity_extract_failed_or_timed_out",
-    "insufficient_budget_before_tab",
-}
 # A LinkedIn route can occasionally land on a visually blank shell: URL is loaded,
 # CDP is reachable, but the app never hydrates. That is a per-profile/page load
 # problem, not a reason to kill the whole activity lane.
-DEFER_ACTIVITY_REASONS = {
-    "activity_feed_not_hydrated",
-    "activity_classification_uncertain",
-    "activity_blank_page_not_ready",
-    "activity_fresh_tab_retry_failed",
-}
-SKIP_ACTIVITY_REASONS = {"invalid_profile_or_404"}
 PENDING_404_STATUS = "retry_pending_404"
-DEFAULT_MAX_TARGET_ATTEMPTS = 4
 
 
 def clean_text(value: Any) -> str:
