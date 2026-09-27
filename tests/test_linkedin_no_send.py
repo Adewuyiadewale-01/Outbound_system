@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT / "helpers"))
 import linkedin_helper
 import linkedin_outreach_session
 
+from outbound.shared.send import engine as send_engine
 from outbound.shared.send import modal as send_modal
 
 
@@ -25,13 +26,13 @@ class NoSendModalTests(unittest.TestCase):
 
     def test_modal_check_requires_confirmed_dismissal(self):
         with (
-            patch.object(linkedin_helper, "_wait_for_linkedin_ready", return_value={"ready": True}),
-            patch.object(linkedin_helper, "_click_connect_button", return_value=True),
-            patch.object(linkedin_helper, "_wait_for_connect_modal", return_value=True),
-            patch.object(linkedin_helper, "_inspect_connect_modal", return_value=self.modal_state),
-            patch.object(linkedin_helper, "_dismiss_connect_modal", return_value=False),
-            patch.object(linkedin_helper, "check_circuit_breakers", return_value=None),
-            patch.object(linkedin_helper, "human_delay", return_value=0),
+            patch.object(send_engine, "_wait_for_linkedin_ready", return_value={"ready": True}),
+            patch.object(send_engine, "_click_connect_button", return_value=True),
+            patch.object(send_engine, "_wait_for_connect_modal", return_value=True),
+            patch.object(send_engine, "_inspect_connect_modal", return_value=self.modal_state),
+            patch.object(send_engine, "_dismiss_connect_modal", return_value=False),
+            patch.object(send_engine, "check_circuit_breakers", return_value=None),
+            patch.object(send_engine, "human_delay", return_value=0),
         ):
             result = linkedin_helper.verify_no_note_send_ui(
                 self.cdp, self.sim, {}, "https://linkedin.com/in/example", self.profile_state
@@ -43,13 +44,13 @@ class NoSendModalTests(unittest.TestCase):
 
     def test_modal_check_passes_after_confirmed_dismissal(self):
         with (
-            patch.object(linkedin_helper, "_wait_for_linkedin_ready", return_value={"ready": True}),
-            patch.object(linkedin_helper, "_click_connect_button", return_value=True),
-            patch.object(linkedin_helper, "_wait_for_connect_modal", return_value=True),
-            patch.object(linkedin_helper, "_inspect_connect_modal", return_value=self.modal_state),
-            patch.object(linkedin_helper, "_dismiss_connect_modal", return_value=True),
-            patch.object(linkedin_helper, "check_circuit_breakers", return_value=None),
-            patch.object(linkedin_helper, "human_delay", return_value=0),
+            patch.object(send_engine, "_wait_for_linkedin_ready", return_value={"ready": True}),
+            patch.object(send_engine, "_click_connect_button", return_value=True),
+            patch.object(send_engine, "_wait_for_connect_modal", return_value=True),
+            patch.object(send_engine, "_inspect_connect_modal", return_value=self.modal_state),
+            patch.object(send_engine, "_dismiss_connect_modal", return_value=True),
+            patch.object(send_engine, "check_circuit_breakers", return_value=None),
+            patch.object(send_engine, "human_delay", return_value=0),
         ):
             result = linkedin_helper.verify_no_note_send_ui(
                 self.cdp, self.sim, {}, "https://linkedin.com/in/example", self.profile_state
