@@ -23,7 +23,6 @@ for _path in (str(HELPERS), str(ROOT), str(SCRIPTS)):
 # --- activity_check carve: shim re-exports (appended per slice) ---
 from linkedin_outreach_session import (  # noqa: E402
     OBF_SHEET_URL,
-    _run_diversion,
     sheet_date,
 )
 from prefinal_queue import (  # noqa: E402
@@ -85,6 +84,7 @@ from outbound.activity_check.danger import (  # noqa: F401
     is_blocking_danger,
     is_cdp_transport_exception,
 )
+from outbound.activity_check.diversion import apply_diversion  # noqa: F401
 from outbound.activity_check.reader import (  # noqa: F401
     LiveActivityReader,
     build_fixture_reader,
@@ -139,31 +139,6 @@ load_repo_env()
 # CDP is reachable, but the app never hydrates. That is a per-profile/page load
 # problem, not a reason to kill the whole activity lane.
 PENDING_404_STATUS = "retry_pending_404"
-
-
-def apply_diversion(
-    session: Any | None, plan_item: dict[str, Any], activity_detail: dict[str, Any], dry_run: bool
-) -> dict[str, Any]:
-    result: dict[str, Any] = {"ok": True, "diversion_executed": False}
-    if dry_run:
-        result["dry_run"] = True
-        return result
-    diversion = clean_text(plan_item.get("lead_diversion")).lower() or "none"
-    diversion_sec = plan_item.get("activity_diversion_sec")
-    if session is not None and diversion != "none":
-        diversion_result = _run_diversion(
-            session=session,
-            diversion=diversion,
-            diversion_sec=diversion_sec,
-            activity=activity_detail,
-        )
-        result["diversion"] = diversion_result
-        result["diversion_executed"] = bool(diversion_result.get("executed"))
-        if not diversion_result.get("ok", True):
-            result["ok"] = False
-            result["error"] = diversion_result.get("error", "diversion_failed")
-            return result
-    return result
 
 
 def write_final_batch_upsert_and_sort(
