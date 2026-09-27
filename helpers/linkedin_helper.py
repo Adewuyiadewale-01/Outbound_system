@@ -2928,7 +2928,7 @@ def read_activity_tab(
     cdp: CDPConnection,
     sim: HumanSimulator,
     profile_url: str,
-    max_seconds: float = 30.0,
+    max_seconds: float = 45.0,
 ) -> dict[str, Any]:
     """Navigate to a profile's activity endpoints and read all/comments/reactions."""
     profile_base = canonicalize_linkedin_profile_url(profile_url)
@@ -2941,6 +2941,22 @@ def read_activity_tab(
         }
     started_at = time.time()
     deadline = started_at + max_seconds
+    grace_used = 0
+    MAX_GRACE_PER_TAB = 3
+    GRACE_SECONDS = 15.0
+
+    def maybe_grace() -> bool:
+        """..."""
+        nonlocal deadline, grace_used
+        if grace_used >= MAX_GRACE_PER_TAB:
+            return False
+        if _page_still_loading(cdp):
+            deadline += GRACE_SECONDS
+            grace_used += 1
+            return True
+        return False
+
+    tabs_checked: list[dict[str, Any]] = []
 
     tabs_checked: list[dict[str, Any]] = []
     best_result: dict[str, Any] | None = None
@@ -2972,7 +2988,8 @@ def read_activity_tab(
 
     for tab_key, tab_label in ACTIVITY_TAB_ORDER:
         if remaining() < 4:
-            return timeout_result(tab_key, "insufficient_budget_before_tab")
+            if not maybe_grace():
+                return timeout_result(tab_key, "insufficient_budget_before_tab")
         activity_url = _activity_url_for_tab(profile_base, tab_key)
         try:
             cdp.navigate(activity_url, wait_load=False, timeout=min(8, max(2, remaining())))
@@ -3013,6 +3030,9 @@ def read_activity_tab(
         invalid = _activity_invalid_result(cdp)
         if invalid:
             return {**invalid, "source_tab": tab_key, "tabs_checked": tabs_checked}
+        if remaining() < 3:
+            if not maybe_grace():
+                return timeout_result(tab_key, "insufficient_budget_before_feed_state")
         feed_state = _wait_for_activity_feed_state(cdp, timeout=min(12, max(3, remaining())))
         if feed_state.get("invalid"):
             return {
@@ -3032,10 +3052,12 @@ def read_activity_tab(
         }
 
         if not bounded_pause(0.5, 1.5):
-            return timeout_result(tab_key, "timeout_before_scroll")
+            if not maybe_grace():
+                return timeout_result(tab_key, "timeout_before_scroll")
         scroll_budget = max(1.0, min(random.uniform(3, 6), remaining() - 2))
         if scroll_budget <= 0:
-            return timeout_result(tab_key, "insufficient_budget_before_scroll")
+            if not maybe_grace():
+                return timeout_result(tab_key, "insufficient_budget_before_scroll")
         scroll_result = _scroll_activity_with_lazy_patience(
             cdp,
             sim,
@@ -3066,6 +3088,8 @@ def read_activity_tab(
             "tab": tab_key,
             "label": tab_label,
             "found": True,
+            "tab_elapsed_sec": round(elapsed(), 2),
+            "grace_used": grace_used,
             "url": activity_url,
             "total_visible": tab_result.get("total_visible", 0),
             "within_7d": window_counts.get("within_7d", 0),
