@@ -1,37 +1,16 @@
 #!/usr/bin/env python3
-"""
-LinkedIn automation helper — CDP-based browser control with human simulation.
+"""Compatibility shim for the historical linkedin_helper module.
 
-Operates through a real Chrome profile via Chrome DevTools Protocol (port 18800).
-Every action is designed to be indistinguishable from a human using LinkedIn.
+All logic now lives under outbound/shared/* (the linkedin_helper carve — see
+docs/CARVE-LINKEDIN-HELPER-PLAN.md). This file preserves the historical import
+surface for its consumers and stays runnable as a CLI:
 
-Usage as library:
-    from linkedin_helper import LinkedInSession
-    session = LinkedInSession()
-    session.connect()
-    session.warm_up()
-    ...
-    session.cool_down()
-    session.disconnect()
+    python3 helpers/linkedin_helper.py <command>
 
-Usage as CLI:
-    python3 linkedin_helper.py preflight
-    python3 linkedin_helper.py warm-up
-    python3 linkedin_helper.py view-profile --url <linkedin_url>
-    python3 linkedin_helper.py read-feed --scrolls 5
 """
 
 import sys
 from pathlib import Path
-
-try:
-    from outreach_helper import (
-        count_outreach_log_connection_requests,
-        count_pipeline_connected_leads,
-    )
-except Exception:  # pragma: no cover - keep LinkedIn-only helpers usable
-    count_outreach_log_connection_requests = None
-    count_pipeline_connected_leads = None
 
 # --- linkedin_helper carve: package bootstrap (docs/CARVE-LINKEDIN-HELPER-PLAN.md) ---
 _HELPERS_DIR = Path(__file__).resolve().parent
@@ -112,7 +91,6 @@ from outbound.shared.browser.visibility import (  # noqa: F401
     get_visible_elements,
     is_element_visible,
 )
-from outbound.shared.cli import main  # noqa: F401
 from outbound.shared.danger.detection import (  # noqa: F401
     PageType,
     check_circuit_breakers,
@@ -187,130 +165,6 @@ from outbound.shared.session.envelope import session_cool_down, session_warm_up 
 from outbound.shared.session.interleave import _execute_interleave, run_session  # noqa: F401
 from outbound.shared.session.manager import LinkedInSession  # noqa: F401
 from outbound.shared.session.preflight import preflight_check  # noqa: F401
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-
-# State file for daily quotas, session history, last scroll sequence, etc.
-
-# Hard limits (non-overridable)
-
-# Warmup schedule: week_number -> max daily conn_req
-
-# Acceptance rate thresholds
-
-
-# ---------------------------------------------------------------------------
-# Delay utilities — all timing is randomized, never repeating patterns
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# State persistence — tracks quotas, session history, scroll sequences
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# CDP Connection Manager
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Stealth patches — mask automation indicators
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Human simulation primitives
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Element visibility checker (honeypot guard)
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Page detection — identify what LinkedIn page we're on
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Page-readiness gate — used by acceptance-check path for resilient navigation
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Feed reader — content-aware scrolling
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Profile viewer
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Activity tab reader
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Notification toggle
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Notification checker
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Session envelope — warm-up and cool-down
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Safety rails — pre-flight checks, quota enforcement, circuit breakers
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Phase 3: Connection request engine + engagement scanner
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Engagement actions (Approaches A-E)
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Sent-invitations scraper & subtractive acceptance detection
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Withdrawal manager — withdraw stale pending connection requests
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Session orchestrator — batch connection requests with interleaved engagement
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# LinkedInSession — high-level session manager
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# CLI interface
-# ---------------------------------------------------------------------------
-
 
 if __name__ == "__main__":
     from outbound.shared.cli import main
