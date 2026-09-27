@@ -140,6 +140,18 @@ class ReliabilityTests(unittest.TestCase):
             pe.run_campaign_schedule(self.day, True)
         self.assertEqual(calls, ["wait", "run"])
 
+    def test_run_campaign_schedule_waits_without_lock_collision(self):
+        c = self.campaign()
+        c["next_batch_at"] = (pe.now() - timedelta(seconds=1)).isoformat()
+        pe.save_campaign(c)
+        with patch.object(
+            runner_module,
+            "run_campaign",
+            return_value={"status": "completed", "day": self.day},
+        ):
+            result = pe.run_campaign_schedule(self.day, True)
+            self.assertEqual(result["status"], "completed")
+
     def test_recovered_batch_creates_missing_cooldown(self):
         c = self.campaign()
         candidate = c["candidates"][0]

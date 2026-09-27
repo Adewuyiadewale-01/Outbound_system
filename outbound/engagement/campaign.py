@@ -192,7 +192,6 @@ def resolve_deferred_action(action: str, profile_url: str) -> None:
         write_json(PENDING_ACTIONS_PATH, pending)
 
 
-@exclusive_campaign
 def wait_for_next_batch(campaign: dict[str, Any]) -> bool:
     """Wait in short, pause-aware intervals; returns false when paused."""
     raw = str(campaign.get("next_batch_at") or "")
