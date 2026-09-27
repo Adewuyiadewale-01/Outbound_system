@@ -13,22 +13,22 @@ python3 scripts/check_prefinal_activity.py
 
 Double-click wrapper:
 ```bash
-./ORCHESTRATION/activity_check/Run.command
+./mac/activity_check/Run.command
 ```
 
 Prepare local state only:
 ```bash
-./ORCHESTRATION/activity_check/Prepare.command
+./mac/activity_check/Prepare.command
 ```
 
 Run activity from already-prepared local state only:
 ```bash
-./ORCHESTRATION/activity_check/Activity.command
+./mac/activity_check/Activity.command
 ```
 
 Prompt for a limited target count:
 ```bash
-./ORCHESTRATION/activity_check/Test_Limit.command
+./mac/activity_check/Test_Limit.command
 ```
 
 Dry-run validation:

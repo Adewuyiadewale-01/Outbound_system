@@ -57,7 +57,7 @@ due checkpoint and exits.
 PROJECT_ROOT="$(pwd)"
 PLIST=~/Library/LaunchAgents/com.outreachautomation.orchestration-watcher.plist
 mkdir -p ~/Library/LaunchAgents
-sed "s|__PROJECT_ROOT__|$PROJECT_ROOT|g" ORCHESTRATION/watcher/com.outreachautomation.orchestration-watcher.plist.template > "$PLIST"
+sed "s|__PROJECT_ROOT__|$PROJECT_ROOT|g" orchestrator/watcher/com.outreachautomation.orchestration-watcher.plist.template > "$PLIST"
 launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load "$PLIST"
 ```

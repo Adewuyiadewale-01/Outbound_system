@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ORCHESTRATION.monitor_app import local_server
+from orchestrator.server import local_server
 
 
 class DashboardRunResolutionTests(unittest.TestCase):

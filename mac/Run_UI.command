@@ -2,7 +2,7 @@
 set -e
 
 # Navigate to the app directory relative to this script
-cd "$(dirname "$0")/monitor_app"
+cd "$(dirname "$0")/../frontend"
 
 echo "============================================="
 echo "       Outreach Control Center Launcher       "

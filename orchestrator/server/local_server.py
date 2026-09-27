@@ -20,7 +20,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 APP_DIR = Path(__file__).resolve().parent
-PROJECT_DIR = APP_DIR.parents[1]
+PROJECT_DIR = APP_DIR.parents[2]
 STATE_DIR = PROJECT_DIR / "state"
 SCRIPTS_DIR = PROJECT_DIR / "scripts"
 HELPERS_DIR = PROJECT_DIR / "helpers"
@@ -102,9 +102,9 @@ WITHDRAWAL_DASHBOARD_RUN_LOG_PATH = STATE_DIR / "dashboard_cache" / "withdrawal_
 ACTIVITY_SESSIONS_DIR = STATE_DIR / "activity_sessions"
 ACTIVITY_HISTORY_CACHE: dict[str, Any] = {"signature": (), "rows": []}
 WATCHER_STATE_PATH = STATE_DIR / "orchestration_watcher.json"
-WATCHER_SCRIPT_PATH = PROJECT_DIR / "ORCHESTRATION" / "watcher" / "orchestration_watcher.py"
+WATCHER_SCRIPT_PATH = PROJECT_DIR / "orchestrator" / "watcher" / "orchestration_watcher.py"
 WATCHER_LABEL = "com.outreachautomation.orchestration-watcher"
-WATCHER_PLIST_SOURCE = PROJECT_DIR / "ORCHESTRATION" / "watcher" / f"{WATCHER_LABEL}.plist.template"
+WATCHER_PLIST_SOURCE = PROJECT_DIR / "orchestrator" / "watcher" / f"{WATCHER_LABEL}.plist.template"
 WATCHER_PLIST_TARGET = Path.home() / "Library" / "LaunchAgents" / f"{WATCHER_LABEL}.plist"
 PROCESS_APPROVED_FIRST_AUTOMATION_PATH = (
     Path.home() / ".codex" / "automations" / "process-approved-leads" / "automation.toml"
@@ -2558,7 +2558,7 @@ def invoke(channel: str, requested: dict[str, Any]) -> Any:
 
 class DashboardHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, directory=str(APP_DIR), **kwargs)
+        super().__init__(*args, directory=str(PROJECT_DIR / "frontend"), **kwargs)
 
     def _send_json(self, payload: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
         encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
