@@ -18,10 +18,10 @@ from outreach_helper import (
     build_prospect_activity_fields,
     mark_connected,
 )
-from sheets_helper import get_client, get_worksheet, open_sheet
 
 from outbound.outreach.journal import _record_journal_event, _sheet_target_payload
 from outbound.outreach.policy import ACTIVITY_READ_TIMEOUT_SEC, OUTREACH_STATUS_REQUIRES_EMAIL
+from outbound.shared.sheets import get_client, get_worksheet, open_sheet
 
 
 def _activity_summary(activity: dict[str, Any]) -> str:

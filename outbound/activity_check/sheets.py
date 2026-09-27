@@ -7,9 +7,8 @@ carve (see docs/CARVE-ACTIVITY-CHECK.md, slice S6). Pure move.
 from pathlib import Path
 from typing import Any
 
-from sheets_helper import get_client, normalize_rows, open_sheet
-
 from outbound.activity_check.text import clean_text, normalize_activity_value, normalize_url
+from outbound.shared.sheets import get_client, normalize_rows, open_sheet
 
 
 def read_worksheet(

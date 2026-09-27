@@ -13,11 +13,10 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 
-from sheets_helper import get_client, open_sheet
-
 from outbound.leads.config import NOTIFICATION_QUEUE_COLUMNS, SEARCH_TASKS_DIR
 from outbound.leads.reviewtab import get_or_create_worksheet
 from outbound.leads.runs import save_run, source_sheet_url
+from outbound.shared.sheets import get_client, open_sheet
 
 
 def export_pending_search_tasks(

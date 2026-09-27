@@ -15,7 +15,6 @@ from typing import Any
 import gspread
 from gspread.utils import ValidationConditionType
 from prefinal_queue import enqueue_batch, record_prefinal_publish
-from sheets_helper import get_client, get_worksheet, open_sheet
 
 from outbound.leads.archive import ResearchArchive, clean_text
 from outbound.leads.config import (
@@ -32,6 +31,7 @@ from outbound.leads.destination import (
     write_destination_rows,
 )
 from outbound.leads.runs import load_run, save_run
+from outbound.shared.sheets import get_client, get_worksheet, open_sheet
 
 ROOT = Path(__file__).resolve().parents[2]
 

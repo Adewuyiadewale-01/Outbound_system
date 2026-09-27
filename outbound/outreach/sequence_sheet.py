@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from sheets_helper import get_client, get_worksheet, open_sheet
-
 from outbound.outreach.planning import (
     _normalize_activity_timing,
     generate_activity_timing_plan,
@@ -21,6 +19,7 @@ from outbound.shared.diversion import (
     generate_lead_diversion_plan,
     generate_lead_diversion_seconds_plan,
 )
+from outbound.shared.sheets import get_client, get_worksheet, open_sheet
 from outbound.shared.sheetutils import (
     _batch_update_cells,
     _find_first_index,

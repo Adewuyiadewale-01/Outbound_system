@@ -11,9 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from sheets_helper import get_client, get_worksheet, open_sheet
-
 from outbound.outreach.paths import OUTREACH_WORKERS_CONFIG_PATH
+from outbound.shared.sheets import get_client, get_worksheet, open_sheet
 from outbound.shared.sheetutils import _batch_update_cells, _find_first_index
 
 

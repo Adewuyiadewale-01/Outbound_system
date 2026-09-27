@@ -20,7 +20,6 @@ from outreach_helper import (
     load_prospect_queue,
     load_templates,
 )
-from sheets_helper import daily_approval_state, get_daily_group_data, safe_number
 
 from outbound.outreach.control_sheet import (
     _control_lane_targets,
@@ -79,6 +78,7 @@ from outbound.outreach.sequence_sheet import (
     generate_lead_diversions_from_sheet,
 )
 from outbound.shared.dates import _parse_date, sheet_date
+from outbound.shared.sheets import daily_approval_state, get_daily_group_data, safe_number
 from outbound.shared.sheetutils import _normalize_profile_url
 
 
