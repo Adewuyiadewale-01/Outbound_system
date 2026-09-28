@@ -227,6 +227,7 @@ DEFAULTS: dict[str, Any] = {
     "deepBudgetMinutesPerRun": 180,
     "parkAfterZeroFullChecks": 4,
     "activatedQueries": [],
+    "parkedQueries": [],
 }
 
 _RANGE_PAIRS: list[tuple[str, str]] = [
@@ -306,6 +307,8 @@ def normalize_settings(source: dict[str, Any] | None = None) -> dict[str, Any]:
     settings["adaptiveDepthEnabled"] = _bool(settings.get("adaptiveDepthEnabled"), True)
     if not isinstance(settings.get("activatedQueries"), list):
         settings["activatedQueries"] = []
+    if not isinstance(settings.get("parkedQueries"), list):
+        settings["parkedQueries"] = []
     if not re.fullmatch(r"\d{2}:\d{2}", str(settings["dailyRunTime"])):
         raise ValueError("dailyRunTime must use HH:MM format")
     ZoneInfo(str(settings["timezone"]))
