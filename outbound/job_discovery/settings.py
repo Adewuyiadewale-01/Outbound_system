@@ -217,6 +217,16 @@ DEFAULTS: dict[str, Any] = {
     "staleLockMinutes": 360,
     "maxConsecutiveErrorsPerPlatform": 3,
     "closeAfterMisses": 3,
+    # Adaptive search depth (docs/SEARCH-DEPTH-FIX.md)
+    "adaptiveDepthEnabled": True,
+    "shallowQuietThreshold": 10,
+    "shallowQuietPages": 3,
+    "sparsePageResults": 2,
+    "sparsePages": 3,
+    "fullCheckIntervalDays": 7,
+    "deepBudgetMinutesPerRun": 180,
+    "parkAfterZeroFullChecks": 4,
+    "activatedQueries": [],
 }
 
 _RANGE_PAIRS: list[tuple[str, str]] = [
@@ -238,6 +248,11 @@ _MIN_ONE_KEYS = [
     "listingRetryAttempts",
     "staleLockMinutes",
     "closeAfterMisses",
+    "shallowQuietPages",
+    "sparsePages",
+    "fullCheckIntervalDays",
+    "deepBudgetMinutesPerRun",
+    "parkAfterZeroFullChecks",
 ]
 
 
@@ -266,6 +281,17 @@ def _number_or(value: Any, fallback: float) -> float:
     return parsed
 
 
+def _bool(value: Any, default: bool = True) -> bool:
+    """Lenient boolean for config values ("true"/false/1/0 booleans)."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
+
 def normalize_settings(source: dict[str, Any] | None = None) -> dict[str, Any]:
     """Port of ``normalizeSettings``: defaults + input, clamped and validated."""
     settings = {**DEFAULTS, **(source or {})}
@@ -275,6 +301,11 @@ def normalize_settings(source: dict[str, Any] | None = None) -> dict[str, Any]:
     for key in _MIN_ONE_KEYS:
         settings[key] = max(1, math.floor(_number_or(settings[key], DEFAULTS[key])))
     settings["maxPagesPerQuery"] = max(0, math.floor(_number_or(settings["maxPagesPerQuery"], 0)))
+    for key in ("shallowQuietThreshold", "sparsePageResults"):
+        settings[key] = max(0, math.floor(_number_or(settings[key], DEFAULTS[key])))
+    settings["adaptiveDepthEnabled"] = _bool(settings.get("adaptiveDepthEnabled"), True)
+    if not isinstance(settings.get("activatedQueries"), list):
+        settings["activatedQueries"] = []
     if not re.fullmatch(r"\d{2}:\d{2}", str(settings["dailyRunTime"])):
         raise ValueError("dailyRunTime must use HH:MM format")
     ZoneInfo(str(settings["timezone"]))

@@ -51,6 +51,11 @@ CREATE TABLE IF NOT EXISTS projection_sync (
   target TEXT NOT NULL, id TEXT NOT NULL, projection_hash TEXT NOT NULL, synced_at TEXT NOT NULL,
   PRIMARY KEY(target, id)
 );
+CREATE TABLE IF NOT EXISTS query_coverage (
+  id TEXT PRIMARY KEY, frontier_page INTEGER, frontier_reason TEXT, covered_at TEXT, checked_at TEXT,
+  last_stop_reason TEXT
+);
+CREATE TABLE IF NOT EXISTS query_stats (id TEXT PRIMARY KEY, data TEXT NOT NULL);
 """
 
 _METADATA_KEYS = (
@@ -71,6 +76,8 @@ _ALL_TABLES = (
     "live_test_usage",
     "search_results",
     "projection_sync",
+    "query_coverage",
+    "query_stats",
 )
 _DEFAULT_LOCK_STALE_MS = 6 * 60 * 60 * 1000
 _DEFAULT_RECONCILE_MS = 7 * 24 * 60 * 60 * 1000
@@ -428,6 +435,81 @@ class StateStore:
             if row:
                 found[row[0]] = json.loads(row[1])
         return found
+
+    # ----------------------------------------------------------- crawl memory
+
+    def query_coverage_map(self) -> dict[str, dict]:
+        """Per-query crawl coverage (frontier memory; see docs/SEARCH-DEPTH-FIX.md)."""
+        self.ensure_database()
+        assert self.db is not None
+        return {
+            row[0]: {
+                "frontierPage": row[1],
+                "frontierReason": row[2],
+                "coveredAt": row[3],
+                "checkedAt": row[4],
+                "lastStopReason": row[5],
+            }
+            for row in self.db.execute(
+                "SELECT id, frontier_page, frontier_reason, covered_at, checked_at, last_stop_reason "
+                "FROM query_coverage"
+            ).fetchall()
+        }
+
+    def get_query_coverage(self, query_id: str) -> dict | None:
+        return self.query_coverage_map().get(query_id)
+
+    def set_query_coverage(self, query_id: str, coverage: dict) -> None:
+        self.ensure_database()
+        assert self.db is not None
+        self.db.execute(
+            "INSERT INTO query_coverage(id,frontier_page,frontier_reason,covered_at,checked_at,last_stop_reason) "
+            "VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET frontier_page=excluded.frontier_page,"
+            "frontier_reason=excluded.frontier_reason, covered_at=excluded.covered_at,"
+            "checked_at=excluded.checked_at, last_stop_reason=excluded.last_stop_reason",
+            [
+                query_id,
+                coverage.get("frontierPage"),
+                coverage.get("frontierReason"),
+                coverage.get("coveredAt"),
+                coverage.get("checkedAt"),
+                coverage.get("lastStopReason"),
+            ],
+        )
+
+    def query_stats_map(self) -> dict[str, dict]:
+        """Per-query rolling crawl statistics (ranking inputs)."""
+        self.ensure_database()
+        assert self.db is not None
+        return {
+            row[0]: json.loads(row[1])
+            for row in self.db.execute("SELECT id, data FROM query_stats").fetchall()
+        }
+
+    def get_query_stats(self, query_id: str) -> dict:
+        self.ensure_database()
+        assert self.db is not None
+        row = self.db.execute("SELECT data FROM query_stats WHERE id = ?", [query_id]).fetchone()
+        return json.loads(row[0]) if row else {}
+
+    def set_query_stats(self, query_id: str, stats: dict) -> None:
+        self.ensure_database()
+        assert self.db is not None
+        self.db.execute(
+            "INSERT INTO query_stats(id, data) VALUES(?, ?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+            [query_id, _json(stats)],
+        )
+
+    def search_history_urls(self, query_id: str) -> list[str]:
+        """Every result URL ever recorded for this query (novelty checks)."""
+        self.ensure_database()
+        assert self.db is not None
+        return [
+            row[0]
+            for row in self.db.execute(
+                "SELECT url FROM search_results WHERE query_id = ?", [query_id]
+            ).fetchall()
+        ]
 
     def stats(self) -> dict[str, Any]:
         self.ensure_database()
