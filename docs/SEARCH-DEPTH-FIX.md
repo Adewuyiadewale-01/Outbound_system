@@ -89,7 +89,7 @@ Every crawl of a query restarts at page 0 and walks to its natural end regardles
 2. **Stop rules (provider)** — shallow stop (knownUrls/threshold/buffer), tail rule, `known_frontier`,
    `last_page`; unit tests. *(done)*
 3. **Runner integration** — shallow/full decision, coverage/stats write-back, miss-guard, master switch;
-   two-day regression test (day 2 = 1–3 pages).
+   two-day regression test (day 2 = 1–3 pages). *(done)*
 4. **Policy** — tier classification, auto-park + overrides, 7-day clock, priority wave, deep budget, backlog reporting.
 5. **Proof & polish** — `status` telemetry, seeded-DB dry simulation (projected savings), fake-browser E2E;
    live validation rides the cutover gate.
