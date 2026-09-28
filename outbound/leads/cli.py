@@ -12,8 +12,6 @@ from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
-from prefinal_queue import rows_fingerprint
-
 from outbound.leads.archive import ResearchArchive
 from outbound.leads.bridge import bridge_prefinal_to_prospects
 from outbound.leads.computation import (
@@ -65,6 +63,7 @@ from outbound.leads.workflow import (
     run_search_tasks,
     write_research_prompt,
 )
+from outbound.shared.queue import rows_fingerprint
 
 
 def add_common_args(parser: argparse.ArgumentParser) -> None:

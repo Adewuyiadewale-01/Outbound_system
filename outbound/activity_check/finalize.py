@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 import gspread
-from prefinal_queue import QUEUE_ROW_COLUMNS, load_batch, update_batch_status
 
 from outbound.activity_check.analysis import final_sort_key, rank_row_for_final
 from outbound.activity_check.config import FINAL_REQUIRED_COLUMNS
@@ -24,6 +23,7 @@ from outbound.activity_check.state import (
 )
 from outbound.activity_check.targets import extract_targets
 from outbound.activity_check.text import clean_text, normalize_activity_value, target_key
+from outbound.shared.queue import QUEUE_ROW_COLUMNS, load_batch, update_batch_status
 from outbound.shared.sheets import get_client, normalize_rows, open_sheet, require_columns
 
 

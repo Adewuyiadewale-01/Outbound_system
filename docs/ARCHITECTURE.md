@@ -100,7 +100,7 @@ config/  state/  tests/  docs/
 | 4 | Leads pipeline | `lead_review_lifecycle.py` + friends | strong test suite |
 | 5 | Withdrawals | `withdraw_connections.py` + friends | un-paused at cutover |
 | 6 | Watcher | `ORCHESTRATION/*` | rename happens here; everything else settled |
-| 7 | Apps Script | `mobile_lead_app/` | documentation pass, low risk |
+| 7 | Apps Script | `reporting_app/` | mobile reporting web app, documentation pass |
 
 ## 7. Decision Log
 

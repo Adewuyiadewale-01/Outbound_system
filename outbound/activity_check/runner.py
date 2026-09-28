@@ -10,13 +10,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from prefinal_queue import (
-    enqueue_batch,
-    load_batch,
-    next_activity_batch,
-    update_batch_status,
-)
-
 from outbound.activity_check.analysis import (
     activity_detail_empty_success_reason,
     activity_evidence,
@@ -78,6 +71,12 @@ from outbound.activity_check.text import (
     normalize_activity_value,
 )
 from outbound.shared.dates import sheet_date
+from outbound.shared.queue import (
+    enqueue_batch,
+    load_batch,
+    next_activity_batch,
+    update_batch_status,
+)
 from outbound.shared.sheets import require_columns
 
 
