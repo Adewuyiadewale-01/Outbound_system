@@ -196,7 +196,9 @@ New deps added: `playwright`, `lxml`, `httpx`, `gspread` (existing in ecosystem)
 
 ### 6.4a Progress log
 
-- **Phase 2 (pure core) — completed locally 2026-09-28.** `outbound/job_discovery/{settings,urls,queries,dedupe,signals}.py` ported; 122 native tests added; cross-language golden harness (Node reference vs Python port) reports **0 mismatches** across the full corpus; repo suite 234 tests green, ruff clean.
+- **Phase 2 (pure core) — completed locally 2026-09-28.** `outbound/job_discovery/{settings,urls,queries,dedupe,signals}.py` ported; 122 native tests added; cross-language golden harness (Node reference vs Python port) reports **0 mismatches** across the full corpus; repo suite 234 tests green, ruff clean. Merged via PR #29 (squash `6eff19f`).
+
+- **Phase 3 (state store) — completed locally 2026-09-28.** `outbound/job_discovery/state.py` (SQLite schema, run lock, projection sync, legacy migration) + 10 tests; cross-language check vs the reference on `node:sqlite`: **0 mismatches** across 15 scenario outputs incl. byte-level table dumps; repo suite 244 tests green, ruff clean. Awaiting push/merge go.
 
 ### 6.5 Verification strategy
 - Test parity: ≥22 ported tests + golden cross-language checks (Node available locally; harness not in CI).
