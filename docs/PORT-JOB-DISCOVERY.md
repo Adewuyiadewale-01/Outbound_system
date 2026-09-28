@@ -194,6 +194,10 @@ New deps added: `playwright`, `lxml`, `httpx`, `gspread` (existing in ecosystem)
 - **Phase 6 — Runner & CLI:** `runner.py`, `scheduler.py`, `cli.py` + full mock end-to-end (mirrors `run.test.mjs` scenarios).
 - **Phase 7 — Live verification:** read-only `status` against the real setup → `smoke-test` → capped `live-test` → cutover decision (only with explicit approval).
 
+### 6.4a Progress log
+
+- **Phase 2 (pure core) — completed locally 2026-09-28.** `outbound/job_discovery/{settings,urls,queries,dedupe,signals}.py` ported; 122 native tests added; cross-language golden harness (Node reference vs Python port) reports **0 mismatches** across the full corpus; repo suite 234 tests green, ruff clean.
+
 ### 6.5 Verification strategy
 - Test parity: ≥22 ported tests + golden cross-language checks (Node available locally; harness not in CI).
 - Mock end-to-end runs before any live call; `automationEnabled=false` throughout development.
@@ -201,11 +205,11 @@ New deps added: `playwright`, `lxml`, `httpx`, `gspread` (existing in ecosystem)
 
 ---
 
-## 7. Open questions (need your call)
+## 7. Open questions — resolved 2026-09-28
 
-1. **Browser**: direct Python `playwright` (my rec) or keep the `playwright-cli.sh` shell interface for now?
-2. **State location**: repo `state/job_discovery/` conventions or keep `data/` inside the package dir?
-3. **Transports**: keep BOTH sheet transports (Apps Script + service account) and BOTH extra search providers (`http`, `google-cse`)? My rec: yes — interface-compatible, near-zero cost.
-4. **JS copy retention**: keep `job_discovery/` as reference until parity proven (my rec: yes), then archive at cutover.
-5. **Env reconciliation**: job-discovery's `.env` keys vs the repo root `.env` — port should use the repo's env loader with the same key names; confirm no conflicts.
-6. **Entry naming**: `scripts/job_discovery.py` OK? (Launcher to follow in `mac/`.)
+1. **Browser**: Python `playwright` directly. ✅
+2. **State location**: repo `state/` conventions (e.g. `state/job_discovery/`). ✅
+3. **Transports**: keep both sheet transports and all search providers. ✅
+4. **JS copy retention**: keep `job_discovery/` as reference until parity proven. ✅
+5. **Env reconciliation**: no key conflicts; port reads the repo `.env` with the same names. ✅
+6. **Entry naming**: `scripts/job_discovery.py` (+ `mac/` launcher later). ✅
