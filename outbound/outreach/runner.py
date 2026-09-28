@@ -14,13 +14,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from outreach_helper import (
-    apply_prospect_fields,
-    insert_outreach_log_row,
-    load_prospect_queue,
-    load_templates,
-)
-
 from outbound.outreach.control_sheet import (
     _control_lane_targets,
     _control_prospects_start_row,
@@ -76,6 +69,12 @@ from outbound.outreach.sequence_sheet import (
     generate_delay_seconds_from_sheet,
     generate_lead_diversion_seconds_from_sheet,
     generate_lead_diversions_from_sheet,
+)
+from outbound.outreach.sheetops import (
+    apply_prospect_fields,
+    insert_outreach_log_row,
+    load_prospect_queue,
+    load_templates,
 )
 from outbound.shared.dates import _parse_date, sheet_date
 from outbound.shared.sheets import daily_approval_state, get_daily_group_data, safe_number

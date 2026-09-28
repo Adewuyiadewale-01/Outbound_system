@@ -12,15 +12,14 @@ import time
 from datetime import date
 from typing import Any
 
-from outreach_helper import (
+from outbound.outreach.journal import _record_journal_event, _sheet_target_payload
+from outbound.outreach.policy import ACTIVITY_READ_TIMEOUT_SEC, OUTREACH_STATUS_REQUIRES_EMAIL
+from outbound.outreach.sheetops import (
     apply_prospect_fields,
     build_connection_sent_fields,
     build_prospect_activity_fields,
     mark_connected,
 )
-
-from outbound.outreach.journal import _record_journal_event, _sheet_target_payload
-from outbound.outreach.policy import ACTIVITY_READ_TIMEOUT_SEC, OUTREACH_STATUS_REQUIRES_EMAIL
 from outbound.shared.sheets import get_client, get_worksheet, open_sheet
 
 

@@ -21,8 +21,10 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "helpers"))
 
-from outreach_helper import CREDS_PATH, OBF_SHEET_URL, OUTREACH_LOG_TAB  # noqa: E402
 from sheets_helper import get_client, get_worksheet, open_sheet  # noqa: E402
+
+from outbound.outreach.config import CREDS_PATH, OBF_SHEET_URL
+from outbound.outreach.sheetops import OUTREACH_LOG_TAB  # noqa: E402
 
 LOCAL_TZ = ZoneInfo("Africa/Lagos")
 SESSIONS = ROOT / "state" / "withdrawal_sessions"

@@ -27,8 +27,10 @@ HELPERS = ROOT / "helpers"
 sys.path.insert(0, str(HELPERS))
 
 from linkedin_helper import LinkedInSession, check_circuit_breakers  # noqa: E402
-from outreach_helper import CREDS_PATH, OBF_SHEET_URL, PIPELINE_TAB  # noqa: E402
 from sheets_helper import get_client, get_worksheet, open_sheet  # noqa: E402
+
+from outbound.outreach.config import CREDS_PATH, OBF_SHEET_URL
+from outbound.outreach.sheetops import PIPELINE_TAB  # noqa: E402
 
 DEFAULT_TIMEZONE = "Africa/Lagos"
 FOLLOWUP_TEMPLATES_TAB = "Follow-up Templates"
