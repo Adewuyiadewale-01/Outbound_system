@@ -10,7 +10,7 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import automation_gate  # noqa: E402
+from outbound.leads import gate_impl as automation_gate  # noqa: E402
 
 
 class DesignThresholdTests(unittest.TestCase):

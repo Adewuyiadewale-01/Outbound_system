@@ -13,13 +13,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 HELPERS = ROOT / "helpers"
 if str(HELPERS) not in sys.path:
     sys.path.insert(0, str(HELPERS))
 
 from runtime_environment import load_repo_env  # noqa: E402
-from sheets_helper import get_client, get_worksheet, normalize_rows, open_sheet  # noqa: E402
+
+from outbound.shared.sheets import (  # noqa: E402
+    get_client,
+    get_worksheet,
+    normalize_rows,
+    open_sheet,
+)
 
 load_repo_env()
 
