@@ -1,0 +1,1178 @@
+{
+ "bootstrapPayload": {
+  "action": "bootstrap",
+  "token": "token-1",
+  "platforms": [
+   {
+    "name": "Ashby",
+    "siteTarget": "site:jobs.ashbyhq.com",
+    "enabled": true
+   },
+   {
+    "name": "Lever",
+    "siteTarget": "(site:jobs.lever.co OR site:jobs.eu.lever.co)",
+    "enabled": true
+   }
+  ],
+  "roles": [
+   {
+    "name": "Python Developer",
+    "field": "engineering",
+    "junior": [
+     "junior python developer",
+     "entry level python developer"
+    ],
+    "unfiltered": [
+     "python developer",
+     "python engineer"
+    ]
+   }
+  ],
+  "queries": [
+   {
+    "id": "Ashby:Python Developer:junior",
+    "platform": "Ashby",
+    "role": "Python Developer",
+    "type": "junior",
+    "query": "site:jobs.ashbyhq.com (intitle:\"junior python developer\") remote -\"no remote\"",
+    "allowedHosts": [
+     "jobs.ashbyhq.com"
+    ]
+   }
+  ],
+  "localFirst": false,
+  "tabSchemas": {
+   "Control": [
+    "Setting",
+    "Value",
+    "Description"
+   ],
+   "ATS Platforms": [
+    "Platform",
+    "Google site target",
+    "Enabled"
+   ],
+   "Roles & Vocabulary": [
+    "Role",
+    "Search type",
+    "Vocabulary"
+   ],
+   "Queries": [
+    "Query ID",
+    "Platform",
+    "Role",
+    "Search type",
+    "Google query",
+    "Enabled"
+   ],
+   "Jobs": [
+    "job_id",
+    "company_id",
+    "company",
+    "title",
+    "location",
+    "application_url",
+    "ats_platform",
+    "role_match",
+    "junior_status",
+    "remote_status",
+    "python_status",
+    "evidence_text",
+    "source_queries",
+    "first_seen_at",
+    "last_seen_at",
+    "verification_checked_at",
+    "score",
+    "status",
+    "review_reason"
+   ],
+   "Companies": [
+    "company_id",
+    "company_name",
+    "company_domain",
+    "ats_platforms",
+    "career_urls",
+    "first_seen_at",
+    "last_seen_at",
+    "active_job_count",
+    "remote_hiring_signal",
+    "status",
+    "notes"
+   ],
+   "Runs": [
+    "run_id",
+    "trigger",
+    "status",
+    "started_at",
+    "ended_at",
+    "queries_attempted",
+    "results_found",
+    "unique_candidates",
+    "hydrated",
+    "new_jobs",
+    "errors",
+    "notes"
+   ],
+   "Review Queue": [
+    "job_id",
+    "company",
+    "title",
+    "application_url",
+    "review_reason",
+    "junior_status",
+    "remote_status",
+    "python_status",
+    "checked_at"
+   ],
+   "Rules": [
+    "Rule",
+    "Value",
+    "Version"
+   ]
+  },
+  "defaultControl": [
+   [
+    "Automation Enabled",
+    "FALSE",
+    "Set TRUE to allow the scheduler to launch the daily run."
+   ],
+   [
+    "Daily Run Time",
+    "08:00",
+    "24-hour local time."
+   ],
+   [
+    "Timezone",
+    "Africa/Lagos",
+    "IANA timezone used by the scheduler."
+   ],
+   [
+    "Max Queries Per Run",
+    "180",
+    "Use a smaller number for testing."
+   ],
+   [
+    "Max Listings Per Run",
+    "180",
+    "Daily verification target. The bot finishes its current query before stopping, so this can be exceeded slightly."
+   ],
+   [
+    "Minimum Listing Delay (ms)",
+    "8000",
+    "Minimum spacing after a job listing read."
+   ],
+   [
+    "Maximum Listing Delay (ms)",
+    "15000",
+    "Maximum spacing after a job listing read."
+   ],
+   [
+    "Minimum Listing Dwell (ms)",
+    "4000",
+    "Minimum time spent loading and reading a job listing."
+   ],
+   [
+    "Maximum Listing Dwell (ms)",
+    "7000",
+    "Maximum time spent loading and reading a job listing."
+   ],
+   [
+    "Minimum Page Delay (ms)",
+    "15000",
+    "Minimum spacing before advancing a Google results page."
+   ],
+   [
+    "Maximum Page Delay (ms)",
+    "30000",
+    "Maximum spacing before advancing a Google results page."
+   ],
+   [
+    "Search Page Burst Size",
+    "3",
+    "Pause after this many consecutive Google results pages within one query."
+   ],
+   [
+    "Minimum Search Page Cooldown (ms)",
+    "180000",
+    "Shortest pause between result-page bursts (3 minutes)."
+   ],
+   [
+    "Maximum Search Page Cooldown (ms)",
+    "300000",
+    "Longest pause between result-page bursts (5 minutes)."
+   ],
+   [
+    "Minimum Inter-query Delay (ms)",
+    "90000",
+    "Minimum spacing between completed Google queries."
+   ],
+   [
+    "Maximum Inter-query Delay (ms)",
+    "180000",
+    "Maximum spacing between completed Google queries."
+   ],
+   [
+    "Query Burst Size",
+    "3",
+    "Complete this many full queries before a longer cooldown."
+   ],
+   [
+    "Minimum Cooldown (ms)",
+    "600000",
+    "Shortest pause between query bursts (10 minutes)."
+   ],
+   [
+    "Maximum Cooldown (ms)",
+    "900000",
+    "Longest pause between query bursts (15 minutes)."
+   ],
+   [
+    "Maximum Pages Per Query",
+    "0",
+    "Optional total-page ceiling. Use 0 to paginate until Google ends or two thin pages occur."
+   ],
+   [
+    "Maximum Search Minutes Per Query",
+    "75",
+    "Safety time limit for a single Google query; normal pagination still stops after two low-yield pages."
+   ],
+   [
+    "Search Retry Attempts",
+    "2",
+    "Attempts before leaving a query pending for a later run."
+   ],
+   [
+    "Listing Retry Attempts",
+    "3",
+    "Attempts before leaving a failed listing pending for a later run."
+   ],
+   [
+    "Retry Base Delay (ms)",
+    "2000",
+    "Base delay used for bounded exponential retries."
+   ],
+   [
+    "Verified Job Recheck Days",
+    "7",
+    "Re-open unchanged verified jobs after this many days."
+   ],
+   [
+    "Stale Lock Minutes",
+    "360",
+    "Recover a lock only after this age or when its local process is gone."
+   ],
+   [
+    "Close After Query Misses",
+    "3",
+    "Mark a job closed after this many completed source-query misses."
+   ]
+  ]
+ },
+ "tabSchemas": {
+  "Control": [
+   "Setting",
+   "Value",
+   "Description"
+  ],
+  "ATS Platforms": [
+   "Platform",
+   "Google site target",
+   "Enabled"
+  ],
+  "Roles & Vocabulary": [
+   "Role",
+   "Search type",
+   "Vocabulary"
+  ],
+  "Queries": [
+   "Query ID",
+   "Platform",
+   "Role",
+   "Search type",
+   "Google query",
+   "Enabled"
+  ],
+  "Jobs": [
+   "job_id",
+   "company_id",
+   "company",
+   "title",
+   "location",
+   "application_url",
+   "ats_platform",
+   "role_match",
+   "junior_status",
+   "remote_status",
+   "python_status",
+   "evidence_text",
+   "source_queries",
+   "first_seen_at",
+   "last_seen_at",
+   "verification_checked_at",
+   "score",
+   "status",
+   "review_reason"
+  ],
+  "Companies": [
+   "company_id",
+   "company_name",
+   "company_domain",
+   "ats_platforms",
+   "career_urls",
+   "first_seen_at",
+   "last_seen_at",
+   "active_job_count",
+   "remote_hiring_signal",
+   "status",
+   "notes"
+  ],
+  "Runs": [
+   "run_id",
+   "trigger",
+   "status",
+   "started_at",
+   "ended_at",
+   "queries_attempted",
+   "results_found",
+   "unique_candidates",
+   "hydrated",
+   "new_jobs",
+   "errors",
+   "notes"
+  ],
+  "Review Queue": [
+   "job_id",
+   "company",
+   "title",
+   "application_url",
+   "review_reason",
+   "junior_status",
+   "remote_status",
+   "python_status",
+   "checked_at"
+  ],
+  "Rules": [
+   "Rule",
+   "Value",
+   "Version"
+  ]
+ },
+ "defaultControl": [
+  [
+   "Automation Enabled",
+   "FALSE",
+   "Set TRUE to allow the scheduler to launch the daily run."
+  ],
+  [
+   "Daily Run Time",
+   "08:00",
+   "24-hour local time."
+  ],
+  [
+   "Timezone",
+   "Africa/Lagos",
+   "IANA timezone used by the scheduler."
+  ],
+  [
+   "Max Queries Per Run",
+   "180",
+   "Use a smaller number for testing."
+  ],
+  [
+   "Max Listings Per Run",
+   "180",
+   "Daily verification target. The bot finishes its current query before stopping, so this can be exceeded slightly."
+  ],
+  [
+   "Minimum Listing Delay (ms)",
+   "8000",
+   "Minimum spacing after a job listing read."
+  ],
+  [
+   "Maximum Listing Delay (ms)",
+   "15000",
+   "Maximum spacing after a job listing read."
+  ],
+  [
+   "Minimum Listing Dwell (ms)",
+   "4000",
+   "Minimum time spent loading and reading a job listing."
+  ],
+  [
+   "Maximum Listing Dwell (ms)",
+   "7000",
+   "Maximum time spent loading and reading a job listing."
+  ],
+  [
+   "Minimum Page Delay (ms)",
+   "15000",
+   "Minimum spacing before advancing a Google results page."
+  ],
+  [
+   "Maximum Page Delay (ms)",
+   "30000",
+   "Maximum spacing before advancing a Google results page."
+  ],
+  [
+   "Search Page Burst Size",
+   "3",
+   "Pause after this many consecutive Google results pages within one query."
+  ],
+  [
+   "Minimum Search Page Cooldown (ms)",
+   "180000",
+   "Shortest pause between result-page bursts (3 minutes)."
+  ],
+  [
+   "Maximum Search Page Cooldown (ms)",
+   "300000",
+   "Longest pause between result-page bursts (5 minutes)."
+  ],
+  [
+   "Minimum Inter-query Delay (ms)",
+   "90000",
+   "Minimum spacing between completed Google queries."
+  ],
+  [
+   "Maximum Inter-query Delay (ms)",
+   "180000",
+   "Maximum spacing between completed Google queries."
+  ],
+  [
+   "Query Burst Size",
+   "3",
+   "Complete this many full queries before a longer cooldown."
+  ],
+  [
+   "Minimum Cooldown (ms)",
+   "600000",
+   "Shortest pause between query bursts (10 minutes)."
+  ],
+  [
+   "Maximum Cooldown (ms)",
+   "900000",
+   "Longest pause between query bursts (15 minutes)."
+  ],
+  [
+   "Maximum Pages Per Query",
+   "0",
+   "Optional total-page ceiling. Use 0 to paginate until Google ends or two thin pages occur."
+  ],
+  [
+   "Maximum Search Minutes Per Query",
+   "75",
+   "Safety time limit for a single Google query; normal pagination still stops after two low-yield pages."
+  ],
+  [
+   "Search Retry Attempts",
+   "2",
+   "Attempts before leaving a query pending for a later run."
+  ],
+  [
+   "Listing Retry Attempts",
+   "3",
+   "Attempts before leaving a failed listing pending for a later run."
+  ],
+  [
+   "Retry Base Delay (ms)",
+   "2000",
+   "Base delay used for bounded exponential retries."
+  ],
+  [
+   "Verified Job Recheck Days",
+   "7",
+   "Re-open unchanged verified jobs after this many days."
+  ],
+  [
+   "Stale Lock Minutes",
+   "360",
+   "Recover a lock only after this age or when its local process is gone."
+  ],
+  [
+   "Close After Query Misses",
+   "3",
+   "Mark a job closed after this many completed source-query misses."
+  ]
+ ],
+ "googleSetup": {
+  "created": [
+   "Control",
+   "ATS Platforms",
+   "Roles & Vocabulary",
+   "Queries",
+   "Jobs",
+   "Companies",
+   "Runs",
+   "Review Queue",
+   "Rules"
+  ],
+  "valuesBatchUpdate": {
+   "data": [
+    {
+     "range": "'Control'!A1",
+     "majorDimension": "ROWS",
+     "values": [
+      [
+       "Setting",
+       "Value",
+       "Description"
+      ]
+     ]
+    },
+    {
+     "range": "'ATS Platforms'!A1",
+     "majorDimension": "ROWS",
+     "values": [
+      [
+       "Platform",
+       "Google site target",
+       "Enabled"
+      ]
+     ]
+    },
+    {
+     "range": "'Roles & Vocabulary'!A1",
+     "majorDimension": "ROWS",
+     "values": [
+      [
+       "Role",
+       "Search type",
+       "Vocabulary"
+      ]
+     ]
+    },
+    {
+     "range": "'Queries'!A1",
+     "majorDimension": "ROWS",
+     "values": [
+      [
+       "Query ID",
+       "Platform",
+       "Role",
+       "Search type",
+       "Google query",
+       "Enabled"
+      ]
+     ]
+    },
+    {
+     "range": "'Jobs'!A1",
+     "majorDimension": "ROWS",
+     "values": [
+      [
+       "job_id",
+       "company_id",
+       "company",
+       "title",
+       "location",
+       "application_url",
+       "ats_platform",
+       "role_match",
+       "junior_status",
+       "remote_status",
+       "python_status",
+       "evidence_text",
+       "source_queries",
+       "first_seen_at",
+       "last_seen_at",
+       "verification_checked_at",
+       "score",
+       "status",
+       "review_reason"
+      ]
+     ]
+    },
+    {
+     "range": "'Companies'!A1",
+     "majorDimension": "ROWS",
+     "values": [
+      [
+       "company_id",
+       "company_name",
+       "company_domain",
+       "ats_platforms",
+       "career_urls",
+       "first_seen_at",
+       "last_seen_at",
+       "active_job_count",
+       "remote_hiring_signal",
+       "status",
+       "notes"
+      ]
+     ]
+    },
+    {
+     "range": "'Runs'!A1",
+     "majorDimension": "ROWS",
+     "values": [
+      [
+       "run_id",
+       "trigger",
+       "status",
+       "started_at",
+       "ended_at",
+       "queries_attempted",
+       "results_found",
+       "unique_candidates",
+       "hydrated",
+       "new_jobs",
+       "errors",
+       "notes"
+      ]
+     ]
+    },
+    {
+     "range": "'Review Queue'!A1",
+     "majorDimension": "ROWS",
+     "values": [
+      [
+       "job_id",
+       "company",
+       "title",
+       "application_url",
+       "review_reason",
+       "junior_status",
+       "remote_status",
+       "python_status",
+       "checked_at"
+      ]
+     ]
+    },
+    {
+     "range": "'Rules'!A1",
+     "majorDimension": "ROWS",
+     "values": [
+      [
+       "Rule",
+       "Value",
+       "Version"
+      ]
+     ]
+    },
+    {
+     "range": "'Control'!A2",
+     "majorDimension": "ROWS",
+     "values": [
+      [
+       "Automation Enabled",
+       "FALSE",
+       "Set TRUE to allow the scheduler to launch the daily run."
+      ],
+      [
+       "Daily Run Time",
+       "08:00",
+       "24-hour local time."
+      ],
+      [
+       "Timezone",
+       "Africa/Lagos",
+       "IANA timezone used by the scheduler."
+      ],
+      [
+       "Max Queries Per Run",
+       "180",
+       "Use a smaller number for testing."
+      ],
+      [
+       "Max Listings Per Run",
+       "180",
+       "Daily verification target. The bot finishes its current query before stopping, so this can be exceeded slightly."
+      ],
+      [
+       "Minimum Listing Delay (ms)",
+       "8000",
+       "Minimum spacing after a job listing read."
+      ],
+      [
+       "Maximum Listing Delay (ms)",
+       "15000",
+       "Maximum spacing after a job listing read."
+      ],
+      [
+       "Minimum Listing Dwell (ms)",
+       "4000",
+       "Minimum time spent loading and reading a job listing."
+      ],
+      [
+       "Maximum Listing Dwell (ms)",
+       "7000",
+       "Maximum time spent loading and reading a job listing."
+      ],
+      [
+       "Minimum Page Delay (ms)",
+       "15000",
+       "Minimum spacing before advancing a Google results page."
+      ],
+      [
+       "Maximum Page Delay (ms)",
+       "30000",
+       "Maximum spacing before advancing a Google results page."
+      ],
+      [
+       "Search Page Burst Size",
+       "3",
+       "Pause after this many consecutive Google results pages within one query."
+      ],
+      [
+       "Minimum Search Page Cooldown (ms)",
+       "180000",
+       "Shortest pause between result-page bursts (3 minutes)."
+      ],
+      [
+       "Maximum Search Page Cooldown (ms)",
+       "300000",
+       "Longest pause between result-page bursts (5 minutes)."
+      ],
+      [
+       "Minimum Inter-query Delay (ms)",
+       "90000",
+       "Minimum spacing between completed Google queries."
+      ],
+      [
+       "Maximum Inter-query Delay (ms)",
+       "180000",
+       "Maximum spacing between completed Google queries."
+      ],
+      [
+       "Query Burst Size",
+       "3",
+       "Complete this many full queries before a longer cooldown."
+      ],
+      [
+       "Minimum Cooldown (ms)",
+       "600000",
+       "Shortest pause between query bursts (10 minutes)."
+      ],
+      [
+       "Maximum Cooldown (ms)",
+       "900000",
+       "Longest pause between query bursts (15 minutes)."
+      ],
+      [
+       "Maximum Pages Per Query",
+       "0",
+       "Optional total-page ceiling. Use 0 to paginate until Google ends or two thin pages occur."
+      ],
+      [
+       "Maximum Search Minutes Per Query",
+       "75",
+       "Safety time limit for a single Google query; normal pagination still stops after two low-yield pages."
+      ],
+      [
+       "Search Retry Attempts",
+       "2",
+       "Attempts before leaving a query pending for a later run."
+      ],
+      [
+       "Listing Retry Attempts",
+       "3",
+       "Attempts before leaving a failed listing pending for a later run."
+      ],
+      [
+       "Retry Base Delay (ms)",
+       "2000",
+       "Base delay used for bounded exponential retries."
+      ],
+      [
+       "Verified Job Recheck Days",
+       "7",
+       "Re-open unchanged verified jobs after this many days."
+      ],
+      [
+       "Stale Lock Minutes",
+       "360",
+       "Recover a lock only after this age or when its local process is gone."
+      ],
+      [
+       "Close After Query Misses",
+       "3",
+       "Mark a job closed after this many completed source-query misses."
+      ]
+     ]
+    },
+    {
+     "range": "'ATS Platforms'!A2",
+     "majorDimension": "ROWS",
+     "values": [
+      [
+       "Ashby",
+       "site:jobs.ashbyhq.com",
+       true
+      ],
+      [
+       "Lever",
+       "(site:jobs.lever.co OR site:jobs.eu.lever.co)",
+       true
+      ]
+     ]
+    },
+    {
+     "range": "'Roles & Vocabulary'!A2",
+     "majorDimension": "ROWS",
+     "values": [
+      [
+       "Python Developer",
+       "junior",
+       "junior python developer | entry level python developer"
+      ],
+      [
+       "Python Developer",
+       "unfiltered",
+       "python developer | python engineer"
+      ]
+     ]
+    },
+    {
+     "range": "'Queries'!A2",
+     "majorDimension": "ROWS",
+     "values": [
+      [
+       "Ashby:Python Developer:junior",
+       "Ashby",
+       "Python Developer",
+       "junior",
+       "site:jobs.ashbyhq.com (intitle:\"junior python developer\") remote -\"no remote\"",
+       true
+      ]
+     ]
+    },
+    {
+     "range": "'Rules'!A2",
+     "majorDimension": "ROWS",
+     "values": [
+      [
+       "Rules version",
+       "3",
+       "3"
+      ],
+      [
+       "Junior signals",
+       "junior | jr | associate | entry level | new grad | graduate | I | 1 | early career",
+       "2"
+      ],
+      [
+       "Senior signals",
+       "senior | staff | principal | lead | manager | director",
+       "2"
+      ],
+      [
+       "Remote signals",
+       "remote | work from home | distributed | anywhere",
+       "2"
+      ],
+      [
+       "Hybrid signals",
+       "hybrid",
+       "3"
+      ],
+      [
+       "Onsite signals",
+       "no remote | on-site | onsite | in office",
+       "3"
+      ],
+      [
+       "Non-remote signals",
+       "no remote | on-site | onsite | in office | hybrid only",
+       "2"
+      ],
+      [
+       "Python signals",
+       "python",
+       "2"
+      ]
+     ]
+    }
+   ]
+  }
+ },
+ "defaultRules": [
+  [
+   "Rules version",
+   "3",
+   "3"
+  ],
+  [
+   "Junior signals",
+   "junior | jr | associate | entry level | new grad | graduate | I | 1 | early career",
+   "2"
+  ],
+  [
+   "Senior signals",
+   "senior | staff | principal | lead | manager | director",
+   "2"
+  ],
+  [
+   "Remote signals",
+   "remote | work from home | distributed | anywhere",
+   "2"
+  ],
+  [
+   "Hybrid signals",
+   "hybrid",
+   "3"
+  ],
+  [
+   "Onsite signals",
+   "no remote | on-site | onsite | in office",
+   "3"
+  ],
+  [
+   "Non-remote signals",
+   "no remote | on-site | onsite | in office | hybrid only",
+   "2"
+  ],
+  [
+   "Python signals",
+   "python",
+   "2"
+  ]
+ ],
+ "googleSetupLocalFirst": {
+  "created": [
+   "Jobs",
+   "Companies",
+   "Runs",
+   "Review Queue"
+  ],
+  "valuesBatchUpdate": {
+   "data": [
+    {
+     "range": "'Jobs'!A1",
+     "majorDimension": "ROWS",
+     "values": [
+      [
+       "job_id",
+       "company_id",
+       "company",
+       "title",
+       "location",
+       "application_url",
+       "ats_platform",
+       "role_match",
+       "junior_status",
+       "remote_status",
+       "python_status",
+       "evidence_text",
+       "source_queries",
+       "first_seen_at",
+       "last_seen_at",
+       "verification_checked_at",
+       "score",
+       "status",
+       "review_reason"
+      ]
+     ]
+    },
+    {
+     "range": "'Companies'!A1",
+     "majorDimension": "ROWS",
+     "values": [
+      [
+       "company_id",
+       "company_name",
+       "company_domain",
+       "ats_platforms",
+       "career_urls",
+       "first_seen_at",
+       "last_seen_at",
+       "active_job_count",
+       "remote_hiring_signal",
+       "status",
+       "notes"
+      ]
+     ]
+    },
+    {
+     "range": "'Runs'!A1",
+     "majorDimension": "ROWS",
+     "values": [
+      [
+       "run_id",
+       "trigger",
+       "status",
+       "started_at",
+       "ended_at",
+       "queries_attempted",
+       "results_found",
+       "unique_candidates",
+       "hydrated",
+       "new_jobs",
+       "errors",
+       "notes"
+      ]
+     ]
+    },
+    {
+     "range": "'Review Queue'!A1",
+     "majorDimension": "ROWS",
+     "values": [
+      [
+       "job_id",
+       "company",
+       "title",
+       "application_url",
+       "review_reason",
+       "junior_status",
+       "remote_status",
+       "python_status",
+       "checked_at"
+      ]
+     ]
+    }
+   ]
+  }
+ },
+ "googleUpsert": {
+  "updates": [
+   {
+    "range": "'Jobs'!A2",
+    "majorDimension": "ROWS",
+    "values": [
+     [
+      "job-1",
+      "New Title"
+     ]
+    ]
+   }
+  ],
+  "appends": [
+   [
+    "job-2",
+    "Fresh"
+   ]
+  ]
+ },
+ "googleReplace": {
+  "cleared": "A2:ZZ3",
+  "appended": [
+   [
+    "x",
+    "y"
+   ]
+  ]
+ },
+ "googleReadControl": {
+  "sheetRows": [
+   [
+    "Setting",
+    "Value",
+    "Description"
+   ],
+   [
+    "Automation Enabled",
+    "TRUE"
+   ],
+   [
+    "",
+    ""
+   ],
+   [
+    "Timezone",
+    "Africa/Lagos"
+   ]
+  ],
+  "result": {
+   "Automation Enabled": "TRUE",
+   "Timezone": "Africa/Lagos"
+  }
+ },
+ "googleReadConfiguration": {
+  "sheetRows": {
+   "ATS Platforms": [
+    [
+     "Platform",
+     "Google site target",
+     "Enabled"
+    ],
+    [
+     "Ashby",
+     "site:jobs.ashbyhq.com",
+     "TRUE"
+    ],
+    [
+     "Lever",
+     "x"
+    ]
+   ],
+   "Roles & Vocabulary": [
+    [
+     "Role",
+     "Search type",
+     "Vocabulary"
+    ],
+    [
+     "Python Developer",
+     "junior",
+     "junior python developer | entry level python developer"
+    ]
+   ],
+   "Queries": [
+    [
+     "Query ID",
+     "Platform",
+     "Role",
+     "Search type",
+     "Google query",
+     "Enabled"
+    ],
+    [
+     "Ashby:Python Developer:junior",
+     "Ashby",
+     "Python Developer",
+     "junior",
+     "site:...",
+     "TRUE"
+    ]
+   ],
+   "Rules": [
+    [
+     "Rule",
+     "Value",
+     "Version"
+    ],
+    [
+     "Rules version",
+     "3",
+     "3"
+    ]
+   ]
+  },
+  "result": {
+   "platformRows": [
+    [
+     "Ashby",
+     "site:jobs.ashbyhq.com",
+     "TRUE"
+    ],
+    [
+     "Lever",
+     "x"
+    ]
+   ],
+   "roleRows": [
+    [
+     "Python Developer",
+     "junior",
+     "junior python developer | entry level python developer"
+    ]
+   ],
+   "queryRows": [
+    [
+     "Ashby:Python Developer:junior",
+     "Ashby",
+     "Python Developer",
+     "junior",
+     "site:...",
+     "TRUE"
+    ]
+   ],
+   "ruleRows": [
+    [
+     "Rules version",
+     "3",
+     "3"
+    ]
+   ]
+  }
+ }
+}
