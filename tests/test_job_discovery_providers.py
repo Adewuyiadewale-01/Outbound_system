@@ -79,14 +79,15 @@ def _valid_jobs(*numbers):
 # ---------------------------------------------------------------- pagination
 
 
-def test_ends_pagination_after_two_consecutive_low_yield_pages() -> None:
-    first = next_pagination_state(0, 2)
-    assert first == {"thinPages": 1, "complete": False}
-    assert next_pagination_state(first["thinPages"], 1) == {"thinPages": 2, "complete": True}
-    assert next_pagination_state(1, 3) == {"thinPages": 0, "complete": False}
+def test_ends_pagination_after_three_consecutive_sparse_pages() -> None:
+    assert next_pagination_state(0, 2) == {"sparseStreak": 0, "complete": False}
+    assert next_pagination_state(0, 1) == {"sparseStreak": 1, "complete": False}
+    assert next_pagination_state(1, 1) == {"sparseStreak": 2, "complete": False}
+    assert next_pagination_state(2, 1) == {"sparseStreak": 3, "complete": True}
+    assert next_pagination_state(2, 3) == {"sparseStreak": 0, "complete": False}
 
 
-def test_paginates_until_two_ats_valid_thin_pages_and_rejects_off_domain_results() -> None:
+def test_paginates_until_three_consecutive_sparse_pages_and_rejects_off_domain_results() -> None:
     pages = [
         {
             "hasNext": True,
@@ -95,6 +96,8 @@ def test_paginates_until_two_ats_valid_thin_pages_and_rejects_off_domain_results
         },
         {"hasNext": True, "results": _valid_jobs(4, 5)},
         {"hasNext": True, "results": _valid_jobs(6)},
+        {"hasNext": True, "results": _valid_jobs(7)},
+        {"hasNext": True, "results": _valid_jobs(8)},
     ]
     browser = FakeBrowser(pages)
     checkpoints: list = []
@@ -107,20 +110,21 @@ def test_paginates_until_two_ats_valid_thin_pages_and_rejects_off_domain_results
             "maxPageDelayMs": 0,
             "onPage": lambda checkpoint: checkpoints.append(
                 {
-                    "nextPage": checkpoint["nextPage"],
-                    "thinPages": checkpoint["thinPages"],
                     "validResults": checkpoint["validResults"],
+                    "sparseStreak": checkpoint["sparseStreak"],
                     "paginationStop": checkpoint["paginationStop"],
                 }
             ),
         },
     )
-    assert len(results) == 6
+    assert len(results) == 8
     assert results.pagination_stop == "low_yield"
-    assert [checkpoint["validResults"] for checkpoint in checkpoints] == [3, 2, 1]
-    assert len(browser.opened) == 3
+    assert results.last_page == 4
+    assert [checkpoint["validResults"] for checkpoint in checkpoints] == [3, 2, 1, 1, 1]
+    assert [checkpoint["sparseStreak"] for checkpoint in checkpoints] == [0, 0, 1, 2, 3]
+    assert len(browser.opened) == 5
     assert "start=0" in browser.opened[0]
-    assert "start=20" in browser.opened[2]
+    assert "start=40" in browser.opened[4]
 
 
 def test_continues_from_a_saved_page_checkpoint_when_the_total_page_ceiling_is_disabled() -> None:
@@ -644,3 +648,128 @@ def test_extract_json_ld_handles_arrays_and_graphs() -> None:
 
 def test_strip_tags_removes_scripts_styles_and_nbsp() -> None:
     assert listing_module.strip_tags("a<script>x</script>b<style>y</style>c&nbsp;d") == "a b c d"
+
+
+def test_shallow_known_stop_stops_after_quiet_pages_within_frontier() -> None:
+    known = {f"https://jobs.ashbyhq.com/acme/job-{number}" for number in range(1, 30)}
+    pages = [
+        {
+            "hasNext": True,
+            "results": [
+                _valid_jobs(1)[0],
+                {"title": "N", "link": "https://jobs.ashbyhq.com/acme/job-99", "snippet": "s"},
+            ],
+        },
+        {"hasNext": True, "results": _valid_jobs(2, 3)},
+        {"hasNext": True, "results": _valid_jobs(4)},
+    ]
+    browser = FakeBrowser(pages)
+    checkpoints: list = []
+    provider = PlaywrightGoogleSearchProvider(browser=browser)
+    results = provider.search(
+        QUERY,
+        {
+            "minPageDelayMs": 0,
+            "maxPageDelayMs": 0,
+            "knownUrls": known,
+            "shallowStop": {
+                "enabled": True,
+                "quietThreshold": 1,
+                "quietPages": 2,
+                "frontierPage": 5,
+            },
+            "onPage": lambda checkpoint: checkpoints.append(
+                {
+                    "quietStreak": checkpoint["quietStreak"],
+                    "paginationStop": checkpoint["paginationStop"],
+                }
+            ),
+        },
+    )
+    assert results.pagination_stop == "known_frontier"
+    assert results.last_page == 2
+    assert len(browser.opened) == 3
+    assert any(item["link"].endswith("job-99") for item in results)
+    assert [checkpoint["quietStreak"] for checkpoint in checkpoints] == [0, 1, 2]
+    assert checkpoints[-1]["paginationStop"] == "known_frontier"
+
+
+def test_shallow_stop_not_applied_beyond_frontier() -> None:
+    known = {f"https://jobs.ashbyhq.com/acme/job-{number}" for number in range(1, 30)}
+    pages = [
+        {
+            "hasNext": True,
+            "results": [
+                _valid_jobs(1)[0],
+                {"title": "N", "link": "https://jobs.ashbyhq.com/acme/job-99", "snippet": "s"},
+            ],
+        },
+        {"hasNext": True, "results": _valid_jobs(2)},
+        {"hasNext": True, "results": _valid_jobs(3)},
+        {"hasNext": True, "results": _valid_jobs(4)},
+        {"hasNext": False, "results": _valid_jobs(5)},
+    ]
+    browser = FakeBrowser(pages)
+    provider = PlaywrightGoogleSearchProvider(browser=browser)
+    results = provider.search(
+        QUERY,
+        {
+            "minPageDelayMs": 0,
+            "maxPageDelayMs": 0,
+            "sparsePageResults": 0,
+            "knownUrls": known,
+            "shallowStop": {
+                "enabled": True,
+                "quietThreshold": 1,
+                "quietPages": 2,
+                "frontierPage": 1,
+            },
+        },
+    )
+    assert results.pagination_stop == "exhausted"
+    assert results.last_page == 4
+    assert len(browser.opened) == 5
+
+
+def test_sparse_tail_options_are_configurable() -> None:
+    pages = [
+        {"hasNext": True, "results": _valid_jobs(1)},
+        {"hasNext": True, "results": _valid_jobs(2)},
+    ]
+    browser = FakeBrowser(pages)
+    provider = PlaywrightGoogleSearchProvider(browser=browser)
+    results = provider.search(
+        QUERY,
+        {"minPageDelayMs": 0, "maxPageDelayMs": 0, "sparsePageResults": 2, "sparsePages": 2},
+    )
+    assert results.pagination_stop == "low_yield"
+    assert results.last_page == 1
+    assert len(browser.opened) == 2
+
+
+def test_no_shallow_stop_without_frontier() -> None:
+    known = {f"https://jobs.ashbyhq.com/acme/job-{number}" for number in range(1, 30)}
+    pages = [
+        {"hasNext": True, "results": _valid_jobs(1)},
+        {"hasNext": True, "results": _valid_jobs(2)},
+        {"hasNext": False, "results": _valid_jobs(3)},
+    ]
+    browser = FakeBrowser(pages)
+    provider = PlaywrightGoogleSearchProvider(browser=browser)
+    results = provider.search(
+        QUERY,
+        {
+            "minPageDelayMs": 0,
+            "maxPageDelayMs": 0,
+            "sparsePageResults": 0,
+            "knownUrls": known,
+            "shallowStop": {
+                "enabled": True,
+                "quietThreshold": 10,
+                "quietPages": 1,
+                "frontierPage": None,
+            },
+        },
+    )
+    assert results.pagination_stop == "exhausted"
+    assert len(browser.opened) == 3

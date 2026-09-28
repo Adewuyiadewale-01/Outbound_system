@@ -41,7 +41,7 @@ Every crawl of a query restarts at page 0 and walks to its natural end regardles
 - Stop when `sparsePages` (3) consecutive pages each yield fewer than `sparsePageResults` (2) valid results.
   Replaces the old "<3 results × 2 pages" rule. Stop reason: `low_yield`.
 
-**2.5 Interrupted crawls.** Non-completion stops leave coverage partial → the next visit is a full walk.
+**2.5 Interrupted crawls.** Non-completion stops leave coverage partial → the next visit is a full walk.\n\n**2.6 Stop-reason precedence (per page).** `result_limit` → `exhausted` → sparse tail (`low_yield`) → shallow\nknown-stop (`known_frontier`). The shallow stop additionally requires being within the covered frontier;\nbeyond it, full rules govern.
 
 ## 3. Ranking & parking
 
@@ -87,7 +87,7 @@ Every crawl of a query restarts at page 0 and walks to its natural end regardles
 
 1. **Foundation** — this spec + state tables/APIs + settings keys. *(done)*
 2. **Stop rules (provider)** — shallow stop (knownUrls/threshold/buffer), tail rule, `known_frontier`,
-   `last_page`; unit tests.
+   `last_page`; unit tests. *(done)*
 3. **Runner integration** — shallow/full decision, coverage/stats write-back, miss-guard, master switch;
    two-day regression test (day 2 = 1–3 pages).
 4. **Policy** — tier classification, auto-park + overrides, 7-day clock, priority wave, deep budget, backlog reporting.
