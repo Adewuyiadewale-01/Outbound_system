@@ -7,9 +7,8 @@ carve (see docs/CARVE-ACTIVITY-CHECK.md, slice S3). Pure move.
 from datetime import datetime
 from typing import Any
 
-from prefinal_queue import load_batch, update_batch_status
-
 from outbound.activity_check.text import _parse_positive_int, clean_text
+from outbound.shared.queue import load_batch, update_batch_status
 
 
 def next_activity_retry_record(

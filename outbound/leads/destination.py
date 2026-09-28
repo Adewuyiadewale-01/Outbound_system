@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import gspread
-from prefinal_queue import enqueue_batch, record_prefinal_publish, rows_fingerprint
 
 from outbound.leads.config import (
     DEFAULT_DESTINATION_TAB,
@@ -20,6 +19,7 @@ from outbound.leads.extract import seniority_score
 from outbound.leads.runs import destination_sheet_url
 from outbound.leads.sheetsio import require_columns
 from outbound.leads.text import clean_text, is_linkedin_profile_url, normalize_key
+from outbound.shared.queue import enqueue_batch, record_prefinal_publish, rows_fingerprint
 from outbound.shared.sheets import get_client, get_worksheet, open_sheet
 
 
