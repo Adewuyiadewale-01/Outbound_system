@@ -229,9 +229,8 @@ New deps added: `playwright`, `lxml`, `httpx`, `gspread` (existing in ecosystem)
 Each step below executes only with explicit approval, in order. Nothing here touches the production automation; write-verification against the live Sheet is a cutover-level decision (§9).
 
 **Prerequisites**
-1. Playwright browsers for the venv (not yet installed):
-   `.venv/bin/python -m playwright install chromium` (~150 MB into `~/Library/Caches/ms-playwright`).
-2. Env keys for the port — append a block to the repo `.env` (names do not conflict with the existing system keys):
+1. Playwright browsers for the venv — **installed 2026-09-28** (`chromium-1243`; headless launch smoke passed).
+2. Env keys for the port — **wired into the repo `.env` 2026-09-28** (names do not conflict with the existing system keys; values never printed):
    ```
    SEARCH_PROVIDER=playwright-google
    PLAYWRIGHT_HEADED=true
@@ -251,10 +250,8 @@ Each step below executes only with explicit approval, in order. Nothing here tou
 
 **Steps (each gated on explicit go-ahead)**
 1. **Local dry run — done 2026-09-28.** `status` + `smoke-test` from the repo root with sheets neutralized: both exit 0; smoke completed with 1 hydrated; zero network/Sheet calls.
-2. **Read-only transport check vs the live Sheet** (when the env block is wired):
-   `CONTROL_SOURCE=sheet python scripts/job_discovery.py status`
-   — only `getControl` (and optionally `getConfiguration`) reads occur; no writes. Confirms the deployed Apps Script protocol end-to-end. The live sheet may run local-first (tabs absent) — either way a clean `{ok:true}` round-trip is the success criterion.
-3. **Smoke-test (local-only)**: sheets env absent; synthetic provider/reader; one `test` record in local state.
+2. **Read-only transport check vs the live Sheet — done 2026-09-28.** Authenticated round-trip verified: the deployment accepted the token and answered with its own `Missing required tab: Control` (the live sheet is local-first, so config tabs are absent — expected); `doGet` liveness probe returned 200 (`service: daily-job-discovery`). No writes occurred.
+3. **Smoke-test (local-only)**: sheets env absent; synthetic provider/reader; one `test` record in local state. (Done in the local dry run; repeat only with sheets neutralized.)
 4. **Capped live-test**: one query, `maxResults=1`, 2-use cap, sheets absent (local writes only) — the first real Google search + real listing read through the port, exercising the persistent profile.
 5. **Evidence pack + cutover decision** (§9): compile receipts; decide the cutover sequence and timing.
 
