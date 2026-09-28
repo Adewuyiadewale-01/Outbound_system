@@ -281,6 +281,92 @@ def _record_query_misses(
         job["status"] = "closed" if job["misses"] >= threshold else "possibly_closed"
 
 
+_COMPLETE_STOPS = ("exhausted", "low_yield", "known_frontier")
+_FRONTIER_STOPS = ("exhausted", "low_yield")
+
+
+def _parse_iso_ms(value: object) -> float:
+    if not isinstance(value, str):
+        return math.nan
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return math.nan
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp() * 1000
+
+
+def _decide_walk_mode(coverage: dict | None, *, now_ms: float, interval_days: object) -> str:
+    """Shallow only for fresh, complete coverage; otherwise walk full
+    (docs/SEARCH-DEPTH-FIX.md §2)."""
+    if not coverage or coverage.get("lastStopReason") not in _COMPLETE_STOPS:
+        return "full"
+    if coverage.get("frontierPage") is None or not coverage.get("coveredAt"):
+        return "full"
+    age_ms = now_ms - _parse_iso_ms(coverage.get("coveredAt"))
+    if not math.isfinite(age_ms):
+        return "full"
+    interval_ms = max(1.0, _n(interval_days)) * 24 * 60 * 60 * 1000
+    return "shallow" if age_ms < interval_ms else "full"
+
+
+def _update_crawl_memory(
+    *,
+    state_store,
+    query_id: str,
+    results: list,
+    walk_mode: str,
+    known_urls: set,
+    previous_coverage: dict | None,
+    last_page_hint: int | None,
+    new_jobs: float,
+    hydrated: float,
+    minutes: float,
+) -> None:
+    """Persist coverage + rolling crawl stats after a rotational crawl completes."""
+    stop = getattr(results, "pagination_stop", None) or ""
+    last_page = getattr(results, "last_page", None)
+    if last_page is None:
+        last_page = last_page_hint
+    set_coverage = getattr(state_store, "set_query_coverage", None)
+    if set_coverage:
+        previous = previous_coverage or {}
+        coverage = {
+            "frontierPage": previous.get("frontierPage"),
+            "frontierReason": previous.get("frontierReason"),
+            "coveredAt": previous.get("coveredAt"),
+            "checkedAt": _iso_now(),
+            "lastStopReason": stop,
+        }
+        if stop in _FRONTIER_STOPS and last_page is not None:
+            coverage["frontierPage"] = last_page
+            coverage["frontierReason"] = stop
+            coverage["coveredAt"] = _iso_now()
+        set_coverage(query_id, coverage)
+    get_stats = getattr(state_store, "get_query_stats", None)
+    set_stats = getattr(state_store, "set_query_stats", None)
+    if get_stats and set_stats:
+        stats = get_stats(query_id) or {}
+        crawls = list(stats.get("crawls") or [])
+        crawls.append(
+            {
+                "at": _iso_now(),
+                "mode": walk_mode,
+                "pages": (last_page + 1) if isinstance(last_page, int) else None,
+                "results": len(results),
+                "newResults": sum(1 for item in results if item.get("link") not in known_urls),
+                "newJobs": new_jobs,
+                "hydrated": hydrated,
+                "minutes": minutes,
+            }
+        )
+        set_stats(query_id, {**stats, "crawls": crawls[-8:]})
+
+
 def _wait_with_heartbeat(
     ms: float, *, state_store, run_id: str, should_stop: Callable[[], bool]
 ) -> None:
@@ -470,6 +556,7 @@ def run_discovery(
         signal_rules = {}
     if should_stop is None:
         should_stop = _always_false
+    adaptive_enabled = bool(settings.get("adaptiveDepthEnabled"))
 
     run_id = f"run_{int(time.time() * 1000)}"
     stale_after_ms = _num_or(settings.get("staleLockMinutes"), 360) * 60_000
@@ -542,6 +629,31 @@ def run_discovery(
             if hydrated_for_field_today(field) >= _field_quota(settings, field):
                 continue
             run["queriesAttempted"] += 1
+            walk_mode = "full"
+            shallow_stop_options = None
+            known_urls: set = set()
+            coverage_snapshot = None
+            if adaptive_enabled and not queries:
+                get_coverage = getattr(state_store, "get_query_coverage", None)
+                coverage_snapshot = get_coverage(query["id"]) if get_coverage else None
+                history = getattr(state_store, "search_history_urls", None)
+                if history:
+                    known_urls = set(history(query["id"]))
+                walk_mode = _decide_walk_mode(
+                    coverage_snapshot,
+                    now_ms=time.time() * 1000,
+                    interval_days=settings.get("fullCheckIntervalDays"),
+                )
+                if walk_mode == "shallow":
+                    shallow_stop_options = {
+                        "enabled": True,
+                        "quietThreshold": settings.get("shallowQuietThreshold"),
+                        "quietPages": settings.get("shallowQuietPages"),
+                        "frontierPage": coverage_snapshot.get("frontierPage"),
+                    }
+            query_started_ms = time.time() * 1000
+            hydrated_at_query_start = run["hydrated"]
+            new_jobs_at_query_start = run["newJobs"]
             if existing_progress.get("status") in (
                 "hydrating",
                 "pending_retry",
@@ -586,7 +698,10 @@ def run_discovery(
                                 "resume": {
                                     "partialResults": progress.get("partialResults") or [],
                                     "nextPage": progress.get("nextPage") or 0,
-                                    "thinPages": progress.get("thinPages") or 0,
+                                    "sparseStreak": progress.get("sparseStreak")
+                                    or progress.get("thinPages")
+                                    or 0,
+                                    "quietStreak": progress.get("quietStreak") or 0,
                                 },
                                 "maxPages": settings.get("maxPagesPerQuery"),
                                 "maxMinutes": settings.get("maxSearchMinutesPerQuery"),
@@ -595,6 +710,12 @@ def run_discovery(
                                 "searchPageBurstSize": settings.get("searchPageBurstSize"),
                                 "minSearchPageCooldownMs": settings.get("minSearchPageCooldownMs"),
                                 "maxSearchPageCooldownMs": settings.get("maxSearchPageCooldownMs"),
+                                "sparsePageResults": settings.get("sparsePageResults"),
+                                "sparsePages": settings.get("sparsePages"),
+                                "knownUrls": known_urls
+                                if (adaptive_enabled and not queries)
+                                else None,
+                                "shallowStop": shallow_stop_options,
                                 "onPage": on_page,
                             },
                         )
@@ -834,7 +955,12 @@ def run_discovery(
                 run["stopReason"] = "query_pending_retry"
                 checkpoint()
                 break
-            _record_query_misses(state, query, query_seen_job_ids, settings.get("closeAfterMisses"))
+            # Miss/closure accounting only trusts full walks (docs/SEARCH-DEPTH-FIX.md §2.3):
+            # shallow walks never see below their stop point and must not decay jobs.
+            if not adaptive_enabled or walk_mode != "shallow":
+                _record_query_misses(
+                    state, query, query_seen_job_ids, settings.get("closeAfterMisses")
+                )
             state["queryProgress"][query["id"]] = {
                 "status": "completed",
                 "completionReason": getattr(results, "pagination_stop", None) or "exhausted",
@@ -844,6 +970,19 @@ def run_discovery(
                 "uniqueCandidates": len(unique_candidates),
                 "companyBoardCandidates": company_board_candidates,
             }
+            if adaptive_enabled and not queries:
+                _update_crawl_memory(
+                    state_store=state_store,
+                    query_id=query["id"],
+                    results=results,
+                    walk_mode=walk_mode,
+                    known_urls=known_urls,
+                    previous_coverage=coverage_snapshot,
+                    last_page_hint=existing_progress.get("lastPage"),
+                    new_jobs=run["newJobs"] - new_jobs_at_query_start,
+                    hydrated=run["hydrated"] - hydrated_at_query_start,
+                    minutes=round((time.time() * 1000 - query_started_ms) / 60_000, 2),
+                )
             run["queriesCompleted"] += 1
             if not queries:
                 _advance_query_cursor(state, query_inventory, query)

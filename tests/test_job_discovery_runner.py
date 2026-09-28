@@ -6,11 +6,13 @@ projection sync, reverify, and interrupted-run recovery.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+from outbound.job_discovery.browser import PlaywrightGoogleSearchProvider
 from outbound.job_discovery.runner import (
+    _decide_walk_mode,
     reverify_stored_jobs,
     run_discovery,
     sync_state_to_sheets,
@@ -643,3 +645,221 @@ def test_recovers_an_abandoned_active_run(tmp_path: Path) -> None:
     assert updated["runs"]["run_abandoned"]["status"] == "interrupted_recovered"
     assert "Recovered by" in updated["runs"]["run_abandoned"]["errors"][0]
     assert updated["activeRunId"] is None
+
+
+class _PageBrowser:
+    def __init__(self):
+        self.opened: list = []
+        self._queue: list = []
+
+    def refill(self, pages):
+        self._queue = [dict(page) for page in pages]
+
+    def open(self, url):
+        self.opened.append(url)
+
+    def reject_google_cookies_if_present(self):
+        return None
+
+    def scroll_search_results(self):
+        return None
+
+    def evaluate(self, expression):
+        page = self._queue.pop(0)
+        return {"url": "https://google.com/search", "title": "Search", "bodyText": "", **page}
+
+    def close(self):
+        return None
+
+
+class _RecordingProvider:
+    def __init__(self, inner):
+        self.inner = inner
+        self.calls: list = []
+
+    def search(self, query, options=None):
+        self.calls.append(dict(options or {}))
+        return self.inner.search(query, options)
+
+    def close(self):
+        return None
+
+
+def _demo_jobs(*numbers):
+    return [
+        {
+            "title": f"Junior Python Developer {number}",
+            "link": f"https://jobs.ashbyhq.com/acme/job-{number}",
+            "snippet": "Remote",
+        }
+        for number in numbers
+    ]
+
+
+def test_second_day_rerun_uses_a_shallow_walk_and_skips_miss_accounting(tmp_path: Path) -> None:
+    state_store = StateStore(tmp_path / "state.json")
+    query = {
+        "id": "demo:q1",
+        "platform": "Ashby",
+        "role": "Python Developer",
+        "field": "engineering",
+        "type": "junior",
+        "query": "site:jobs.ashbyhq.com python",
+        "allowedHosts": ["jobs.ashbyhq.com"],
+    }
+    browser = _PageBrowser()
+    provider = _RecordingProvider(PlaywrightGoogleSearchProvider(browser=browser))
+    reads: list = []
+
+    def listing_reader(candidate, options=None):
+        reads.append(candidate["jobId"])
+        return {
+            "title": candidate["title"],
+            "description": "Fully remote role requiring Python.",
+            "company": "Acme",
+            "location": "Remote",
+            "canonicalUrl": candidate["canonicalUrl"],
+        }
+
+    settings = {
+        "maxQueriesPerRun": 1,
+        "maxListingsPerRun": 50,
+        "minListingDelayMs": 0,
+        "maxListingDelayMs": 0,
+        "minPageDelayMs": 0,
+        "maxPageDelayMs": 0,
+        "searchPageBurstSize": 99,
+        "minSearchPageCooldownMs": 0,
+        "maxSearchPageCooldownMs": 0,
+        "queryBurstSize": 99,
+        "cooldownMinMs": 0,
+        "cooldownMaxMs": 0,
+        "searchRetryAttempts": 1,
+        "listingRetryAttempts": 1,
+        "retryBaseDelayMs": 0,
+    }
+
+    browser.refill(
+        [
+            {"hasNext": True, "results": _demo_jobs(1, 2, 3)},
+            {"hasNext": True, "results": _demo_jobs(4, 5, 6)},
+            {"hasNext": True, "results": _demo_jobs(7, 8, 9)},
+            {"hasNext": False, "results": _demo_jobs(10)},
+        ]
+    )
+    day1 = run_discovery(
+        state_store=state_store,
+        search_provider=provider,
+        listing_reader=listing_reader,
+        settings=settings,
+        query_inventory=[query],
+    )
+    coverage = state_store.get_query_coverage("demo:q1")
+    assert day1["hydrated"] == 10
+    assert len(browser.opened) == 4
+    assert provider.calls[0].get("shallowStop") is None
+    assert (
+        coverage is not None
+        and coverage["frontierPage"] == 3
+        and coverage["lastStopReason"] == "exhausted"
+    )
+
+    before = len(browser.opened)
+    browser.refill(
+        [
+            {
+                "hasNext": True,
+                "results": [
+                    {
+                        "title": "Junior Python Developer 11",
+                        "link": "https://jobs.ashbyhq.com/acme/job-11",
+                        "snippet": "Remote",
+                    },
+                    *_demo_jobs(1, 2),
+                ],
+            },
+            {"hasNext": True, "results": _demo_jobs(3)},
+            {"hasNext": True, "results": _demo_jobs(4)},
+            {"hasNext": True, "results": _demo_jobs(5)},
+        ]
+    )
+    day2 = run_discovery(
+        state_store=state_store,
+        search_provider=provider,
+        listing_reader=listing_reader,
+        settings=settings,
+        query_inventory=[query],
+    )
+    day2_opened = browser.opened[before:]
+    state = state_store.read()
+    assert len(day2_opened) == 3
+    assert "start=20" in day2_opened[-1] and "start=30" not in day2_opened[-1]
+    assert day2["hydrated"] == 1
+    shallow_call = provider.calls[-1]
+    assert shallow_call["shallowStop"]["enabled"] is True
+    assert shallow_call["shallowStop"]["frontierPage"] == 3
+    assert shallow_call["knownUrls"]
+    assert state["queryProgress"]["demo:q1"]["completionReason"] == "known_frontier"
+    coverage = state_store.get_query_coverage("demo:q1")
+    assert coverage["frontierPage"] == 3 and coverage["lastStopReason"] == "known_frontier"
+    jobs = list(state["jobs"].values())
+    assert all(job.get("misses") == 0 for job in jobs)
+    assert all(job.get("status") == "active" for job in jobs)
+    stats = state_store.get_query_stats("demo:q1")
+    assert [crawl["mode"] for crawl in stats["crawls"]] == ["full", "shallow"]
+    assert stats["crawls"][1]["newResults"] == 1
+
+
+def test_decide_walk_mode_requires_fresh_complete_coverage() -> None:
+    now_ms = datetime.now(timezone.utc).timestamp() * 1000
+    fresh = (
+        (datetime.now(timezone.utc) - timedelta(hours=1))
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
+    stale = (
+        (datetime.now(timezone.utc) - timedelta(days=10))
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
+    assert _decide_walk_mode(None, now_ms=now_ms, interval_days=7) == "full"
+    assert (
+        _decide_walk_mode(
+            {"frontierPage": None, "lastStopReason": "exhausted", "coveredAt": fresh},
+            now_ms=now_ms,
+            interval_days=7,
+        )
+        == "full"
+    )
+    assert (
+        _decide_walk_mode(
+            {"frontierPage": 3, "lastStopReason": "", "coveredAt": fresh},
+            now_ms=now_ms,
+            interval_days=7,
+        )
+        == "full"
+    )
+    assert (
+        _decide_walk_mode(
+            {"frontierPage": 3, "lastStopReason": "exhausted", "coveredAt": fresh},
+            now_ms=now_ms,
+            interval_days=7,
+        )
+        == "shallow"
+    )
+    assert (
+        _decide_walk_mode(
+            {"frontierPage": 3, "lastStopReason": "known_frontier", "coveredAt": fresh},
+            now_ms=now_ms,
+            interval_days=7,
+        )
+        == "shallow"
+    )
+    assert (
+        _decide_walk_mode(
+            {"frontierPage": 3, "lastStopReason": "exhausted", "coveredAt": stale},
+            now_ms=now_ms,
+            interval_days=7,
+        )
+        == "full"
+    )
