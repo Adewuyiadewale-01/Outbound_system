@@ -154,10 +154,13 @@ class PlaywrightBrowser:
         headed: bool = True,
         profile_path: str = "./data/browser-profile",
         timeout_ms: int = 45_000,
+        record_video_dir: str | None = None,
     ) -> None:
         self.headed = headed
         self.profile_path = str(Path(profile_path).resolve()) if profile_path else ""
         self.timeout_ms = timeout_ms
+        # Optional video capture for verification/debug runs (one file per page).
+        self.record_video_dir = str(Path(record_video_dir).resolve()) if record_video_dir else None
         self._playwright = None
         self._owns_playwright = False
         self._context = None
@@ -176,13 +179,14 @@ class PlaywrightBrowser:
         if self._page is not None:
             return self._page
         playwright = self._ensure_playwright()
+        video = {"record_video_dir": self.record_video_dir} if self.record_video_dir else {}
         if self.profile_path:
             self._context = playwright.chromium.launch_persistent_context(
-                self.profile_path, headless=not self.headed
+                self.profile_path, headless=not self.headed, **video
             )
         else:
             browser = playwright.chromium.launch(headless=not self.headed)
-            self._context = browser.new_context()
+            self._context = browser.new_context(**video)
         self._context.set_default_timeout(self.timeout_ms)
         self._page = self._context.pages[0] if self._context.pages else self._context.new_page()
         return self._page

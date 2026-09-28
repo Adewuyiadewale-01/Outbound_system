@@ -275,6 +275,22 @@ def test_load_local_settings_normalizes(tmp_path: Path) -> None:
 @pytest.fixture
 def cli_env(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    # Hermetic isolation: the shared repo env loader (outbound/shared/env.py)
+    # mutates os.environ at import time, so ambient job-discovery keys from the
+    # repo .env must be scrubbed or these tests would reach the live transports.
+    for key in (
+        "SHEETS_TRANSPORT",
+        "GOOGLE_APPS_SCRIPT_URL",
+        "APPS_SCRIPT_TOKEN",
+        "GOOGLE_SHEET_ID",
+        "GOOGLE_SERVICE_ACCOUNT_JSON",
+        "CONTROL_SOURCE",
+        "CONFIGURATION_SOURCE",
+        "SEARCH_PROVIDER",
+        "PLAYWRIGHT_HEADED",
+        "PLAYWRIGHT_PROFILE_DIR",
+    ):
+        monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("STATE_FILE", str(tmp_path / "state.sqlite"))
     monkeypatch.setenv("LOCAL_CONTROL_FILE", str(tmp_path / "runtime.json"))
     monkeypatch.setenv("SEARCH_PROVIDER", "fixture")
