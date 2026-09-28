@@ -204,3 +204,101 @@ def test_schema_tables_and_indexes_exist(tmp_path: Path) -> None:
         "search_results_result_hash_idx",
     } <= names
     store.close()
+
+
+def test_query_coverage_roundtrip(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.json")
+    assert store.get_query_coverage("q1") is None
+    store.set_query_coverage(
+        "q1",
+        {
+            "frontierPage": 29,
+            "frontierReason": "exhausted",
+            "coveredAt": "2026-09-28T00:00:00.000Z",
+            "checkedAt": "2026-09-29T00:00:00.000Z",
+            "lastStopReason": "exhausted",
+        },
+    )
+    stored = store.get_query_coverage("q1")
+    assert (
+        stored is not None
+        and stored["frontierPage"] == 29
+        and stored["frontierReason"] == "exhausted"
+    )
+    assert store.query_coverage_map()["q1"]["lastStopReason"] == "exhausted"
+    store.set_query_coverage("q1", {"frontierPage": 3, "frontierReason": "low_yield"})
+    assert store.get_query_coverage("q1")["frontierPage"] == 3
+    store.close()
+
+
+def test_query_stats_roundtrip(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.json")
+    assert store.get_query_stats("q1") == {}
+    store.set_query_stats("q1", {"crawls": [{"at": "t", "mode": "full", "newJobs": 2}]})
+    assert store.get_query_stats("q1")["crawls"][0]["newJobs"] == 2
+    store.set_query_stats("q1", {"crawls": []})
+    assert store.get_query_stats("q1") == {"crawls": []}
+    assert store.query_stats_map()["q1"] == {"crawls": []}
+    store.close()
+
+
+def test_search_history_urls(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.json")
+    store.record_search_results(
+        "q1",
+        [
+            {"title": "a", "link": "https://jobs.ashbyhq.com/x/a"},
+            {"title": "b", "link": "https://jobs.ashbyhq.com/x/b"},
+        ],
+    )
+    store.record_search_results("q2", [{"title": "c", "link": "https://jobs.ashbyhq.com/x/c"}])
+    assert sorted(store.search_history_urls("q1")) == [
+        "https://jobs.ashbyhq.com/x/a",
+        "https://jobs.ashbyhq.com/x/b",
+    ]
+    assert store.search_history_urls("q2") == ["https://jobs.ashbyhq.com/x/c"]
+    assert store.search_history_urls("missing") == []
+    store.close()
+
+
+def test_crawl_memory_tables_auto_upgrade_on_existing_db(tmp_path: Path) -> None:
+    path = tmp_path / "state.json"
+    first = StateStore(path)
+    first.ensure_database()
+    assert first.db is not None
+    first.db.execute("DROP TABLE query_coverage")
+    first.db.execute("DROP TABLE query_stats")
+    first.close()
+
+    second = StateStore(path)
+    second.set_query_coverage(
+        "q1",
+        {
+            "frontierPage": 7,
+            "frontierReason": "exhausted",
+            "coveredAt": "t",
+            "checkedAt": "t",
+            "lastStopReason": "exhausted",
+        },
+    )
+    assert second.get_query_coverage("q1")["frontierPage"] == 7
+    second.close()
+
+
+def test_reset_clears_crawl_memory(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.json")
+    store.set_query_coverage(
+        "q",
+        {
+            "frontierPage": 5,
+            "frontierReason": "exhausted",
+            "coveredAt": None,
+            "checkedAt": None,
+            "lastStopReason": None,
+        },
+    )
+    store.set_query_stats("q", {"crawls": [1]})
+    store.reset()
+    assert store.get_query_coverage("q") is None
+    assert store.get_query_stats("q") == {}
+    store.close()

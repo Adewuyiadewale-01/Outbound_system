@@ -45,3 +45,34 @@ def test_static_inventory_sizes() -> None:
     assert len(PLATFORMS) == 12
     assert len(ROLES) == 8
     assert sum(role["field"] == "engineering" for role in ROLES) == 5
+
+
+def test_adaptive_depth_defaults() -> None:
+    settings = normalize_settings()
+    assert settings["adaptiveDepthEnabled"] is True
+    assert settings["shallowQuietThreshold"] == 10
+    assert settings["shallowQuietPages"] == 3
+    assert settings["sparsePageResults"] == 2
+    assert settings["sparsePages"] == 3
+    assert settings["fullCheckIntervalDays"] == 7
+    assert settings["deepBudgetMinutesPerRun"] == 180
+    assert settings["parkAfterZeroFullChecks"] == 4
+    assert settings["activatedQueries"] == []
+
+
+def test_adaptive_depth_normalization() -> None:
+    settings = normalize_settings(
+        {
+            "shallowQuietPages": "0",
+            "activatedQueries": "nope",
+            "adaptiveDepthEnabled": "false",
+            "sparsePages": "2.9",
+            "shallowQuietThreshold": "abc",
+        }
+    )
+    # falsy values fall back to the default (shared numeric convention), then clamp to >= 1
+    assert settings["shallowQuietPages"] == 3
+    assert settings["activatedQueries"] == []
+    assert settings["adaptiveDepthEnabled"] is False
+    assert settings["sparsePages"] == 2
+    assert settings["shallowQuietThreshold"] == 10

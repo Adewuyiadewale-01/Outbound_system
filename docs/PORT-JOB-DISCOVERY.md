@@ -208,6 +208,8 @@ New deps added: `playwright`, `lxml`, `httpx`, `gspread` (existing in ecosystem)
 
 - **Reference retirement — 2026-09-28.** After full verification (phases 1–6, live read/write checks, and the sheet restore), the Node reference was removed from the repo at the user's direction: `job_discovery/` deleted (recoverable via git history and the original `~/Documents/Automation Journey/daily-job-discovery`); fixtures → `outbound/job_discovery/fixtures/`; runtime config → `config/job_discovery/runtime.json`; the deployed Apps Script source kept at `outbound/job_discovery/apps-script/`.
 
+- **Search-depth fix (deficiency #1) — Phase 1 of 5, 2026-09-29.** Spec: `docs/SEARCH-DEPTH-FIX.md` (adaptive shallow/full walks, coverage memory, priority-wave full checks, query ranking/parking). State + settings foundation landed; phases 2–5 follow.
+
 ### 6.5 Verification strategy
 - Test parity: ≥22 ported tests + golden cross-language checks (Node available locally; harness not in CI).
 - Mock end-to-end runs before any live call; `automationEnabled=false` throughout development.
