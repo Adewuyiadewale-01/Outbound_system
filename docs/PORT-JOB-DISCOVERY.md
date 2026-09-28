@@ -248,7 +248,7 @@ Each step below executes only with explicit approval, in order. Nothing here tou
    - `smoke-test` writes a `test` job (excluded from Jobs) and, when sheets are configured, syncs its run row to Runs (reference behavior). For the first live smoke run, use sheets-unconfigured mode.
    - Manual probing must respect the same pacing as the runner: several rapid manual Google requests from the shared profile triggered a soft verification page (2026-09-28). The challenge page is an instruction to stop requesting Google — let it cool down / clear it by hand in the visible browser before further live checks.
    - The port's default state path is `state/job_discovery/state.sqlite`; keep it distinct from the reference project's `data/state.sqlite` until cutover.
-   - **Test isolation (incident 2026-09-28):** the shared env loader (`outbound/shared/env.py`) mutates `os.environ` at import time; once job-discovery keys live in the repo `.env`, unprotected tests inherit them. Three full-suite runs made real Apps Script calls and cleared the live projection tabs before this was caught. Mitigation: the `cli_env` fixture now scrubs every job-discovery key (hermetic); restore the sheet via version history or the cutover re-sync.
+   - **Test isolation (incident 2026-09-28):** the shared env loader (`outbound/shared/env.py`) mutates `os.environ` at import time; once job-discovery keys live in the repo `.env`, unprotected tests inherit them. Three full-suite runs made real Apps Script calls and cleared the live projection tabs before this was caught. Mitigation: the `cli_env` fixture now scrubs every job-discovery key (hermetic). **Restored 2026-09-28 via the state re-sync path (user's choice):** port state seeded from the reference DB with a consistent read-only copy (629 jobs / 442 companies / 4 runs / 694 raw search results), historical runs re-flagged, one `syncProjection` call — server reported **jobs: 629 inserted, companies: 442 inserted, reviews: 58 replaced, runs: 4 inserted** in 18.5 s. This also serves as the port's **first production write verification** through the Apps Script transport (retain + upsert semantics exercised against the live deployment). Manual Notes columns were not restored; Sheets version history remains available (~30 days) if needed.
 
 **Steps (each gated on explicit go-ahead)**
 1. **Local dry run — done 2026-09-28.** `status` + `smoke-test` from the repo root with sheets neutralized: both exit 0; smoke completed with 1 hydrated; zero network/Sheet calls.
@@ -260,8 +260,7 @@ Each step below executes only with explicit approval, in order. Nothing here tou
 ## 9. Cutover checklist (draft — execute only after explicit sign-off)
 
 - [ ] Finalize the env block; install browsers; keep `Automation Enabled` FALSE throughout.
-- [ ] **Seed the port state by copying the reference SQLite** (schemas are identical; the reference migrated to SQLite already):
-      checkpoint `daily-job-discovery/data/state.sqlite`, copy it to `state/job_discovery/state.sqlite`, and verify row counts via the port's `stats()`.
+- [x] **Seed the port state by copying the reference SQLite** — done 2026-09-28 (consistent read-only copy; counts verified: 629/442/4; the sheet was repopulated from this state in the same session).
 - [ ] Freeze the reference scheduler: `launchctl bootout gui/$UID/com.fulltime-job.daily-job-discovery` (it is currently running — PID observed 2026-09-28) and confirm no browser profile contention.
 - [ ] Supervised first real run: `scripts/job_discovery.py run` with sheets configured; verify Jobs/Companies/Review/Runs deltas; then `reverify`.
 - [ ] Decide scheduler takeover: port a `mac/` launcher + launchd unit for `scripts/job_discovery.py schedule`; retire the JS agent.
