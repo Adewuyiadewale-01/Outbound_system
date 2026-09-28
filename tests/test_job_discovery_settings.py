@@ -76,3 +76,10 @@ def test_adaptive_depth_normalization() -> None:
     assert settings["adaptiveDepthEnabled"] is False
     assert settings["sparsePages"] == 2
     assert settings["shallowQuietThreshold"] == 10
+
+
+def test_parked_queries_default_and_normalization() -> None:
+    settings = normalize_settings()
+    assert settings["parkedQueries"] == []
+    assert normalize_settings({"parkedQueries": "nope"})["parkedQueries"] == []
+    assert normalize_settings({"parkedQueries": ["q1"]})["parkedQueries"] == ["q1"]

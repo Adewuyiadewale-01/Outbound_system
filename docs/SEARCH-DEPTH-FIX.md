@@ -61,6 +61,13 @@ Every crawl of a query restarts at page 0 and walks to its natural end regardles
 - Highs are few → checked ~weekly; averages take remaining capacity (typically every ~2–4 weeks); the run
   report surfaces backlog so starvation is visible and tunable.
 
+**Wave v1 mechanics.** Due dates are rolling (not a fixed weekday). The wave processes stale refreshes only —
+first-time coverage still happens on each query's own rotation visit. Parked queries are skipped entirely
+(no shallow, no full). Once the per-run deep budget is spent, any further full walk (wave or rotation)
+defers to the next run; rotation shallow checks are unaffected. Tier v1 thresholds (constants in code):
+high = ≥2 new jobs across the last 6 crawls; low = ≥3 consecutive zero-yield full crawls; new queries default
+to average; parking = 4 consecutive zero-yield full crawls.
+
 ## 5. Dials (defaults; all editable in runtime.json)
 
 | Key | Meaning | Default |
@@ -74,6 +81,7 @@ Every crawl of a query restarts at page 0 and walks to its natural end regardles
 | `deepBudgetMinutesPerRun` | max deep minutes per run | 180 |
 | `parkAfterZeroFullChecks` | zero-yield full checks before auto-park | 4 |
 | `activatedQueries` | reactivated (un-parked) query ids | [] |
+| `parkedQueries` | manually parked query ids (activated overrides; ignored when activated) | [] |
 
 ## 6. State additions
 
@@ -90,7 +98,7 @@ Every crawl of a query restarts at page 0 and walks to its natural end regardles
    `last_page`; unit tests. *(done)*
 3. **Runner integration** — shallow/full decision, coverage/stats write-back, miss-guard, master switch;
    two-day regression test (day 2 = 1–3 pages). *(done)*
-4. **Policy** — tier classification, auto-park + overrides, 7-day clock, priority wave, deep budget, backlog reporting.
+4. **Policy** — tier classification, auto-park + overrides, 7-day clock, priority wave, deep budget, backlog reporting. *(done)*
 5. **Proof & polish** — `status` telemetry, seeded-DB dry simulation (projected savings), fake-browser E2E;
    live validation rides the cutover gate.
 

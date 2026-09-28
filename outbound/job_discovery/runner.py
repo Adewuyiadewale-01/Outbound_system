@@ -314,6 +314,75 @@ def _decide_walk_mode(coverage: dict | None, *, now_ms: float, interval_days: ob
     return "shallow" if age_ms < interval_ms else "full"
 
 
+_TIER_RANK = {"high": 0, "average": 1, "low": 2}
+_TIER_WINDOW = 6
+_TIER_HIGH_MIN_NEW_JOBS = 2
+_TIER_LOW_ZERO_STREAK = 3
+
+
+def _crawl_records(stats: dict | None) -> list:
+    return list((stats or {}).get("crawls") or [])
+
+
+def _zero_yield_full_streak(stats: dict | None) -> int:
+    """Consecutive most-recent FULL crawls with no new jobs and no new results."""
+    streak = 0
+    for crawl in reversed(_crawl_records(stats)):
+        if crawl.get("mode") != "full":
+            continue
+        if _n(crawl.get("newJobs")) == 0 and _n(crawl.get("newResults")) == 0:
+            streak += 1
+        else:
+            break
+    return streak
+
+
+def classify_query_tier(stats: dict | None) -> str:
+    """Ranking (docs/SEARCH-DEPTH-FIX.md §3): high / average / low from recent crawls."""
+    crawls = _crawl_records(stats)
+    if not crawls:
+        return "average"
+    recent = crawls[-_TIER_WINDOW:]
+    new_jobs_total = sum(_n(crawl.get("newJobs")) for crawl in recent)
+    if new_jobs_total >= _TIER_HIGH_MIN_NEW_JOBS:
+        return "high"
+    if _zero_yield_full_streak(stats) >= _TIER_LOW_ZERO_STREAK:
+        return "low"
+    return "average"
+
+
+def _parked_state(query_id: str, stats: dict | None, settings: dict) -> bool:
+    """Parking (docs/SEARCH-DEPTH-FIX.md §3): manual list wins; activated overrides all;
+    otherwise auto-park after ``parkAfterZeroFullChecks`` zero-yield full crawls."""
+    if query_id in set(settings.get("activatedQueries") or []):
+        return False
+    if query_id in set(settings.get("parkedQueries") or []):
+        return True
+    threshold = max(1, int(_n(settings.get("parkAfterZeroFullChecks"))))
+    return _zero_yield_full_streak(stats) >= threshold
+
+
+def _plan_deep_wave(
+    *, query_inventory: list, coverage_map: dict, stats_map: dict, settings: dict, now_ms: float
+) -> list:
+    """Due full-check refreshes, priority-ordered (high -> average -> low, oldest first).
+    Never-covered queries stay on the rotation (first coverage happens at their visit)."""
+    interval_days = settings.get("fullCheckIntervalDays")
+    due = []
+    for query in query_inventory:
+        query_id = query["id"]
+        if _parked_state(query_id, stats_map.get(query_id), settings):
+            continue
+        coverage = coverage_map.get(query_id)
+        if not coverage or coverage.get("lastStopReason") not in _COMPLETE_STOPS:
+            continue
+        if _decide_walk_mode(coverage, now_ms=now_ms, interval_days=interval_days) == "full":
+            tier = classify_query_tier(stats_map.get(query_id))
+            due.append((query, _TIER_RANK.get(tier, 1), coverage.get("coveredAt") or ""))
+    due.sort(key=lambda item: (item[1], item[2]))
+    return [query for query, _, _ in due]
+
+
 def _update_crawl_memory(
     *,
     state_store,
@@ -617,8 +686,40 @@ def run_discovery(
         ordered_queries = _query_sequence(query_inventory, state, queries)[
             : int(_num_or(settings.get("maxQueriesPerRun"), 180))
         ]
+        coverage_map: dict = {}
+        stats_map: dict = {}
+        wave_queries: list = []
+        if adaptive_enabled and not queries:
+            coverage_map_fn = getattr(state_store, "query_coverage_map", None)
+            stats_map_fn = getattr(state_store, "query_stats_map", None)
+            coverage_map = coverage_map_fn() if coverage_map_fn else {}
+            stats_map = stats_map_fn() if stats_map_fn else {}
+            wave_queries = _plan_deep_wave(
+                query_inventory=query_inventory,
+                coverage_map=coverage_map,
+                stats_map=stats_map,
+                settings=settings,
+                now_ms=time.time() * 1000,
+            )
+        wave_ids = {query["id"] for query in wave_queries}
+        work_items = [(query, True) for query in wave_queries] + [
+            (query, False) for query in ordered_queries if query["id"] not in wave_ids
+        ]
+        run["deepWaveQueued"] = len(wave_queries)
+        run["deepWaveProcessed"] = []
+        run["parkedSkipped"] = 0
+        deep_budget_ms = max(0.0, _n(settings.get("deepBudgetMinutesPerRun"))) * 60_000
+        deep_spent_ms = 0.0
         seen_in_run: dict = {}
-        for query in ordered_queries:
+        for item_index, (query, from_wave) in enumerate(work_items):
+            if (
+                adaptive_enabled
+                and not queries
+                and not from_wave
+                and _parked_state(query["id"], stats_map.get(query["id"]), settings)
+            ):
+                run["parkedSkipped"] += 1
+                continue
             if should_stop() and run["queriesAttempted"] == 0:
                 run["stopReason"] = "shutdown_requested"
                 break
@@ -628,14 +729,12 @@ def run_discovery(
             )
             if hydrated_for_field_today(field) >= _field_quota(settings, field):
                 continue
-            run["queriesAttempted"] += 1
             walk_mode = "full"
             shallow_stop_options = None
             known_urls: set = set()
             coverage_snapshot = None
             if adaptive_enabled and not queries:
-                get_coverage = getattr(state_store, "get_query_coverage", None)
-                coverage_snapshot = get_coverage(query["id"]) if get_coverage else None
+                coverage_snapshot = coverage_map.get(query["id"])
                 history = getattr(state_store, "search_history_urls", None)
                 if history:
                     known_urls = set(history(query["id"]))
@@ -651,6 +750,15 @@ def run_discovery(
                         "quietPages": settings.get("shallowQuietPages"),
                         "frontierPage": coverage_snapshot.get("frontierPage"),
                     }
+            if (
+                walk_mode == "full"
+                and adaptive_enabled
+                and not queries
+                and deep_budget_ms
+                and deep_spent_ms >= deep_budget_ms
+            ):
+                continue  # deep budget spent for this run; this full walk defers
+            run["queriesAttempted"] += 1
             query_started_ms = time.time() * 1000
             hydrated_at_query_start = run["hydrated"]
             new_jobs_at_query_start = run["newJobs"]
@@ -971,6 +1079,8 @@ def run_discovery(
                 "companyBoardCandidates": company_board_candidates,
             }
             if adaptive_enabled and not queries:
+                completed_ms = time.time() * 1000 - query_started_ms
+                completed_minutes = round(completed_ms / 60_000, 2)
                 _update_crawl_memory(
                     state_store=state_store,
                     query_id=query["id"],
@@ -981,10 +1091,14 @@ def run_discovery(
                     last_page_hint=existing_progress.get("lastPage"),
                     new_jobs=run["newJobs"] - new_jobs_at_query_start,
                     hydrated=run["hydrated"] - hydrated_at_query_start,
-                    minutes=round((time.time() * 1000 - query_started_ms) / 60_000, 2),
+                    minutes=completed_minutes,
                 )
+                if walk_mode == "full":
+                    deep_spent_ms += completed_ms
+                if from_wave:
+                    run["deepWaveProcessed"].append(query["id"])
             run["queriesCompleted"] += 1
-            if not queries:
+            if not queries and not from_wave:
                 _advance_query_cursor(state, query_inventory, query)
             checkpoint()
             if all(
@@ -996,7 +1110,7 @@ def run_discovery(
             if should_stop():
                 run["stopReason"] = "shutdown_requested"
                 break
-            if query is ordered_queries[-1]:
+            if item_index == len(work_items) - 1:
                 break
             burst = _n(settings.get("queryBurstSize"))
             if burst and run["queriesCompleted"] % burst == 0:

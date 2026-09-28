@@ -13,6 +13,9 @@ from types import SimpleNamespace
 from outbound.job_discovery.browser import PlaywrightGoogleSearchProvider
 from outbound.job_discovery.runner import (
     _decide_walk_mode,
+    _parked_state,
+    _plan_deep_wave,
+    classify_query_tier,
     reverify_stored_jobs,
     run_discovery,
     sync_state_to_sheets,
@@ -676,9 +679,11 @@ class _RecordingProvider:
     def __init__(self, inner):
         self.inner = inner
         self.calls: list = []
+        self.queries: list = []
 
     def search(self, query, options=None):
         self.calls.append(dict(options or {}))
+        self.queries.append(query["id"])
         return self.inner.search(query, options)
 
     def close(self):
@@ -863,3 +868,285 @@ def test_decide_walk_mode_requires_fresh_complete_coverage() -> None:
         )
         == "full"
     )
+
+
+def _fast_settings(**overrides):
+    settings = {
+        "maxQueriesPerRun": 2,
+        "maxListingsPerRun": 50,
+        "minDelayMs": 0,
+        "maxDelayMs": 0,
+        "minPageDelayMs": 0,
+        "maxPageDelayMs": 0,
+        "searchPageBurstSize": 99,
+        "minSearchPageCooldownMs": 0,
+        "maxSearchPageCooldownMs": 0,
+        "queryBurstSize": 99,
+        "cooldownMinMs": 0,
+        "cooldownMaxMs": 0,
+        "minQueryDelayMs": 0,
+        "maxQueryDelayMs": 0,
+        "searchRetryAttempts": 1,
+        "listingRetryAttempts": 1,
+        "retryBaseDelayMs": 0,
+    }
+    settings.update(overrides)
+    return settings
+
+
+def _adaptive_listing_reader(candidate, options=None):
+    return {
+        "title": candidate["title"],
+        "description": "Fully remote role requiring Python.",
+        "company": "Acme",
+        "location": "Remote",
+        "canonicalUrl": candidate["canonicalUrl"],
+    }
+
+
+def _ashby_query(query_id: str, needle: str) -> dict:
+    return {
+        "id": query_id,
+        "platform": "Ashby",
+        "role": "Python Developer",
+        "field": "engineering",
+        "type": "junior",
+        "query": f"site:jobs.ashbyhq.com {needle}",
+        "allowedHosts": ["jobs.ashbyhq.com"],
+    }
+
+
+def test_classify_query_tier_from_recent_crawls() -> None:
+    assert classify_query_tier(None) == "average"
+    assert classify_query_tier({}) == "average"
+    assert (
+        classify_query_tier(
+            {
+                "crawls": [
+                    {"mode": "full", "newJobs": 1, "newResults": 3},
+                    {"mode": "full", "newJobs": 1, "newResults": 1},
+                ]
+            }
+        )
+        == "high"
+    )
+    assert (
+        classify_query_tier(
+            {
+                "crawls": [
+                    {"mode": "full", "newJobs": 0, "newResults": 0},
+                    {"mode": "full", "newJobs": 0, "newResults": 0},
+                    {"mode": "full", "newJobs": 0, "newResults": 0},
+                ]
+            }
+        )
+        == "low"
+    )
+    assert (
+        classify_query_tier({"crawls": [{"mode": "full", "newJobs": 0, "newResults": 2}]})
+        == "average"
+    )
+
+
+def test_parked_state_precedence_and_auto_park() -> None:
+    zero_full = {"mode": "full", "newJobs": 0, "newResults": 0}
+    stats = {"crawls": [zero_full] * 4}
+    settings = {"parkAfterZeroFullChecks": 4, "activatedQueries": [], "parkedQueries": []}
+    assert _parked_state("q1", stats, settings) is True
+    assert _parked_state("q1", stats, {**settings, "activatedQueries": ["q1"]}) is False
+    assert _parked_state("q1", {"crawls": [zero_full] * 3}, settings) is False
+    assert (
+        _parked_state(
+            "q2", {"crawls": [{"mode": "full", "newJobs": 0, "newResults": 4}] * 4}, settings
+        )
+        is False
+    )
+    assert _parked_state("q3", {}, {**settings, "parkedQueries": ["q3"]}) is True
+    shallow_mix = {
+        "crawls": [
+            zero_full,
+            {"mode": "shallow", "newJobs": 0, "newResults": 0},
+            zero_full,
+            zero_full,
+            zero_full,
+        ]
+    }
+    assert _parked_state("q4", shallow_mix, settings) is True
+
+
+def test_deep_wave_orders_high_before_average_and_skips_parked() -> None:
+    now_ms = datetime.now(timezone.utc).timestamp() * 1000
+    stale = (
+        (datetime.now(timezone.utc) - timedelta(days=10))
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
+    coverage_complete = {
+        "frontierPage": 5,
+        "frontierReason": "exhausted",
+        "coveredAt": stale,
+        "checkedAt": stale,
+        "lastStopReason": "exhausted",
+    }
+    inventory = [
+        _ashby_query("q_avg", "a"),
+        _ashby_query("q_high", "b"),
+        _ashby_query("q_parked", "c"),
+        _ashby_query("q_new", "d"),
+    ]
+    coverage_map = {
+        "q_avg": coverage_complete,
+        "q_high": coverage_complete,
+        "q_parked": coverage_complete,
+    }
+    stats_map = {
+        "q_high": {"crawls": [{"mode": "full", "newJobs": 2, "newResults": 5}]},
+        "q_parked": {"crawls": [{"mode": "full", "newJobs": 0, "newResults": 0}] * 4},
+    }
+    settings = {
+        "fullCheckIntervalDays": 7,
+        "activatedQueries": [],
+        "parkedQueries": [],
+        "parkAfterZeroFullChecks": 4,
+    }
+    wave = _plan_deep_wave(
+        query_inventory=inventory,
+        coverage_map=coverage_map,
+        stats_map=stats_map,
+        settings=settings,
+        now_ms=now_ms,
+    )
+    assert [query["id"] for query in wave] == ["q_high", "q_avg"]
+
+
+def test_wave_queries_run_first_and_stay_out_of_the_rotation(tmp_path: Path) -> None:
+    state_store = StateStore(tmp_path / "state.json")
+    stale = (
+        (datetime.now(timezone.utc) - timedelta(days=10))
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
+    state_store.set_query_coverage(
+        "qA",
+        {
+            "frontierPage": 9,
+            "frontierReason": "exhausted",
+            "coveredAt": stale,
+            "checkedAt": stale,
+            "lastStopReason": "exhausted",
+        },
+    )
+    state_store.set_query_stats("qA", {"crawls": [{"mode": "full", "newJobs": 3, "newResults": 9}]})
+
+    qa = _ashby_query("qA", "a")
+    qb = _ashby_query("qB", "b")
+    browser = _PageBrowser()
+    provider = _RecordingProvider(PlaywrightGoogleSearchProvider(browser=browser))
+    browser.refill(
+        [
+            {
+                "hasNext": True,
+                "results": [
+                    {
+                        "title": "A1",
+                        "link": "https://jobs.ashbyhq.com/acme/a-1",
+                        "snippet": "Remote",
+                    }
+                ],
+            },
+            {
+                "hasNext": False,
+                "results": [
+                    {
+                        "title": "A2",
+                        "link": "https://jobs.ashbyhq.com/acme/a-2",
+                        "snippet": "Remote",
+                    }
+                ],
+            },
+            {
+                "hasNext": False,
+                "results": [
+                    {
+                        "title": "B1",
+                        "link": "https://jobs.ashbyhq.com/acme/b-1",
+                        "snippet": "Remote",
+                    }
+                ],
+            },
+        ]
+    )
+    run = run_discovery(
+        state_store=state_store,
+        search_provider=provider,
+        listing_reader=_adaptive_listing_reader,
+        settings=_fast_settings(),
+        query_inventory=[qb, qa],  # the rotation would run qB first; the wave pulls qA forward
+    )
+    assert run["deepWaveQueued"] == 1
+    assert run["deepWaveProcessed"] == ["qA"]
+    assert provider.queries == ["qA", "qB"]
+    refresh = state_store.get_query_coverage("qA")
+    assert refresh["coveredAt"] != stale and refresh["lastStopReason"] == "exhausted"
+    state = state_store.read()
+    assert state["queryCursorId"] == "qA"  # qB advanced the cursor; the wave item did not
+
+
+def test_deep_budget_defers_further_full_walks(tmp_path: Path) -> None:
+    state_store = StateStore(tmp_path / "state.json")
+    stale = (
+        (datetime.now(timezone.utc) - timedelta(days=10))
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
+    for query_id in ("qA", "qB"):
+        state_store.set_query_coverage(
+            query_id,
+            {
+                "frontierPage": 4,
+                "frontierReason": "exhausted",
+                "coveredAt": stale,
+                "checkedAt": stale,
+                "lastStopReason": "exhausted",
+            },
+        )
+    qa = _ashby_query("qA", "a")
+    qb = _ashby_query("qB", "b")
+    browser = _PageBrowser()
+    provider = _RecordingProvider(PlaywrightGoogleSearchProvider(browser=browser))
+    browser.refill(
+        [
+            {
+                "hasNext": False,
+                "results": [
+                    {
+                        "title": "A1",
+                        "link": "https://jobs.ashbyhq.com/acme/a-1",
+                        "snippet": "Remote",
+                    }
+                ],
+            },
+            {
+                "hasNext": False,
+                "results": [
+                    {
+                        "title": "B1",
+                        "link": "https://jobs.ashbyhq.com/acme/b-1",
+                        "snippet": "Remote",
+                    }
+                ],
+            },
+        ]
+    )
+    run = run_discovery(
+        state_store=state_store,
+        search_provider=provider,
+        listing_reader=_adaptive_listing_reader,
+        settings=_fast_settings(deepBudgetMinutesPerRun=0.000001),
+        query_inventory=[qa, qb],
+    )
+    assert run["deepWaveQueued"] == 2
+    assert run["deepWaveProcessed"] == ["qA"]
+    assert provider.queries == ["qA"]
+    unchanged = state_store.get_query_coverage("qB")
+    assert unchanged["coveredAt"] == stale
