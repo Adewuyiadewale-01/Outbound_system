@@ -100,7 +100,7 @@ to average; parking = 4 consecutive zero-yield full crawls.
    two-day regression test (day 2 = 1–3 pages). *(done)*
 4. **Policy** — tier classification, auto-park + overrides, 7-day clock, priority wave, deep budget, backlog reporting. *(done)*
 5. **Proof & polish** — `status` telemetry, seeded-DB dry simulation (projected savings), fake-browser E2E;
-   live validation rides the cutover gate.
+   live validation rides the cutover gate. *(done)*
 
 ## 8. Safety / migration
 
