@@ -13,16 +13,6 @@ import random
 import time
 from typing import Any
 
-from outreach_helper import (
-    apply_prospect_fields,
-    build_connection_sent_fields,
-    build_outreach_log_row,
-    build_template_variables,
-    insert_outreach_log_row,
-    pick_connection_template,
-    render_template,
-)
-
 from outbound.outreach.activity import (
     _activity_summary,
     _read_and_sync_activity,
@@ -56,6 +46,15 @@ from outbound.outreach.policy import (
     PROFILE_UNKNOWN_RETRIES,
     PROFILE_UNKNOWN_RETRY_MAX_SEC,
     PROFILE_UNKNOWN_RETRY_MIN_SEC,
+)
+from outbound.outreach.sheetops import (
+    apply_prospect_fields,
+    build_connection_sent_fields,
+    build_outreach_log_row,
+    build_template_variables,
+    insert_outreach_log_row,
+    pick_connection_template,
+    render_template,
 )
 from outbound.shared.diversion import _first_post_url, _run_diversion
 from outbound.shared.sheetutils import _parse_int

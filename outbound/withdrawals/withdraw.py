@@ -30,8 +30,10 @@ from linkedin_helper import (  # noqa: E402
     check_circuit_breakers,
     inspect_profile_action_state,
 )
-from outreach_helper import CREDS_PATH, OBF_SHEET_URL, OUTREACH_LOG_TAB  # noqa: E402
 from sheets_helper import get_client, get_worksheet, open_sheet  # noqa: E402
+
+from outbound.outreach.config import CREDS_PATH, OBF_SHEET_URL
+from outbound.outreach.sheetops import OUTREACH_LOG_TAB  # noqa: E402
 
 SENT_INVITATIONS_URL = "https://www.linkedin.com/mynetwork/invitation-manager/sent/"
 WITHDRAWN_LEADS_TAB = "Withdrawn Leads"

@@ -24,8 +24,10 @@ ROOT = Path(__file__).resolve().parents[2]
 HELPERS = ROOT / "helpers"
 sys.path.insert(0, str(HELPERS))
 
-from outreach_helper import CREDS_PATH, OBF_SHEET_URL, OUTREACH_LOG_TAB, PROSPECTS_TAB  # noqa: E402
 from sheets_helper import get_client, get_worksheet, open_sheet  # noqa: E402
+
+from outbound.outreach.config import CREDS_PATH, OBF_SHEET_URL, OUTREACH_LOG_TAB
+from outbound.outreach.sheetops import PROSPECTS_TAB  # noqa: E402
 
 SPREADSHEET_SERIAL_EPOCH = datetime(1899, 12, 30)
 DEFAULT_TIMEZONE = "Africa/Lagos"

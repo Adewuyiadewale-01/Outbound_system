@@ -31,7 +31,7 @@ if str(_HELPERS_DIR) not in sys.path:
     sys.path.insert(0, str(_HELPERS_DIR))
 
 try:
-    from outreach_helper import (
+    from outbound.outreach.sheetops import (
         count_outreach_log_connection_requests,
         count_pipeline_connected_leads,
     )

@@ -23,7 +23,7 @@ def prospect(row_number, prospect_id):
 
 
 class OutreachQueuePriorityTests(unittest.TestCase):
-    @patch("outreach_helper.read_tab")
+    @patch("outbound.outreach.sheetops.read_tab")
     def test_start_row_prioritizes_new_rows_then_uses_older_unused_overflow(self, read_tab):
         read_tab.return_value = {
             "rows": [

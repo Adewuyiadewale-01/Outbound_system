@@ -15,7 +15,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from outreach_helper import (
+from outbound.outreach.paths import ACCEPTANCE_STATE_FILE, OBF_SHEET_URL
+from outbound.outreach.sheetops import (
     append_pipeline_row_for_acceptance,
     build_template_variables,
     load_pending_outreach_log_connections,
@@ -23,8 +24,6 @@ from outreach_helper import (
     mark_outreach_log_connected,
     render_template,
 )
-
-from outbound.outreach.paths import ACCEPTANCE_STATE_FILE, OBF_SHEET_URL
 from outbound.shared.dates import sheet_date
 from outbound.shared.sheetutils import (
     _normalize_person_name,
