@@ -1,13 +1,17 @@
 """Job-discovery defaults and settings normalization.
 
-Ported from ``job_discovery/config/defaults.mjs`` + ``normalizeSettings`` in
-``job_discovery/src/config.mjs``. Key names mirror the JS/Sheets wire contract.
+Ported from ``job_discovery/config/defaults.mjs`` plus ``config.mjs`` (env
+loading, local settings, Control-tab mapping). Key names mirror the JS/Sheets
+wire contract.
 """
 
 from __future__ import annotations
 
+import json
 import math
+import os
 import re
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -275,3 +279,92 @@ def normalize_settings(source: dict[str, Any] | None = None) -> dict[str, Any]:
         raise ValueError("dailyRunTime must use HH:MM format")
     ZoneInfo(str(settings["timezone"]))
     return settings
+
+
+def load_environment(file: str = ".env") -> dict[str, str]:
+    """Port of ``loadEnvironment``: process env wins over the dotenv file."""
+    environment = {**os.environ}
+    try:
+        source = Path(file).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return environment
+    for line in re.split(r"\r?\n", source):
+        match = re.match(r"^\s*([A-Z0-9_]+)=(.*)\s*$", line)
+        if match and match.group(1) not in environment:
+            environment[match.group(1)] = re.sub(r"^['\"]|['\"]$", "", match.group(2))
+    return environment
+
+
+def load_local_settings(file: str = "./config/runtime.json") -> dict[str, Any]:
+    """Port of ``loadLocalSettings``."""
+    return normalize_settings(json.loads(Path(file).read_text(encoding="utf-8")))
+
+
+def settings_from_control(control: dict | None = None) -> dict[str, Any]:
+    """Port of ``settingsFromControl`` (Control-tab keys, incl. legacy aliases)."""
+    control = control or {}
+
+    def number(key: str, fallback: Any, legacy: str | None = None) -> Any:
+        raw = control.get(key)
+        if not raw and legacy:
+            raw = control.get(legacy)
+        if raw is None:
+            raw = fallback
+        try:
+            parsed = float(raw)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return fallback
+        if not math.isfinite(parsed):
+            return fallback
+        return int(parsed) if parsed.is_integer() else parsed
+
+    automation = control.get("Automation Enabled")
+    if automation is None:
+        automation = str(DEFAULTS["automationEnabled"])
+    settings = {
+        **DEFAULTS,
+        "automationEnabled": bool(re.fullmatch(r"true", str(automation), re.IGNORECASE)),
+        "dailyRunTime": control.get("Daily Run Time") or DEFAULTS["dailyRunTime"],
+        "timezone": control.get("Timezone") or DEFAULTS["timezone"],
+        "maxQueriesPerRun": number("Max Queries Per Run", DEFAULTS["maxQueriesPerRun"]),
+        "maxListingsPerRun": number("Max Listings Per Run", DEFAULTS["maxListingsPerRun"]),
+        "minListingDelayMs": number(
+            "Minimum Listing Delay (ms)", DEFAULTS["minListingDelayMs"], "Minimum Delay (ms)"
+        ),
+        "maxListingDelayMs": number(
+            "Maximum Listing Delay (ms)", DEFAULTS["maxListingDelayMs"], "Maximum Delay (ms)"
+        ),
+        "minListingDwellMs": number("Minimum Listing Dwell (ms)", DEFAULTS["minListingDwellMs"]),
+        "maxListingDwellMs": number("Maximum Listing Dwell (ms)", DEFAULTS["maxListingDwellMs"]),
+        "minPageDelayMs": number("Minimum Page Delay (ms)", DEFAULTS["minPageDelayMs"]),
+        "maxPageDelayMs": number("Maximum Page Delay (ms)", DEFAULTS["maxPageDelayMs"]),
+        "minSearchPageCooldownMs": number(
+            "Minimum Search Page Cooldown (ms)", DEFAULTS["minSearchPageCooldownMs"]
+        ),
+        "maxSearchPageCooldownMs": number(
+            "Maximum Search Page Cooldown (ms)", DEFAULTS["maxSearchPageCooldownMs"]
+        ),
+        "searchPageBurstSize": number("Search Page Burst Size", DEFAULTS["searchPageBurstSize"]),
+        "minQueryDelayMs": number("Minimum Inter-query Delay (ms)", DEFAULTS["minQueryDelayMs"]),
+        "maxQueryDelayMs": number("Maximum Inter-query Delay (ms)", DEFAULTS["maxQueryDelayMs"]),
+        "queryBurstSize": number(
+            "Query Burst Size", control.get("Batch Size") or DEFAULTS["queryBurstSize"]
+        ),
+        "cooldownMinMs": number(
+            "Minimum Cooldown (ms)", control.get("Batch Pause (ms)") or DEFAULTS["cooldownMinMs"]
+        ),
+        "cooldownMaxMs": number(
+            "Maximum Cooldown (ms)", control.get("Batch Pause (ms)") or DEFAULTS["cooldownMaxMs"]
+        ),
+        "maxPagesPerQuery": number("Maximum Pages Per Query", DEFAULTS["maxPagesPerQuery"]),
+        "maxSearchMinutesPerQuery": number(
+            "Maximum Search Minutes Per Query", DEFAULTS["maxSearchMinutesPerQuery"]
+        ),
+        "searchRetryAttempts": number("Search Retry Attempts", DEFAULTS["searchRetryAttempts"]),
+        "listingRetryAttempts": number("Listing Retry Attempts", DEFAULTS["listingRetryAttempts"]),
+        "retryBaseDelayMs": number("Retry Base Delay (ms)", DEFAULTS["retryBaseDelayMs"]),
+        "recheckAfterDays": number("Verified Job Recheck Days", DEFAULTS["recheckAfterDays"]),
+        "staleLockMinutes": number("Stale Lock Minutes", DEFAULTS["staleLockMinutes"]),
+        "closeAfterMisses": number("Close After Query Misses", DEFAULTS["closeAfterMisses"]),
+    }
+    return normalize_settings(settings)
