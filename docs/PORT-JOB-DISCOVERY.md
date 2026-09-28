@@ -160,7 +160,7 @@ outbound/job_discovery/
 ├── scheduler.py    start_scheduler, run_if_due
 └── cli.py          argparse CLI (8 commands)
 ```
-Thin entry at `scripts/job_discovery.py` (system convention) + optional `mac/` launcher later. The JS copy stays as the reference implementation until parity is proven.
+Thin entry at `scripts/job_discovery.py` (system convention) + optional `mac/` launcher later. The JS copy was kept as the reference implementation until parity was proven; **retired from the repo on 2026-09-28** (see progress log).
 
 ### 6.2 Library decisions (for your approval)
 
@@ -206,6 +206,8 @@ New deps added: `playwright`, `lxml`, `httpx`, `gspread` (existing in ecosystem)
 
 - **Phase 6 (runner & CLI) — completed locally 2026-09-28.** `outbound/job_discovery/{runner,scheduler,cli}.py` + `scripts/job_discovery.py` entry — full run orchestrator (locking + stale recovery, resumable checkpoints, field quotas, daily targets, retries, cursor rotation, miss lifecycle, incremental Sheets sync, reverify), daily scheduler, and the 8-command CLI (`setup-sheet | reset | run | reverify | smoke-test | live-test | schedule | status`); `settings.py`/`queries.py` gained env loading, Control mapping, and Sheet-driven configuration. 27 tests; two-sided end-to-end run comparison: **0 mismatches** (run summary + full final state + Sheet calls); repo suite 313 tests green, ruff clean. Merged via PR #33 (squash `b763d25`).
 
+- **Reference retirement — 2026-09-28.** After full verification (phases 1–6, live read/write checks, and the sheet restore), the Node reference was removed from the repo at the user's direction: `job_discovery/` deleted (recoverable via git history and the original `~/Documents/Automation Journey/daily-job-discovery`); fixtures → `outbound/job_discovery/fixtures/`; runtime config → `config/job_discovery/runtime.json`; the deployed Apps Script source kept at `outbound/job_discovery/apps-script/`.
+
 ### 6.5 Verification strategy
 - Test parity: ≥22 ported tests + golden cross-language checks (Node available locally; harness not in CI).
 - Mock end-to-end runs before any live call; `automationEnabled=false` throughout development.
@@ -218,7 +220,7 @@ New deps added: `playwright`, `lxml`, `httpx`, `gspread` (existing in ecosystem)
 1. **Browser**: Python `playwright` directly. ✅
 2. **State location**: repo `state/` conventions (e.g. `state/job_discovery/`). ✅
 3. **Transports**: keep both sheet transports and all search providers. ✅
-4. **JS copy retention**: keep `job_discovery/` as reference until parity proven. ✅
+4. **JS copy retention**: kept as reference until parity proven → superseded 2026-09-28 (retired from the repo after full verification; recoverable via git history + the original project). ✅
 5. **Env reconciliation**: no key conflicts; port reads the repo `.env` with the same names. ✅
 6. **Entry naming**: `scripts/job_discovery.py` (+ `mac/` launcher later). ✅
 
@@ -239,7 +241,7 @@ Each step below executes only with explicit approval, in order. Nothing here tou
    SHEETS_TRANSPORT=apps-script
    GOOGLE_APPS_SCRIPT_URL=<copy from daily-job-discovery/.env>
    APPS_SCRIPT_TOKEN=<copy from daily-job-discovery/.env>
-   LOCAL_CONTROL_FILE=job_discovery/config/runtime.json
+   LOCAL_CONTROL_FILE=config/job_discovery/runtime.json
    # CONTROL_SOURCE / CONFIGURATION_SOURCE stay unset (local-first) until decided
    ```
    Note: the profile dir is shared with the reference project; the old scheduler is idle (`Automation Enabled` FALSE) so it never launches a browser — but the two must never run browsers on the same profile at once.

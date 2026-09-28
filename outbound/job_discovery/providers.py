@@ -26,11 +26,7 @@ def with_pagination_stop(values, pagination_stop: str) -> SearchResults:
 
 
 def _default_fixture_path() -> Path:
-    # The JS reference stays the single source of truth for fixture data until
-    # cutover; the file moves into this package when the reference is archived.
-    return (
-        Path(__file__).resolve().parents[2] / "job_discovery" / "fixtures" / "search-results.json"
-    )
+    return Path(__file__).resolve().parent / "fixtures" / "search-results.json"
 
 
 class FixtureSearchProvider:

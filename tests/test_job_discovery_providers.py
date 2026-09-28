@@ -441,10 +441,11 @@ def test_fixture_search_provider_reads_by_query_id(tmp_path: Path) -> None:
     assert provider.search({"id": "missing"}) == []
 
 
-def test_fixture_search_provider_defaults_to_reference_fixture() -> None:
+def test_fixture_search_provider_defaults_to_packaged_fixture() -> None:
     provider = providers_module.FixtureSearchProvider()
     assert provider.file_path.name == "search-results.json"
     assert provider.file_path.exists()
+    assert "outbound/job_discovery/fixtures" in str(provider.file_path)
 
 
 def test_google_cse_provider_maps_items_and_reports_errors() -> None:
