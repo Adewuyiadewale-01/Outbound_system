@@ -305,6 +305,10 @@ def test_cli_status_smoke(cli_env, capsys) -> None:
     assert code == 0
     assert payload["enabledQueries"] == 288
     assert payload["controlSource"] == "local"
+    assert payload["queryTiers"] == {"high": 0, "average": 288, "low": 0}
+    assert payload["parkedQueries"] == 0
+    assert payload["fullChecksDue"] == 288
+    assert payload["coveredQueries"] == 0
     assert payload["jobStatusCounts"] == {}
     assert payload["recentRuns"] == []
 

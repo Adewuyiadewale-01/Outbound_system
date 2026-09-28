@@ -19,7 +19,13 @@ import time
 
 from outbound.job_discovery.providers import create_listing_reader, create_search_provider
 from outbound.job_discovery.queries import build_queries, configuration_from_rows
-from outbound.job_discovery.runner import reverify_stored_jobs, run_discovery
+from outbound.job_discovery.runner import (
+    _decide_walk_mode,
+    _parked_state,
+    classify_query_tier,
+    reverify_stored_jobs,
+    run_discovery,
+)
 from outbound.job_discovery.scheduler import SchedulerHandle, start_scheduler
 from outbound.job_discovery.settings import (
     PLATFORMS,
@@ -295,6 +301,29 @@ def main(argv: list[str] | None = None) -> int:
         context = runtime["get_run_context"]()
         state = runtime["state_store"].read()
         database = runtime["state_store"].stats()
+        coverage_map_fn = getattr(runtime["state_store"], "query_coverage_map", None)
+        stats_map_fn = getattr(runtime["state_store"], "query_stats_map", None)
+        coverage_map = coverage_map_fn() if coverage_map_fn else {}
+        stats_map = stats_map_fn() if stats_map_fn else {}
+        query_tiers = {"high": 0, "average": 0, "low": 0}
+        parked_count = 0
+        due_full_checks = 0
+        now_ms = time.time() * 1000
+        for query in context["configuration"]["queries"]:
+            query_id = query["id"]
+            query_tiers[classify_query_tier(stats_map.get(query_id))] += 1
+            if _parked_state(query_id, stats_map.get(query_id), context["settings"]):
+                parked_count += 1
+                continue
+            if (
+                _decide_walk_mode(
+                    coverage_map.get(query_id),
+                    now_ms=now_ms,
+                    interval_days=context["settings"].get("fullCheckIntervalDays"),
+                )
+                == "full"
+            ):
+                due_full_checks += 1
         jobs = list((state.get("jobs") or {}).values())
         runs = sorted(
             (state.get("runs") or {}).values(),
@@ -340,6 +369,10 @@ def main(argv: list[str] | None = None) -> int:
                     "activeRunId": state.get("activeRunId"),
                     "lastScheduledDate": state.get("lastScheduledDate"),
                     "database": database,
+                    "coveredQueries": len(coverage_map),
+                    "queryTiers": query_tiers,
+                    "parkedQueries": parked_count,
+                    "fullChecksDue": due_full_checks,
                     "jobStatusCounts": count_by(jobs, "status"),
                     "queryProgressCounts": count_by(query_progress, "status"),
                     "recentRuns": recent_runs,
