@@ -28,7 +28,11 @@ from datetime import date, datetime
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(__file__))
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
+# --- outreach_helper carve: shim re-exports (appended per slice) ---
 from runtime_environment import load_repo_env
 from sheets_helper import (
     append_row,
@@ -39,65 +43,47 @@ from sheets_helper import (
     update_row,
 )
 
+from outbound.outreach.config import (  # noqa: F401
+    _DEFAULT_CREDS_PATH,
+    _OPENCLAW_CREDS_PATH,
+    ALLOWED_ACTIVITY_VALUES,
+    CREDS_PATH,
+    DAILY_METRICS_TAB,
+    ENRICHMENT_SHEET_URL,
+    LOG_ACTION_MAP,
+    OBF_SHEET_URL,
+    OUTREACH_LOG_TAB,
+    PIPELINE_TAB,
+    PROSPECTS_TAB,
+    SKIP_CONN_REQ_STATUSES,
+    STATUS_CONN_SENT,
+    STATUS_CONNECTED,
+    STATUS_FIRST_MSG,
+    STATUS_FOLLOWING_UP,
+    STATUS_MEETING,
+    STATUS_NO_RESPONSE,
+    STATUS_NOT_INTERESTED,
+    STATUS_QUEUED,
+    STATUS_REPLIED,
+    STATUS_REQUIRES_EMAIL,
+    STATUS_WITHDRAWN,
+    TEMPLATES_TAB,
+)
+
 load_repo_env()
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-_DEFAULT_CREDS_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "credentials", "google-sheets.json"
-)
-_OPENCLAW_CREDS_PATH = os.path.expanduser("~/.openclaw/credentials/google-sheets.json")
-CREDS_PATH = os.environ.get(
-    "GOOGLE_SHEETS_CREDENTIALS",
-    _DEFAULT_CREDS_PATH if os.path.exists(_DEFAULT_CREDS_PATH) else _OPENCLAW_CREDS_PATH,
-)
 
 # Operational sheet URLs are intentionally injected at runtime. See .env.example.
-OBF_SHEET_URL = os.environ.get("OBF_SHEET_URL", "")
-ENRICHMENT_SHEET_URL = os.environ.get("ENRICHMENT_SHEET_URL", "")
 
 # Tab names
-PROSPECTS_TAB = "Prospects"
-OUTREACH_LOG_TAB = "Outreach Log"
-PIPELINE_TAB = "Pipeline"
-TEMPLATES_TAB = "Templates"
-DAILY_METRICS_TAB = "Daily Metrics"
 
 # Outreach status values
-STATUS_QUEUED = "Queued"
-STATUS_CONN_SENT = "Connection Sent"
-STATUS_REQUIRES_EMAIL = "Requires email"
-STATUS_CONNECTED = "Connected"
-STATUS_FIRST_MSG = "First Message Sent"
-STATUS_FOLLOWING_UP = "Following Up"
-STATUS_REPLIED = "Replied"
-STATUS_MEETING = "Meeting Set"
-STATUS_NOT_INTERESTED = "Not Interested"
-STATUS_NO_RESPONSE = "No Response"
 
 # Statuses that mean "don't send a connection request"
-SKIP_CONN_REQ_STATUSES = {
-    STATUS_CONN_SENT,
-    STATUS_REQUIRES_EMAIL,
-    STATUS_CONNECTED,
-    STATUS_FIRST_MSG,
-    STATUS_FOLLOWING_UP,
-    STATUS_REPLIED,
-    STATUS_MEETING,
-    STATUS_NOT_INTERESTED,
-    STATUS_NO_RESPONSE,
-}
-
-ALLOWED_ACTIVITY_VALUES = {"Active", "Very active", "Not active"}
-LOG_ACTION_MAP = {
-    "Connection Request": "Conn Request",
-    "Connection Accepted": "Connected",
-    "Connected": "Connected",
-    "First Message": "First Message",
-    "First Message Sent": "First Message",
-}
 
 
 def _normalize_activity_value(raw_value: str) -> str:
@@ -996,8 +982,6 @@ def get_stale_pending_connections(
 # ---------------------------------------------------------------------------
 # Withdrawal tracking
 # ---------------------------------------------------------------------------
-
-STATUS_WITHDRAWN = "Withdrawn"
 
 
 def mark_withdrawn(
