@@ -39,6 +39,7 @@ Outbound_system.git  HEAD → e686098a5424ccf18cabef47ff8f7c47247deef0
 | External item | Path | Detail | Touch points |
 |---|---|---|---|
 | **Daily Job Discovery** (separate git repo, Node ≥22 ESM) | `~/Documents/Automation Journey/daily-job-discovery` | Full workflow: `src/cli.mjs` (run/reverify/status/schedule/…), `config/runtime.json`, `data/state.sqlite.lock`, own `.env`, own tests | Dashboard: `main.js`, `local_server.py`, `dashboard.html`, `drawer.js`. Interface: env `DAILY_JOB_DISCOVERY_ROOT` → presence check (`src/cli.mjs`+`config/runtime.json`+`package.json`) → spawn `node src/cli.mjs …` → lock-file busy check → launchd toggle |
+| **Codex automations** | `~/.codex/automations/` (11 entries) | The lead-pipeline schedules: ChatGPT research (12:00), lead-review prep (14:00/16:00), review processing (18:00/22:00), bridges (23:10/23:30/06:30), OBF prep/run (8:25/8:30), hourly acceptance. **All PAUSED**; every `cwds` = the old clone. Dashboard reads `process-approved-leads{,-23-00}/automation.toml` for codex-vs-manual mode | Dashboard: `main.js` (`PROCESS_APPROVED_*_AUTOMATION_PATH`), `local_server.py` |
 | **Old repo (production)** | `~/codex-outreach-automation` | See §0 | Watcher launchd agent; state; packaged apps; Desktop symlink; drift protocol |
 | **Followups audit dir** | `~/Desktop/audit` | `outbound/followups/runner.py`: `AUDIT_DIR = Path.home()/"Desktop"/"audit"` (exists; contains one leftover probe PDF) | Followups workflow writes audit artifacts there |
 | **Sibling automation (not this system)** | — | launchd agents `com.tony.fixmypresence.scraper-cycle`, `com.fixmypresence.backup-pull` (separate project; no references from this repo) | None |
@@ -93,16 +94,17 @@ Outbound_system.git  HEAD → e686098a5424ccf18cabef47ff8f7c47247deef0
 **Cutover-critical (blockers when this clone becomes production):**
 1. Watcher agent: repoint to `orchestrator/watcher/orchestration_watcher.py` in this repo; reconcile the two labels to one; remove the manual `com.tonyisbuiding` agent.
 2. State: decide copy-vs-share for `state/` (2.5 GB in home clone — includes watcher log history, leads runs, outreach sequences, activity sessions, dashboard caches).
-3. Remove `~/codex-outreach-automation` fallbacks from `main.js` (`resolveProjectDir` and friends).
-4. Rebuild the "Orchestration Control Center.app" from `orchestrator/dashboard/`; update the Desktop symlink.
-5. Per-flow migration status: `post_engagement` already has runs here; confirm each remaining flow's switch date (the watcher currently drives them from the old clone).
+3. ✅ **DONE (2026-09-28)** — old-repo fallback removed from `main.js`; the dashboard now warns and uses a diagnostic default instead of ever cross-binding.
+4. **Codex automations** (`~/.codex/automations/`, 11 entries, all PAUSED): at cutover, recreate/repoint their `cwds` to this repo — they are the lead-pipeline schedule (ChatGPT research, review processing, bridges, OBF prep/run).
+5. Rebuild the "Orchestration Control Center.app" from `orchestrator/dashboard/`; update the Desktop symlink.
+6. Per-flow migration status: `post_engagement` already has runs here; confirm each remaining flow's switch date (the watcher currently drives them from the old clone).
 
 **Hygiene (non-blocking):**
-6. `config/*.json`: replace hardcoded `/Users/tonyisbuiding/.openclaw/...` profile dirs with `~`-expandable or env values.
-7. Credentials resolution is duplicated across ~6 modules with *different* fallback orders (`outreach/config.py`, `outreach/paths.py`, `leads/config.py`, `activity_check/config.py`, `leads/gate_impl.py`, `local_server.py`, `sheets.py` CLI default) — consolidate to one resolver + document.
-8. Add/refresh `.env.example` for this clone (the home clone has one; verify parity).
-9. Decide the fate of `~/Desktop/audit` (followups audit output) — migrate into repo `state/` or keep documented.
-10. `.DS_Store`/`.playwright-cli` etc. — none in this clone; no action.
+7. `config/*.json`: replace hardcoded `/Users/tonyisbuiding/.openclaw/...` profile dirs with `~`-expandable or env values. **Chrome-profile sharing confirmed as intended (2026-09-28)** — same LinkedIn accounts; new-repo state stays in this clone.
+8. Credentials resolution is duplicated across ~6 modules with *different* fallback orders (`outreach/config.py`, `outreach/paths.py`, `leads/config.py`, `activity_check/config.py`, `leads/gate_impl.py`, `local_server.py`, `sheets.py` CLI default) — consolidate to one resolver + document.
+9. Add/refresh `.env.example` for this clone (the home clone has one; verify parity).
+10. Decide the fate of `~/Desktop/audit` (followups audit output) — migrate into repo `state/` or keep documented.
+11. `.DS_Store`/`.playwright-cli` etc. — none in this clone; no action.
 
 ---
 
@@ -117,3 +119,14 @@ git ls-remote (both repos)  → distinct HEADs (see §0)
 grep WATCHER_LABEL old repo local_server.py → com.outreachautomation.orchestration-watcher (≠ installed label)
 config/activity_workers.json + outreach_workers.json → /Users/tonyisbuiding/.openclaw/chrome-profile{,-2}
 ```
+
+---
+
+## 8. Resolution log
+
+| Date | Item | Resolution |
+|---|---|---|
+| 2026-09-28 | Old-repo fallback in `main.js` | **Removed** — fails loudly instead of cross-binding |
+| 2026-09-28 | npm package name | **Renamed** `codex-outreach-automation` → `outbound-system` |
+| 2026-09-28 | Chrome profiles sharing | **Decision: keep shared** (same accounts); new-repo state remains in this clone |
+| 2026-09-28 | Codex automations | Discovered & catalogued (11 paused schedules bound to the old clone) — cutover item |
