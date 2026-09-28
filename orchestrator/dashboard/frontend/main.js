@@ -24,11 +24,12 @@ function resolveProjectDir() {
   const candidates = [
     process.env.OUTREACH_AUTOMATION_ROOT,
     app.isPackaged ? packagedSiblingRoot : path.resolve(__dirname, '..', '..', '..'),
-    path.join(os.homedir(), 'codex-outreach-automation')
   ];
   const resolved = candidates.find(isProjectRoot);
   if (resolved) return resolved;
-  // Preserve a useful diagnostic path rather than silently reading the app bundle.
+  // No accepted root found. Never fall back to another checkout; warn and use a
+  // diagnostic default so a failure is visible instead of a silent cross-binding.
+  console.warn('[main] Could not resolve the project root from the expected candidates.');
   return path.resolve(process.env.OUTREACH_AUTOMATION_ROOT || (app.isPackaged ? packagedSiblingRoot : path.join(__dirname, '..', '..', '..')));
 }
 
