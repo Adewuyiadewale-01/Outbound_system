@@ -288,8 +288,8 @@ class _FakeChromium:
         self.launch_args = None
         self.context = _FakeContext()
 
-    def launch_persistent_context(self, user_data_dir, headless=None):
-        self.launch_args = {"user_data_dir": user_data_dir, "headless": headless}
+    def launch_persistent_context(self, user_data_dir, **kwargs):
+        self.launch_args = {"user_data_dir": user_data_dir, **kwargs}
         return self.context
 
 
@@ -317,6 +317,18 @@ def test_opens_a_headed_browser_with_a_persistent_local_profile() -> None:
     browser.close()
     assert fake_app.chromium.context.closed is True
     assert fake_app.stopped is True
+
+
+def test_records_video_when_requested() -> None:
+    browser = PlaywrightBrowser(
+        headed=True, profile_path="./data/test-browser-profile", record_video_dir="./data/videos"
+    )
+    fake_app = _FakePlaywrightApp()
+    browser._playwright = fake_app
+    browser._owns_playwright = True
+    browser.open("https://example.com")
+    assert fake_app.chromium.launch_args["record_video_dir"] == str(Path("./data/videos").resolve())
+    browser.close()
 
 
 # ----------------------------------------------------------- listing (browser)
