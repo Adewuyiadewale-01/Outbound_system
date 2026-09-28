@@ -1,4 +1,5 @@
 gspread==6.2.1
 google-auth==2.49.2
 httpx==0.28.1
+playwright==1.63.0
 websocket-client==1.9.2
