@@ -1,0 +1,7 @@
+node_modules/
+.env
+data/
+coverage/
+.playwright-cli/
+data/*.log
+.DS_Store
