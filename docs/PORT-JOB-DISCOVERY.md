@@ -246,13 +246,14 @@ Each step below executes only with explicit approval, in order. Nothing here tou
 3. Safety notes (learned from the reference implementation):
    - `syncStateToSheets` retains by **local** id sets — never sync to the live Sheet from a fresh/empty state, or Jobs/Companies rows are cleared by design.
    - `smoke-test` writes a `test` job (excluded from Jobs) and, when sheets are configured, syncs its run row to Runs (reference behavior). For the first live smoke run, use sheets-unconfigured mode.
+   - Manual probing must respect the same pacing as the runner: several rapid manual Google requests from the shared profile triggered a soft verification page (2026-09-28). The challenge page is an instruction to stop requesting Google — let it cool down / clear it by hand in the visible browser before further live checks.
    - The port's default state path is `state/job_discovery/state.sqlite`; keep it distinct from the reference project's `data/state.sqlite` until cutover.
 
 **Steps (each gated on explicit go-ahead)**
 1. **Local dry run — done 2026-09-28.** `status` + `smoke-test` from the repo root with sheets neutralized: both exit 0; smoke completed with 1 hydrated; zero network/Sheet calls.
 2. **Read-only transport check vs the live Sheet — done 2026-09-28.** Authenticated round-trip verified: the deployment accepted the token and answered with its own `Missing required tab: Control` (the live sheet is local-first, so config tabs are absent — expected); `doGet` liveness probe returned 200 (`service: daily-job-discovery`). No writes occurred.
 3. **Smoke-test (local-only)**: sheets env absent; synthetic provider/reader; one `test` record in local state. (Done in the local dry run; repeat only with sheets neutralized.)
-4. **Capped live-test**: one query, `maxResults=1`, 2-use cap, sheets absent (local writes only) — the first real Google search + real listing read through the port, exercising the persistent profile.
+4. **Capped live-test — run 2026-09-28.** Search flow executed cleanly twice on query #1 (`Ashby:Python Developer:junior`); Google legitimately returned zero matches (this filter has ~1 hit ever historically) and the run completed correctly (`exhausted`; usage counted). A follow-up targeted probe on the highest-yield query (`Ashby:Software Engineer:unfiltered`, 297 historical hits) received Google's soft verification page after several rapid manual requests — handled by design (`SearchBlockedError`: stop, defer, no retry). Live results-extraction + listing hydration remain pending a cooldown / human verification pass in the shared profile.
 5. **Evidence pack + cutover decision** (§9): compile receipts; decide the cutover sequence and timing.
 
 ## 9. Cutover checklist (draft — execute only after explicit sign-off)
