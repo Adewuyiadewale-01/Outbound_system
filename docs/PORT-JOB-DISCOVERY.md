@@ -204,7 +204,7 @@ New deps added: `playwright`, `lxml`, `httpx`, `gspread` (existing in ecosystem)
 
 - **Phase 5 (providers & browser) — completed locally 2026-09-28.** `outbound/job_discovery/{browser,providers,listing}.py` — Playwright browser wrapper on the direct Python API (lazy import), Google pagination provider (resume checkpoints, 2-thin-pages rule, challenge detection, page/time safety ceilings), search-provider factory (fixture/http/CSE/playwright transports), HTTP listing reader; reference page-side extraction snippets kept verbatim; `playwright==1.63.0` added; 25 tests; two-sided golden check: **0 mismatches** across 9 scenarios + pagination-state cases; repo suite 286 tests green, ruff clean. Merged via PR #32 (squash `55dd163`).
 
-- **Phase 6 (runner & CLI) — completed locally 2026-09-28.** `outbound/job_discovery/{runner,scheduler,cli}.py` + `scripts/job_discovery.py` entry — full run orchestrator (locking + stale recovery, resumable checkpoints, field quotas, daily targets, retries, cursor rotation, miss lifecycle, incremental Sheets sync, reverify), daily scheduler, and the 8-command CLI (`setup-sheet | reset | run | reverify | smoke-test | live-test | schedule | status`); `settings.py`/`queries.py` gained env loading, Control mapping, and Sheet-driven configuration. 27 tests; two-sided end-to-end run comparison: **0 mismatches** (run summary + full final state + Sheet calls); repo suite 313 tests green, ruff clean. Awaiting push/merge go.
+- **Phase 6 (runner & CLI) — completed locally 2026-09-28.** `outbound/job_discovery/{runner,scheduler,cli}.py` + `scripts/job_discovery.py` entry — full run orchestrator (locking + stale recovery, resumable checkpoints, field quotas, daily targets, retries, cursor rotation, miss lifecycle, incremental Sheets sync, reverify), daily scheduler, and the 8-command CLI (`setup-sheet | reset | run | reverify | smoke-test | live-test | schedule | status`); `settings.py`/`queries.py` gained env loading, Control mapping, and Sheet-driven configuration. 27 tests; two-sided end-to-end run comparison: **0 mismatches** (run summary + full final state + Sheet calls); repo suite 313 tests green, ruff clean. Merged via PR #33 (squash `b763d25`).
 
 ### 6.5 Verification strategy
 - Test parity: ≥22 ported tests + golden cross-language checks (Node available locally; harness not in CI).
@@ -221,3 +221,49 @@ New deps added: `playwright`, `lxml`, `httpx`, `gspread` (existing in ecosystem)
 4. **JS copy retention**: keep `job_discovery/` as reference until parity proven. ✅
 5. **Env reconciliation**: no key conflicts; port reads the repo `.env` with the same names. ✅
 6. **Entry naming**: `scripts/job_discovery.py` (+ `mac/` launcher later). ✅
+
+---
+
+## 8. Phase 7 — Live verification runbook
+
+Each step below executes only with explicit approval, in order. Nothing here touches the production automation; write-verification against the live Sheet is a cutover-level decision (§9).
+
+**Prerequisites**
+1. Playwright browsers for the venv (not yet installed):
+   `.venv/bin/python -m playwright install chromium` (~150 MB into `~/Library/Caches/ms-playwright`).
+2. Env keys for the port — append a block to the repo `.env` (names do not conflict with the existing system keys):
+   ```
+   SEARCH_PROVIDER=playwright-google
+   PLAYWRIGHT_HEADED=true
+   PLAYWRIGHT_PROFILE_DIR=/Users/tonyisbuiding/Documents/Automation Journey/daily-job-discovery/data/browser-profile
+   STATE_FILE=state/job_discovery/state.sqlite
+   SHEETS_TRANSPORT=apps-script
+   GOOGLE_APPS_SCRIPT_URL=<copy from daily-job-discovery/.env>
+   APPS_SCRIPT_TOKEN=<copy from daily-job-discovery/.env>
+   LOCAL_CONTROL_FILE=job_discovery/config/runtime.json
+   # CONTROL_SOURCE / CONFIGURATION_SOURCE stay unset (local-first) until decided
+   ```
+   Note: the profile dir is shared with the reference project; the old scheduler is idle (`Automation Enabled` FALSE) so it never launches a browser — but the two must never run browsers on the same profile at once.
+3. Safety notes (learned from the reference implementation):
+   - `syncStateToSheets` retains by **local** id sets — never sync to the live Sheet from a fresh/empty state, or Jobs/Companies rows are cleared by design.
+   - `smoke-test` writes a `test` job (excluded from Jobs) and, when sheets are configured, syncs its run row to Runs (reference behavior). For the first live smoke run, use sheets-unconfigured mode.
+   - The port's default state path is `state/job_discovery/state.sqlite`; keep it distinct from the reference project's `data/state.sqlite` until cutover.
+
+**Steps (each gated on explicit go-ahead)**
+1. **Local dry run — done 2026-09-28.** `status` + `smoke-test` from the repo root with sheets neutralized: both exit 0; smoke completed with 1 hydrated; zero network/Sheet calls.
+2. **Read-only transport check vs the live Sheet** (when the env block is wired):
+   `CONTROL_SOURCE=sheet python scripts/job_discovery.py status`
+   — only `getControl` (and optionally `getConfiguration`) reads occur; no writes. Confirms the deployed Apps Script protocol end-to-end. The live sheet may run local-first (tabs absent) — either way a clean `{ok:true}` round-trip is the success criterion.
+3. **Smoke-test (local-only)**: sheets env absent; synthetic provider/reader; one `test` record in local state.
+4. **Capped live-test**: one query, `maxResults=1`, 2-use cap, sheets absent (local writes only) — the first real Google search + real listing read through the port, exercising the persistent profile.
+5. **Evidence pack + cutover decision** (§9): compile receipts; decide the cutover sequence and timing.
+
+## 9. Cutover checklist (draft — execute only after explicit sign-off)
+
+- [ ] Finalize the env block; install browsers; keep `Automation Enabled` FALSE throughout.
+- [ ] **Seed the port state by copying the reference SQLite** (schemas are identical; the reference migrated to SQLite already):
+      checkpoint `daily-job-discovery/data/state.sqlite`, copy it to `state/job_discovery/state.sqlite`, and verify row counts via the port's `stats()`.
+- [ ] Freeze the reference scheduler: `launchctl bootout gui/$UID/com.fulltime-job.daily-job-discovery` (it is currently running — PID observed 2026-09-28) and confirm no browser profile contention.
+- [ ] Supervised first real run: `scripts/job_discovery.py run` with sheets configured; verify Jobs/Companies/Review/Runs deltas; then `reverify`.
+- [ ] Decide scheduler takeover: port a `mac/` launcher + launchd unit for `scripts/job_discovery.py schedule`; retire the JS agent.
+- [ ] Housekeeping: move `search-results.json` into `outbound/job_discovery/fixtures/`; archive `job_discovery/` (reference) per plan §6.1; update `docs/EXTERNAL-DEPENDENCIES.md`; final gates + PR.
