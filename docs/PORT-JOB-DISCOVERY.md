@@ -248,6 +248,7 @@ Each step below executes only with explicit approval, in order. Nothing here tou
    - `smoke-test` writes a `test` job (excluded from Jobs) and, when sheets are configured, syncs its run row to Runs (reference behavior). For the first live smoke run, use sheets-unconfigured mode.
    - Manual probing must respect the same pacing as the runner: several rapid manual Google requests from the shared profile triggered a soft verification page (2026-09-28). The challenge page is an instruction to stop requesting Google — let it cool down / clear it by hand in the visible browser before further live checks.
    - The port's default state path is `state/job_discovery/state.sqlite`; keep it distinct from the reference project's `data/state.sqlite` until cutover.
+   - **Test isolation (incident 2026-09-28):** the shared env loader (`outbound/shared/env.py`) mutates `os.environ` at import time; once job-discovery keys live in the repo `.env`, unprotected tests inherit them. Three full-suite runs made real Apps Script calls and cleared the live projection tabs before this was caught. Mitigation: the `cli_env` fixture now scrubs every job-discovery key (hermetic); restore the sheet via version history or the cutover re-sync.
 
 **Steps (each gated on explicit go-ahead)**
 1. **Local dry run — done 2026-09-28.** `status` + `smoke-test` from the repo root with sheets neutralized: both exit 0; smoke completed with 1 hydrated; zero network/Sheet calls.
