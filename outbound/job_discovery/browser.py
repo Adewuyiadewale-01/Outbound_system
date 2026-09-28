@@ -11,7 +11,7 @@ regular methods on the browser wrapper.
 The ``playwright`` import is lazy: smoke tests and non-browser commands never
 pay for it, mirroring how the reference kept the browser external to the core.
 
-Pacing helpers are intentionally faithful (including the 2-thin-pages rule and
+Pacing helpers are intentionally faithful (including the sparse-tail rule and
 the zero-page-ceiling default); sleeps are synchronous, as the runner is.
 """
 
@@ -94,10 +94,18 @@ class SearchSafetyLimitError(RuntimeError):
         self.name = "SearchSafetyLimitError"
 
 
-def next_pagination_state(previous_thin_pages: int, valid_result_count: int) -> dict:
-    """Two consecutive pages with fewer than three valid results complete a query."""
-    thin_pages = previous_thin_pages + 1 if valid_result_count < 3 else 0
-    return {"thinPages": thin_pages, "complete": thin_pages >= 2}
+def next_pagination_state(
+    previous_sparse_pages: int,
+    valid_result_count: int,
+    *,
+    sparse_page_results: int = 2,
+    sparse_pages: int = 3,
+) -> dict:
+    """Sparse-tail counter (docs/SEARCH-DEPTH-FIX.md): consecutive pages with fewer
+    than ``sparse_page_results`` valid results; ``sparse_pages`` such pages complete
+    a query."""
+    sparse = previous_sparse_pages + 1 if valid_result_count < sparse_page_results else 0
+    return {"sparseStreak": sparse, "complete": sparse >= sparse_pages}
 
 
 def _number(value: object, fallback: float) -> float:
@@ -276,9 +284,19 @@ class PlaywrightGoogleSearchProvider:
                 seen_urls.add(link)
                 all_results.append({**result, "link": link})
         page_number = _num_or(resume.get("nextPage"), 0)
-        thin_pages = _num_or(resume.get("thinPages"), 0)
-        # A zero page ceiling means paginate until Google has no next page or two
-        # consecutive pages produce fewer than three ATS-valid results.
+        sparse_streak = _num_or(resume.get("sparseStreak"), _num_or(resume.get("thinPages"), 0))
+        quiet_streak = _num_or(resume.get("quietStreak"), 0)
+        # Tail rule: ``sparsePages`` consecutive pages with fewer than ``sparsePageResults``
+        # valid results complete a query (docs/SEARCH-DEPTH-FIX.md). A zero page ceiling
+        # means paginate until Google has no next page, the tail rule, or a shallow stop.
+        sparse_page_results = max(0, int(_number(options.get("sparsePageResults"), 2)))
+        sparse_pages_limit = max(1, int(_number(options.get("sparsePages"), 3)))
+        shallow = options.get("shallowStop") or {}
+        shallow_enabled = bool(shallow.get("enabled"))
+        quiet_threshold = max(0, int(_number(shallow.get("quietThreshold"), 10)))
+        quiet_pages_limit = max(1, int(_number(shallow.get("quietPages"), 3)))
+        frontier_page = shallow.get("frontierPage")
+        known_urls = set(options.get("knownUrls") or [])
         maximum_pages = max(0, _num_or(options.get("maxPages"), 0))
         maximum_ms = max(60_000, _num_or(options.get("maxMinutes"), 20) * 60_000)
         started_at = time.time() * 1000
@@ -353,8 +371,17 @@ class PlaywrightGoogleSearchProvider:
                     }
                 )
             all_results.extend(resolved)
-            state = next_pagination_state(thin_pages, len(resolved))
-            thin_pages = state["thinPages"]
+            new_count = sum(1 for item in resolved if item["link"] not in known_urls)
+            quiet_streak = (
+                quiet_streak + 1 if shallow_enabled and new_count < quiet_threshold else 0
+            )
+            state = next_pagination_state(
+                sparse_streak,
+                len(resolved),
+                sparse_page_results=sparse_page_results,
+                sparse_pages=sparse_pages_limit,
+            )
+            sparse_streak = state["sparseStreak"]
             reached_result_limit = bool(self.max_results and len(all_results) >= self.max_results)
             if reached_result_limit:
                 pagination_stop = "result_limit"
@@ -362,13 +389,23 @@ class PlaywrightGoogleSearchProvider:
                 pagination_stop = "exhausted"
             elif state["complete"]:
                 pagination_stop = "low_yield"
+            elif (
+                shallow_enabled
+                and frontier_page is not None
+                and quiet_streak >= quiet_pages_limit
+                and page_number <= int(frontier_page)
+            ):
+                pagination_stop = "known_frontier"
             on_page = options.get("onPage")
             if on_page:
                 on_page(
                     {
                         "partialResults": all_results,
                         "nextPage": page_number + 1,
-                        "thinPages": thin_pages,
+                        "thinPages": sparse_streak,  # legacy alias for ``sparseStreak``
+                        "sparseStreak": sparse_streak,
+                        "quietStreak": quiet_streak,
+                        "newResults": new_count,
                         "lastPage": page_number,
                         "validResults": len(resolved),
                         "paginationStop": pagination_stop,
@@ -399,6 +436,7 @@ class PlaywrightGoogleSearchProvider:
                     / 1000
                 )
         all_results.pagination_stop = pagination_stop
+        all_results.last_page = page_number
         return all_results
 
     def close(self) -> None:
@@ -411,6 +449,7 @@ class SearchResults(list):
     def __init__(self, values=(), pagination_stop: str = "") -> None:
         super().__init__(values)
         self.pagination_stop = pagination_stop
+        self.last_page: int | None = None
 
 
 def create_playwright_listing_reader(browser):
