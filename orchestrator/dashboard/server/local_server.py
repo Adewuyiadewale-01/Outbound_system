@@ -20,7 +20,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 APP_DIR = Path(__file__).resolve().parent
-PROJECT_DIR = APP_DIR.parents[3]
+PROJECT_DIR = APP_DIR.parents[2]
 STATE_DIR = PROJECT_DIR / "state"
 SCRIPTS_DIR = PROJECT_DIR / "scripts"
 HELPERS_DIR = PROJECT_DIR / "helpers"
