@@ -160,6 +160,30 @@ def job_discovery_scheduler_enabled() -> bool:
     return result.returncode == 0
 
 
+# Keys the repo .env contributes for the local job-discovery port. The legacy
+# node service reads the same names from its process environment first, so
+# inherited port values would redirect it to paths that only exist in this
+# repo (e.g. LOCAL_CONTROL_FILE=config/job_discovery/runtime.json) and break
+# its status/run commands. Scrub them so it falls back to its own .env.
+JOB_DISCOVERY_LEGACY_ENV_BLOCKLIST = (
+    "APPS_SCRIPT_TOKEN",
+    "GOOGLE_APPS_SCRIPT_URL",
+    "LOCAL_CONTROL_FILE",
+    "PLAYWRIGHT_HEADED",
+    "PLAYWRIGHT_PROFILE_DIR",
+    "SEARCH_PROVIDER",
+    "SHEETS_TRANSPORT",
+    "STATE_FILE",
+)
+
+
+def job_discovery_node_env() -> dict[str, str]:
+    env = os.environ.copy()
+    for key in JOB_DISCOVERY_LEGACY_ENV_BLOCKLIST:
+        env.pop(key, None)
+    return env
+
+
 def run_job_discovery_node(*args: str, timeout: int = 30) -> dict[str, Any]:
     if not job_discovery_available():
         return {
@@ -171,7 +195,7 @@ def run_job_discovery_node(*args: str, timeout: int = 30) -> dict[str, Any]:
         completed = subprocess.run(
             ["node", *args],
             cwd=JOB_DISCOVERY_DIR,
-            env=os.environ.copy(),
+            env=job_discovery_node_env(),
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -282,7 +306,7 @@ def start_job_discovery_action(action: str) -> dict[str, Any]:
     subprocess.Popen(
         ["node", "src/cli.mjs", action],
         cwd=JOB_DISCOVERY_DIR,
-        env=os.environ.copy(),
+        env=job_discovery_node_env(),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
