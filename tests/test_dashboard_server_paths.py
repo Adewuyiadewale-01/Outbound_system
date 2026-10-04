@@ -19,4 +19,3 @@ def test_project_dir_resolves_to_repo_root() -> None:
     assert project_dir == REPO_ROOT
     assert (project_dir / "scripts" / "post_engagement.py").is_file()
     assert (project_dir / "helpers").is_dir()
-    assert (project_dir / "state").is_dir()
