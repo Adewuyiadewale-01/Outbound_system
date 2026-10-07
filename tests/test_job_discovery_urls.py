@@ -222,3 +222,59 @@ def test_is_job_posting_candidate_wraps_career_landing_check() -> None:
         )
         is True
     )
+
+
+def test_extract_passthrough_token_modern_goto() -> None:
+    assert (
+        urls.extract_passthrough_token("https://www.google.com/goto?url=CAESfwHrOzAVomMWRE")
+        == "CAESfwHrOzAVomMWRE"
+    )
+
+
+def test_extract_passthrough_token_legacy_url_form() -> None:
+    assert (
+        urls.extract_passthrough_token(
+            "https://www.google.com/url?q=https%3A%2F%2Fjobs.ashbyhq.com%2Facme"
+        )
+        == "https://jobs.ashbyhq.com/acme"
+    )
+
+
+def test_extract_passthrough_token_ignores_normal_links() -> None:
+    assert urls.extract_passthrough_token("https://jobs.ashbyhq.com/acme/job-1") is None
+    assert urls.extract_passthrough_token("https://www.google.com/search?q=anything") is None
+
+
+def test_resolve_passthrough_url_resolves_and_caches() -> None:
+    calls: list[str] = []
+
+    def resolver(value: str) -> str:
+        calls.append(value)
+        return "https://jobs.ashbyhq.com/crusoe/9a5223c4-9eb7-4fdb-b97c-f43525df35ed"
+
+    cache: dict[str, str] = {}
+    passthrough = "https://www.google.com/goto?url=TOKEN123"
+    first = urls.resolve_passthrough_url(passthrough, cache=cache, resolver=resolver)
+    second = urls.resolve_passthrough_url(passthrough, cache=cache, resolver=resolver)
+    assert first == second == "https://jobs.ashbyhq.com/crusoe/9a5223c4-9eb7-4fdb-b97c-f43525df35ed"
+    assert calls == [passthrough]
+
+
+def test_resolve_passthrough_url_falls_back_to_original_on_failure() -> None:
+    def broken_resolver(value: str) -> str:
+        raise RuntimeError("network down")
+
+    passthrough = "https://www.google.com/goto?url=BROKEN"
+    assert urls.resolve_passthrough_url(passthrough, resolver=broken_resolver) == passthrough
+
+
+def test_resolve_passthrough_url_passes_through_normal_links_untouched() -> None:
+    def failing_resolver(value: str) -> str:
+        raise AssertionError("resolver must not be called for normal links")
+
+    assert (
+        urls.resolve_passthrough_url(
+            "https://jobs.ashbyhq.com/acme/job-1", resolver=failing_resolver
+        )
+        == "https://jobs.ashbyhq.com/acme/job-1"
+    )

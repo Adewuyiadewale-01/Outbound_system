@@ -24,7 +24,11 @@ import time
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
-from outbound.job_discovery.urls import canonicalize_url, is_career_landing_page_url
+from outbound.job_discovery.urls import (
+    canonicalize_url,
+    is_career_landing_page_url,
+    resolve_passthrough_url,
+)
 
 _CHALLENGE_RE = re.compile(
     r"/sorry/|unusual traffic|verify (?:that )?you(?:'re| are) human|not a robot|captcha",
@@ -345,11 +349,19 @@ class PlaywrightGoogleSearchProvider:
                 )
 
             resolved = []
+            passthrough_cache: dict[str, str] = {}
+            passthrough_resolver = options.get("passthroughResolver") or None
             for result in page.get("results") or []:
                 if self.max_results and len(all_results) + len(resolved) >= self.max_results:
                     break
                 try:
-                    canonical = canonicalize_url(result.get("link") or "")
+                    canonical = canonicalize_url(
+                        resolve_passthrough_url(
+                            result.get("link") or "",
+                            cache=passthrough_cache,
+                            resolver=passthrough_resolver,
+                        )
+                    )
                 except ValueError:
                     continue
                 parts = urlsplit(canonical)

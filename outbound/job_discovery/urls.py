@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 _TRACKING_KEYS = frozenset(
     {
@@ -268,3 +268,88 @@ def is_job_posting_candidate(candidate: dict) -> bool:
     return not is_career_landing_page_url(
         candidate.get("canonicalUrl", ""), candidate.get("platform", "")
     )
+
+
+def extract_passthrough_token(value: str) -> str | None:
+    """Return the redirect token when ``value`` is a Google passthrough link.
+
+    Recognizes the modern ``google.com/goto?url=<token>`` wrapper and the older
+    ``google.com/url?q=<token>`` form. Anything else returns ``None``.
+    """
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return None
+    hostname = (parts.hostname or "").lower()
+    if not hostname.endswith("google.com"):
+        return None
+    if parts.path == "/goto":
+        key = "url"
+    elif parts.path == "/url":
+        key = "q"
+    else:
+        return None
+    pairs = parse_qs(parts.query, keep_blank_values=True)
+    values = pairs.get(key) or []
+    token = values[0].strip() if values else ""
+    return token or None
+
+
+def default_passthrough_resolver(value: str) -> str:
+    """Resolve a Google passthrough link to its final destination.
+
+    Follows the redirect chain with cookieless, short-timeout requests (the
+    endpoint answers 302 -> target without authentication and repeatably).
+    Raises on network/HTTP failure so callers can fall back gracefully.
+    """
+    import httpx
+
+    with httpx.Client(follow_redirects=False, timeout=15.0) as client:
+        current = value
+        for _ in range(5):
+            response = client.get(current)
+            if response.is_redirect:
+                location = response.headers.get("location")
+                if not location:
+                    break
+                current = str(response.next_request.url) if response.next_request else location
+                continue
+            response.raise_for_status()
+            return current
+    raise RuntimeError(f"Redirect chain did not terminate for {value!r}")
+
+
+def resolve_passthrough_url(
+    value: str,
+    *,
+    cache: dict[str, str] | None = None,
+    resolver=None,
+) -> str:
+    """Unwrap Google passthrough links to their real target URL.
+
+    ``cache`` maps a passthrough URL to its already-resolved target so repeated
+    tokens cost zero extra requests (one cache per search run). ``resolver``
+    defaults to :func:`default_passthrough_resolver` and may be replaced in
+    tests. On any resolution failure the original ``value`` is returned
+    unchanged -- resolution never drops a result outright.
+    """
+    token = extract_passthrough_token(value)
+    if not token:
+        return value
+    if cache is not None and value in cache:
+        return cache[value]
+    resolve = resolver or default_passthrough_resolver
+    try:
+        target = resolve(value)
+    except Exception:  # noqa: BLE001 -- fallback keeps the result flow alive
+        return value
+    target = target.strip()
+    if not target:
+        return value
+    try:
+        target = canonicalize_url(target)
+    except ValueError:
+        return value
+    if cache is not None:
+        cache[value] = target
+    return target
