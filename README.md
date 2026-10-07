@@ -12,6 +12,16 @@ This repository contains a local-first automation toolkit for moving qualified l
 4. Copy `.env.example` to `.env`, then set the required sheet URLs and local credential path. Core Python workflows load the root `.env` automatically; explicit process environment values take precedence.
 5. Keep service-account JSON, browser profiles, generated state, lead exports, and workflow outputs outside version control. The root `.gitignore` protects these paths for a new repository.
 
+## Launching the dashboard
+
+Start the local Operations Control Center (web dashboard) from the repository root:
+
+```bash
+.venv/bin/python orchestrator/dashboard/server/local_server.py --host 127.0.0.1 --port 8765
+```
+
+Open <http://127.0.0.1:8765/dashboard.html> once it prints `Operations Control Center available`. The server binds to loopback only. The Electron shell version starts with `mac/Run_UI.command`.
+
 ## Daily Job Discovery dashboard
 
 The Operations Control Center includes a **Job Discovery** page for the companion daily-job-discovery service. It reads the service's local SQLite-backed status, recent run record, scheduler state, and runtime controls; it can start manual discovery and re-verification runs, enable/disable daily execution, and start or stop its local scheduler. By default it locates the service at `~/Documents/Automation Journey/daily-job-discovery`; set `DAILY_JOB_DISCOVERY_ROOT` in `.env` to use a different directory.
