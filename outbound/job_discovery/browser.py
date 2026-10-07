@@ -45,6 +45,7 @@ _EXTRACT_RESULTS_SCRIPT = r"""(() => {
     title: document.title,
     bodyText: document.body.innerText.slice(0, 12000),
     hasNext: Boolean(document.querySelector('#pnnext, a[aria-label="Next page"], a[aria-label^="Next"]')),
+    rawAnchorCount: document.querySelectorAll('a[href]').length,
     results: [...document.querySelectorAll('a')].flatMap((anchor) => {
       const heading = anchor.querySelector('h3');
       if (!heading) return [];
@@ -212,13 +213,28 @@ class PlaywrightBrowser:
         return self._ensure_page().evaluate(expression)
 
     def reject_google_cookies_if_present(self) -> None:
-        has_banner = self.evaluate(
-            "document.body.innerText.includes('Before you continue to Google')"
-        )
-        if has_banner:
-            button = self._ensure_page().get_by_role("button", name="Reject all")
-            if button.count():
-                button.click()
+        """Dismiss the consent banner, wait for it to settle, reload if still shown.
+
+        Clicking "Reject all" alone frequently leaves the interstitial up -- the
+        SPA does not swap to results until a fresh navigation. Mirrors the
+        reference behavior (banner check -> click) plus a bounded settle-and-
+        reload so post-consent SERPs are actually served. Idempotent when the
+        banner is absent; reload is capped at one attempt per call.
+        """
+        if not self.evaluate("document.body.innerText.includes('Before you continue to Google')"):
+            return
+        page = self._ensure_page()
+        button = page.get_by_role("button", name="Reject all")
+        if button.count():
+            button.click()
+        for _ in range(3):
+            page.wait_for_timeout(1200 + random.randint(0, 800))
+            if not self.evaluate(
+                "document.body.innerText.includes('Before you continue to Google')"
+            ):
+                break
+        if self.evaluate("document.body.innerText.includes('Before you continue to Google')"):
+            page.reload(wait_until="domcontentloaded")
 
     def scroll_search_results(self) -> None:
         page = self._ensure_page()
@@ -278,6 +294,7 @@ class PlaywrightGoogleSearchProvider:
         options = options or {}
         resume = options.get("resume") or {}
         all_results = SearchResults()
+        pages_telemetry: list[dict] = []
         seen_urls: set[str] = set()
         for result in resume.get("partialResults") or []:
             try:
@@ -305,6 +322,7 @@ class PlaywrightGoogleSearchProvider:
         maximum_ms = max(60_000, _num_or(options.get("maxMinutes"), 20) * 60_000)
         started_at = time.time() * 1000
         pagination_stop = ""
+        result_anchors_total = 0
         while True:
             if maximum_pages and page_number >= maximum_pages:
                 raise SearchSafetyLimitError(
@@ -323,7 +341,10 @@ class PlaywrightGoogleSearchProvider:
             scroll = getattr(self.browser, "scroll_search_results", None)
             if scroll:
                 scroll()
+            requested_url = search_url
             page = self.browser.evaluate(_EXTRACT_RESULTS_SCRIPT)
+            served_url = page.get("url") or ""
+            raw_anchor_count = max(0, int(_number(page.get("rawAnchorCount"), 0)))
             challenge_text = (
                 f"{page.get('url') or ''}\n{page.get('title') or ''}\n{page.get('bodyText') or ''}"
             )
@@ -348,6 +369,7 @@ class PlaywrightGoogleSearchProvider:
                     for allowed in allowed_hosts
                 )
 
+            result_anchors_total += len(page.get("results") or [])
             resolved = []
             passthrough_cache: dict[str, str] = {}
             passthrough_resolver = options.get("passthroughResolver") or None
@@ -408,6 +430,19 @@ class PlaywrightGoogleSearchProvider:
                 and page_number <= int(frontier_page)
             ):
                 pagination_stop = "known_frontier"
+            pages_telemetry.append(
+                {
+                    "page": page_number,
+                    "requestedUrl": requested_url,
+                    "servedUrl": served_url,
+                    "serpTitle": (page.get("title") or "").strip()[:200],
+                    "rawAnchorCount": raw_anchor_count,
+                    "resultAnchors": len(page.get("results") or []),
+                    "validResults": len(resolved),
+                    "newResults": new_count,
+                    "paginationStop": pagination_stop,
+                }
+            )
             on_page = options.get("onPage")
             if on_page:
                 on_page(
@@ -421,6 +456,7 @@ class PlaywrightGoogleSearchProvider:
                         "lastPage": page_number,
                         "validResults": len(resolved),
                         "paginationStop": pagination_stop,
+                        "page": pages_telemetry[-1],
                     }
                 )
             if pagination_stop:
@@ -449,10 +485,19 @@ class PlaywrightGoogleSearchProvider:
                 )
         all_results.pagination_stop = pagination_stop
         all_results.last_page = page_number
+        all_results.pages = pages_telemetry
+        all_results.quiet_zero = bool(
+            not all_results and raw_anchor_count > 10 and result_anchors_total > 0
+        )
         return all_results
 
     def close(self) -> None:
         self.browser.close()
+
+    @staticmethod
+    def browser_quiet_zero(results) -> bool:
+        """Convenience accessor for the ``quiet_zero`` flag on search results."""
+        return bool(getattr(results, "quiet_zero", False))
 
 
 class SearchResults(list):
@@ -462,6 +507,8 @@ class SearchResults(list):
         super().__init__(values)
         self.pagination_stop = pagination_stop
         self.last_page: int | None = None
+        self.pages: list[dict] = []
+        self.quiet_zero: bool = False
 
 
 def create_playwright_listing_reader(browser):

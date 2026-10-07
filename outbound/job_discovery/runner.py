@@ -791,9 +791,15 @@ def run_discovery(
                             record = getattr(state_store, "record_search_results", None)
                             if record:
                                 record(_query_id, page_checkpoint.get("partialResults") or [])
+                            page_telemetry = page_checkpoint.get("page")
+                            prior_pages = state["queryProgress"][_query_id].get("pages") or []
+                            pages = (
+                                [*prior_pages, page_telemetry] if page_telemetry else prior_pages
+                            )
                             state["queryProgress"][_query_id] = {
                                 **state["queryProgress"][_query_id],
                                 **page_checkpoint,
+                                "pages": pages,
                                 "status": "searching",
                                 "runId": run["id"],
                                 "checkpointedAt": _iso_now(),
@@ -868,6 +874,8 @@ def run_discovery(
             if record:
                 record(query["id"], results)
             run["resultsFound"] += len(results)
+            if getattr(results, "quiet_zero", False):
+                run["quietZeroQueries"] = run.get("quietZeroQueries", 0) + 1
             state["queryProgress"][query["id"]] = {
                 **state["queryProgress"][query["id"]],
                 "status": "hydrating",
@@ -875,6 +883,10 @@ def run_discovery(
                 "runId": run["id"],
                 "searchResults": [*results],
                 "paginationStop": getattr(results, "pagination_stop", None) or "exhausted",
+                "pages": getattr(results, "pages", None)
+                or state["queryProgress"][query["id"]].get("pages")
+                or [],
+                "quietZero": bool(getattr(results, "quiet_zero", False)),
                 "searchCompletedAt": _iso_now(),
             }
             checkpoint()
@@ -1077,6 +1089,10 @@ def run_discovery(
                 "resultsFound": len(results),
                 "uniqueCandidates": len(unique_candidates),
                 "companyBoardCandidates": company_board_candidates,
+                "pages": getattr(results, "pages", None)
+                or state["queryProgress"][query["id"]].get("pages")
+                or [],
+                "quietZero": bool(getattr(results, "quiet_zero", False)),
             }
             if adaptive_enabled and not queries:
                 completed_ms = time.time() * 1000 - query_started_ms

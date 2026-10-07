@@ -910,3 +910,169 @@ def test_provider_caches_passthrough_resolutions_within_a_search() -> None:
     )
     assert len(results) == 1  # same target URL -> deduped
     assert calls == ["https://www.google.com/goto?url=TOKEN_A"]  # resolved once
+
+
+# ---------------------------------------------------------------- consent reload
+
+
+def _consent_browser(pages, banner_states):
+    """FakeBrowser that lets the REAL reject_google_cookies_if_present run.
+
+    ``evaluate`` answers the banner check; ``_ensure_page`` returns a fake page
+    whose button always clicks and whose reload is recorded.
+    """
+
+    class FakePage:
+        def __init__(self, outer):
+            self._outer = outer
+
+        def get_by_role(self, _role, name=""):
+            outer = self._outer
+
+            class Button:
+                def count(self):
+                    return 1
+
+                def click(self):
+                    outer.clicks += 1
+
+            return Button()
+
+        def wait_for_timeout(self, _ms):
+            return None
+
+        def reload(self, **_kwargs):
+            self._outer.reloads += 1
+
+    class Browser(FakeBrowser):
+        # Bind the REAL method so this test exercises the actual
+        # settle-and-reload implementation, not a stub.
+        reject_google_cookies_if_present = PlaywrightBrowser.reject_google_cookies_if_present
+
+        def __init__(self):
+            super().__init__(pages)
+            self.reloads = 0
+            self.clicks = 0
+            self._banner_checks = 0
+            self._states = list(banner_states)
+
+        def _next_banner_state(self):
+            state = self._states[min(self._banner_checks, len(self._states) - 1)]
+            self._banner_checks += 1
+            return state
+
+        def _ensure_page(self):
+            return FakePage(self)
+
+        def evaluate(self, expression):
+            if "Before you continue" in expression:
+                return self._next_banner_state()
+            return super().evaluate(expression)
+
+    return Browser()
+
+
+def test_consent_dismissal_reloads_when_banner_persists():
+    browser = _consent_browser(
+        [{"hasNext": False, "results": _valid_jobs(1)}],
+        banner_states=[True, False, False, False],  # visible -> clicked -> gone
+    )
+    provider = PlaywrightGoogleSearchProvider(browser=browser)
+    results = provider.search(QUERY, {"maxPages": 1, "minPageDelayMs": 0, "maxPageDelayMs": 0})
+    assert browser.clicks == 1
+    assert browser.reloads == 0  # banner cleared after click + settle
+    assert len(results) == 1
+
+
+def test_consent_dismissal_reloads_when_banner_still_present_after_settling():
+    browser = _consent_browser(
+        [{"hasNext": False, "results": _valid_jobs(1)}],
+        banner_states=[True, True, True, True],  # click never clears it -> reload
+    )
+    provider = PlaywrightGoogleSearchProvider(browser=browser)
+    results = provider.search(QUERY, {"maxPages": 1, "minPageDelayMs": 0, "maxPageDelayMs": 0})
+    assert browser.clicks == 1
+    assert browser.reloads == 1  # the phase-2 fix
+    assert len(results) == 1
+
+
+def test_consent_skips_everything_when_banner_absent():
+    browser = _consent_browser(
+        [{"hasNext": False, "results": _valid_jobs(1)}],
+        banner_states=[False],
+    )
+    provider = PlaywrightGoogleSearchProvider(browser=browser)
+    provider.search(QUERY, {"maxPages": 1, "minPageDelayMs": 0, "maxPageDelayMs": 0})
+    assert browser.clicks == 0
+    assert browser.reloads == 0
+
+
+# ---------------------------------------------------------------- quiet-zero telemetry
+
+
+def test_page_telemetry_reports_raw_anchors_and_zero_results():
+    class Browser(FakeBrowser):
+        def evaluate(self, expression):
+            page = self._pages.pop(0)
+            return {"url": "https://google.com/search", "title": "probe", "bodyText": "", **page}
+
+    pages = [
+        {
+            "hasNext": False,
+            "rawAnchorCount": 59,
+            "results": [],  # anchors on page, none usable: the quiet-zero signature
+        }
+    ]
+    captured: list = []
+    provider = PlaywrightGoogleSearchProvider(browser=Browser(pages))
+    provider.search(
+        QUERY,
+        {
+            "maxPages": 1,
+            "minPageDelayMs": 0,
+            "maxPageDelayMs": 0,
+            "onPage": lambda checkpoint: captured.append(checkpoint),
+        },
+    )
+    assert len(captured) == 1
+    page_info = captured[0]["page"]
+    assert page_info["rawAnchorCount"] == 59
+    assert page_info["resultAnchors"] == 0
+    assert page_info["validResults"] == 0
+    assert page_info["requestedUrl"].startswith("https://www.google.com/search?q=")
+    assert page_info["servedUrl"] == "https://google.com/search"
+    assert page_info["serpTitle"] == "probe"
+
+
+def test_quiet_zero_flag_set_when_results_present_but_all_filtered():
+    class Browser(FakeBrowser):
+        def evaluate(self, expression):
+            page = self._pages.pop(0)
+            return {"url": "https://google.com/search", "title": "probe", "bodyText": "", **page}
+
+    pages = [
+        {
+            "hasNext": False,
+            "rawAnchorCount": 59,
+            "results": [
+                {"title": "Wrong domain", "link": "https://example.com/x", "snippet": ""},
+            ],
+        }
+    ]
+    provider = PlaywrightGoogleSearchProvider(browser=Browser(pages))
+    results = provider.search(QUERY, {"maxPages": 1, "minPageDelayMs": 0, "maxPageDelayMs": 0})
+    assert results == []  # filtered out
+    assert provider.browser_quiet_zero(results) is True
+
+
+def test_no_quiet_zero_flag_on_a_genuinely_empty_serp():
+    class Browser(FakeBrowser):
+        def evaluate(self, expression):
+            page = self._pages.pop(0)
+            return {"url": "https://google.com/search", "title": "probe", "bodyText": "", **page}
+
+    pages = [{"hasNext": False, "rawAnchorCount": 8, "results": []}]
+    provider = PlaywrightGoogleSearchProvider(browser=Browser(pages))
+    results = provider.search(QUERY, {"maxPages": 1, "minPageDelayMs": 0, "maxPageDelayMs": 0})
+    assert results == []
+    assert provider.browser_quiet_zero(results) is False
