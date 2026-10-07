@@ -1150,3 +1150,69 @@ def test_deep_budget_defers_further_full_walks(tmp_path: Path) -> None:
     assert provider.queries == ["qA"]
     unchanged = state_store.get_query_coverage("qB")
     assert unchanged["coveredAt"] == stale
+
+
+def test_persists_page_telemetry_and_quiet_zero_evidence(tmp_path: Path) -> None:
+    """Quiet-zero searches keep raw-anchor evidence in queryProgress + run summary."""
+
+    class TelemetrySearchProvider:
+        """Mirrors the provider contract incl. the results-object telemetry attrs."""
+
+        class _Results(list):
+            pass
+
+        def __init__(self):
+            self.pages = [
+                {
+                    "page": 0,
+                    "requestedUrl": "https://www.google.com/search?q=probe",
+                    "servedUrl": "https://www.google.com/search?q=probe",
+                    "serpTitle": "probe - Google Search",
+                    "rawAnchorCount": 59,
+                    "resultAnchors": 0,
+                    "validResults": 0,
+                    "newResults": 0,
+                    "paginationStop": "exhausted",
+                }
+            ]
+
+        def search(self, query, options=None):
+            results = self._Results()
+            results.pagination_stop = "exhausted"
+            results.last_page = 0
+            results.pages = self.pages
+            results.quiet_zero = True  # anchors present, zero kept
+            if options and options.get("onPage"):
+                options["onPage"](
+                    {
+                        "partialResults": results,
+                        "nextPage": 1,
+                        "thinPages": 0,
+                        "sparseStreak": 0,
+                        "quietStreak": 0,
+                        "newResults": 0,
+                        "lastPage": 0,
+                        "validResults": 0,
+                        "paginationStop": "exhausted",
+                        "page": self.pages[0],
+                    }
+                )
+            return results
+
+        def close(self):
+            pass
+
+    state_store = StateStore(tmp_path / "state.json")
+    provider = TelemetrySearchProvider()
+    run = run_discovery(
+        state_store=state_store,
+        search_provider=provider,
+        listing_reader=lambda candidate, options=None: None,
+        settings={**FAST_SETTINGS, "maxQueriesPerRun": 1, "maxListingsPerRun": 5},
+    )
+    state = state_store.read()
+    progress = state["queryProgress"]["Ashby:Python Developer:junior"]
+    assert progress["pages"] == provider.pages  # per-page telemetry persisted
+    assert progress["quietZero"] is True  # evidence flag on the query
+    assert progress["completionReason"] == "exhausted"  # completed path stores the stop reason
+    assert run["quietZeroQueries"] == 1  # run-level counter
