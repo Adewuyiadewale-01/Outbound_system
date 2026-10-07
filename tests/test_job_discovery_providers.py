@@ -773,3 +773,140 @@ def test_no_shallow_stop_without_frontier() -> None:
     )
     assert results.pagination_stop == "exhausted"
     assert len(browser.opened) == 3
+
+
+def test_provider_resolves_google_goto_links_before_host_filter() -> None:
+    """Results behind google.com/goto passthroughs survive the host filter."""
+
+    class Browser(FakeBrowser):
+        def evaluate(self, expression):
+            page = self._pages.pop(0)
+            return {"url": "https://google.com/search", "title": "Search", "bodyText": "", **page}
+
+    pages = [
+        {
+            "hasNext": False,
+            "results": [
+                {
+                    "title": "Software Engineer I, Network @ Crusoe",
+                    "link": "https://www.google.com/goto?url=TOKEN_CRUSOE",
+                    "snippet": "Ashby",
+                },
+                {
+                    "title": "Direct Ashby Result",
+                    "link": "https://jobs.ashbyhq.com/direct/1",
+                    "snippet": "Ashby",
+                },
+            ],
+        }
+    ]
+    browser = Browser(pages)
+    resolutions = {
+        "https://www.google.com/goto?url=TOKEN_CRUSOE": "https://jobs.ashbyhq.com/crusoe/9a5223c4-9eb7-4fdb-b97c-f43525df35ed"
+    }
+
+    def resolver(value: str) -> str:
+        assert value in resolutions, f"unexpected resolution request: {value}"
+        return resolutions[value]
+
+    provider = PlaywrightGoogleSearchProvider(browser=browser)
+    results = provider.search(
+        {
+            "id": "probe",
+            "platform": "Ashby",
+            "query": "site:jobs.ashbyhq.com probe",
+            "allowedHosts": ["jobs.ashbyhq.com"],
+        },
+        {"maxPages": 1, "minPageDelayMs": 0, "maxPageDelayMs": 0, "passthroughResolver": resolver},
+    )
+    assert [result["link"] for result in results] == [
+        "https://jobs.ashbyhq.com/crusoe/9a5223c4-9eb7-4fdb-b97c-f43525df35ed",
+        "https://jobs.ashbyhq.com/direct/1",
+    ]
+
+
+def test_provider_passthrough_failure_keeps_result_flow_alive() -> None:
+    class Browser(FakeBrowser):
+        def evaluate(self, expression):
+            page = self._pages.pop(0)
+            return {"url": "https://google.com/search", "title": "Search", "bodyText": "", **page}
+
+    pages = [
+        {
+            "hasNext": False,
+            "results": [
+                {
+                    "title": "Behind broken passthrough",
+                    "link": "https://www.google.com/goto?url=BROKEN",
+                    "snippet": "Ashby",
+                }
+            ],
+        }
+    ]
+    browser = Browser(pages)
+
+    def broken_resolver(value: str) -> str:
+        raise RuntimeError("network down")
+
+    provider = PlaywrightGoogleSearchProvider(browser=browser)
+    results = provider.search(
+        {
+            "id": "probe",
+            "platform": "Ashby",
+            "query": "site:jobs.ashbyhq.com probe",
+            "allowedHosts": ["jobs.ashbyhq.com"],
+        },
+        {
+            "maxPages": 1,
+            "minPageDelayMs": 0,
+            "maxPageDelayMs": 0,
+            "passthroughResolver": broken_resolver,
+        },
+    )
+    # Resolution failed -> the unresolvable google URL is filtered out (google host),
+    # but the search itself must not crash.
+    assert results == []
+
+
+def test_provider_caches_passthrough_resolutions_within_a_search() -> None:
+    class Browser(FakeBrowser):
+        def evaluate(self, expression):
+            page = self._pages.pop(0)
+            return {"url": "https://google.com/search", "title": "Search", "bodyText": "", **page}
+
+    pages = [
+        {
+            "hasNext": False,
+            "results": [
+                {
+                    "title": "First sighting",
+                    "link": "https://www.google.com/goto?url=TOKEN_A",
+                    "snippet": "Ashby",
+                },
+                {
+                    "title": "Second sighting",
+                    "link": "https://www.google.com/goto?url=TOKEN_A",
+                    "snippet": "Ashby",
+                },
+            ],
+        }
+    ]
+    browser = Browser(pages)
+    calls: list[str] = []
+
+    def resolver(value: str) -> str:
+        calls.append(value)
+        return "https://jobs.ashbyhq.com/acme/job-1"
+
+    provider = PlaywrightGoogleSearchProvider(browser=browser)
+    results = provider.search(
+        {
+            "id": "probe",
+            "platform": "Ashby",
+            "query": "site:jobs.ashbyhq.com probe",
+            "allowedHosts": ["jobs.ashbyhq.com"],
+        },
+        {"maxPages": 1, "minPageDelayMs": 0, "maxPageDelayMs": 0, "passthroughResolver": resolver},
+    )
+    assert len(results) == 1  # same target URL -> deduped
+    assert calls == ["https://www.google.com/goto?url=TOKEN_A"]  # resolved once
